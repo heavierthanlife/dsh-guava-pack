@@ -1,0 +1,34 @@
+{
+  "name": "dsh-guava-pack",
+  "version": "1.0.0",
+  "description": "One portable DSH bundle: phone UI, direct/SSR provider router, theme manager, a customized Cyberpunk 2077 theme, an OpenCode session-header fix, plus the CommandCode bridge service. Install once, works anywhere.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "cordis",
+    "bundle",
+    "theme",
+    "provider-router"
+  ],
+  "files": [
+    "cordis.patch.yml",
+    "plugins/",
+    "services/",
+    "LICENSES/",
+    "install.mjs",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "check": "node install.mjs --check"
+  }
+}

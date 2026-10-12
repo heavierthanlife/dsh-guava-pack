@@ -1,0 +1,12 @@
+# 运行时状态与本机配置：绝不随包分发
+plugins/provider-router/mode.json
+plugins/provider-router/providers.json
+plugins/provider-router/router.pid
+plugins/provider-router/router.log
+plugins/provider-router/capture-last-request.json*
+services/commandcode-bridge/bridge.log
+services/commandcode-bridge/bridge.out
+services/commandcode-bridge/bridge.pid
+services/commandcode-bridge/.session-id
+*.tgz
+*.log

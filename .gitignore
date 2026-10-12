@@ -1,0 +1,17 @@
+# 运行时状态与日志 —— 不进版本库
+plugins/provider-router/mode.json
+plugins/provider-router/providers.json
+plugins/provider-router/router.pid
+plugins/provider-router/router.log
+plugins/provider-router/capture-last-request.json
+plugins/provider-router/capture-last-request.json.status
+
+services/commandcode-bridge/bridge.log
+services/commandcode-bridge/bridge.out
+services/commandcode-bridge/bridge.pid
+services/commandcode-bridge/.session-id
+
+# 依赖与产物
+node_modules/
+*.tgz
+*.log

@@ -1,0 +1,27 @@
+# dsh-guava-pack — bundle patch layer.
+#
+# 一个包带全部插件。行里的 `./plugins/…` 是**相对路径**，锚定在本 patch 文件旁边
+# （dsh-app-boot 的 schema 原文：Inserted relative plugin paths are anchored beside
+# their patch file）。装进 profile 后它们会解析到
+#   <profile>/node_modules/dsh-guava-pack/plugins/…
+#
+# id 沿用各插件原本的 row id，这样按 id 的 override / disabled 继续有效。
+#
+# 注意：本包只负责「挂载插件」。路由代理需要 providers.json / SSR 地址这类本机配置，
+# 见 README 的「安装后配置」。
+
+- insert:
+    - id: dsh-mobile-ui
+      name: ./plugins/dsh-mobile-ui
+
+    - id: theme-manager
+      name: ./plugins/dsh-theme-manager
+
+    - id: ui-theme-cyberpunk
+      name: ./plugins/dsh-theme-cyberpunk2077
+
+    - id: dsh-provider-router
+      name: ./plugins/provider-router
+
+    - id: dsh-opencode-session-header
+      name: ./plugins/dsh-opencode-session-header

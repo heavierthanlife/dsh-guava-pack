@@ -1,0 +1,4 @@
+# dsh-mobile-ui bundle patch: mount the phone UI layer under its package name.
+- insert:
+    - id: dsh-mobile-ui
+      name: dsh-mobile-ui

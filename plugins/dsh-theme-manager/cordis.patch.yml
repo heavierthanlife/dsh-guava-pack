@@ -1,0 +1,5 @@
+# dsh-theme-manager — profile patch layer.
+# Adds a Theme Manager settings section to the DSH Web UI.
+- insert:
+    - id: theme-manager
+      name: 'dsh-theme-manager'

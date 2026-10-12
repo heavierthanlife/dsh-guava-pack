@@ -1,0 +1,13 @@
+{
+  "_comment": [
+    "复制为 providers.json 即可覆盖/增补内置上游表（改完重启路由代理生效）。",
+    "也可用环境变量 DSH_ROUTER_PROVIDERS 指向别处。",
+    "每条形如 \"<provider>\": { \"baseURL\": \"https://…\", \"headers\": { \"user-agent\": \"…\" } }",
+    "注意 agentrouter 有 UA 白名单，缺了 headers.user-agent 会 401 unauthorized client。"
+  ],
+  "my-cloud-llm": { "baseURL": "https://api.example.com/v1" },
+  "agentrouter": {
+    "baseURL": "https://agentrouter.org",
+    "headers": { "user-agent": "pi (win32 10.0.26300; x64)" }
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "name": "dsh-mobile-ui",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Phone-optimized UI for the DeepSeek Harness Web GUI — DeepSeek-app-like type scale, touch ergonomics, safe areas and overflow guards, applied only on phone-sized viewports.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-theme",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
+    }
+  },
+  "license": "MIT"
+}

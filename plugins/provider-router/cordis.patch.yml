@@ -1,0 +1,4 @@
+# dsh-provider-router bundle patch: mount the provider routing layer under its package name.
+- insert:
+    - id: dsh-provider-router
+      name: dsh-provider-router
