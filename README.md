@@ -87,6 +87,38 @@ node install.mjs --patch          # 幂等，已打过就跳过
 **这两个补丁会在 dsh 依赖升级后丢失** —— 升级完重跑 `node install.mjs --patch` 即可。
 脚本自带幂等标记和锚点断言：锚点找不到会**直接报错**而不是静默改坏代码。
 
+### 让模型列表跟上服务商端（sync-models）
+
+DSH 的可选模型来自 profile 里**静态声明**的 `models:` 数组 —— 各家上新/下线不会自动反映。
+`tools/sync-models.mjs` 拿各家的 `/models` 端点来补齐这个缺口：
+
+```sh
+node tools/sync-models.mjs                  # 预览（默认 dry-run，不改文件）
+node tools/sync-models.mjs --write           # 落盘（自动备份）
+node tools/sync-models.mjs --free-only       # 只同步「有免费模型」的供应商
+node tools/sync-models.mjs --exclude "tts|asr|embed"   # 排除非对话模型
+node tools/sync-models.mjs --only antigravity
+node tools/sync-models.mjs --prune --write   # 顺手删掉端点已无的（慎用，见下）
+```
+
+因为 profile 的 patch 层是**热重载**的，落盘后刷新页面即可，通常**不用重启 DSH**。
+
+**三条从实测得来的设计约束**（不是凭空设的）：
+
+1. **默认绝不删模型。** antigravity 反代上 `gemini-2.5-flash` 已不在 `/models` 里，
+   但调用它**仍然成功** —— 服务端静默别名到 `gemini-3.1-flash-lite`；
+   `claude-opus-4-6` → `claude-opus-4-6-thinking` 同理。
+   **端点没列 ≠ 不能用**，所以要删必须显式 `--prune`。
+2. **保留人工元数据。** 已存在模型的整段 YAML 原样保留（你手写的 contextWindow /
+   reasoningEfforts / compat 都不会被覆盖），只追加新模型；新模型用默认值，
+   你手工修正后下次同步会保留你的值。
+3. **免费 ≠ 无限。** 端点只告诉你「是不是免费」（按 id 里的 `free` 判断），
+   **拿不到**「每日 100 次」「capacity 用完为止」这类限制 —— 那些在服务商条款里。
+
+⚠️ 另一个实测结论值得记下来：**「官方说会自动升级到新模型」未必属实**。
+antigravity 的 `gemini-3.5-flash` 调用后直接返回文字
+"Gemini 3.5 Flash is no longer…"，**并没有**自动连到 3.8。
+
 ### 让 DSH 真的走路由代理
 
 路由代理只在供应商的 `baseURL` 指向它时才起作用。在该 profile 的 `cordis.patch.yml` 里：

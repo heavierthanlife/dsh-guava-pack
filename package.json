@@ -22,7 +22,8 @@
     "patches/",
     "LICENSES/",
     "install.mjs",
-    "README.md"
+    "README.md",
+    "tools/"
   ],
   "dsh": {
     "bundle": {
@@ -30,6 +31,8 @@
     }
   },
   "scripts": {
-    "check": "node install.mjs --check"
+    "check": "node install.mjs --check",
+    "sync-models": "node tools/sync-models.mjs",
+    "sync-models:write": "node tools/sync-models.mjs --write"
   }
 }
