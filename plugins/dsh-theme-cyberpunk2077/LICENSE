@@ -12,8 +12,12 @@ the repository above, but ships **no LICENSE file**. This text is reconstructed 
 that declaration so that the MIT notice accompanies redistributed copies, as MIT
 requires. If upstream later publishes its own LICENSE, that file takes precedence.
 
-This copy has been **modified** from upstream (local customization by the pack owner).
-The modifications are not authored by Tommy00748 and are likewise offered under MIT.
+This copy has been **modified** from upstream: only `lib/client.js` differs
+(253 diff lines against upstream main, HEAD a3681ee, version 0.1.4). The changes add
+persisted enable/disable preference, collapse the teardown into
+startVisuals/stopVisuals, and restore the host `document.title` and favicon when the
+theme stands down. The modifications are not authored by Tommy00748 and are likewise
+offered under MIT. See ../LICENSES/README.md for the full inventory.
 
 ---
 

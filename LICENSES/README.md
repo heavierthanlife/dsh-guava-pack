@@ -8,12 +8,30 @@
 | 项 | 值 |
 |---|---|
 | 上游 | https://github.com/Tommy00748/dsh-theme-cyberpunk2077 |
-| 版本 | 0.1.4 |
+| 版本 | 0.1.4（与上游 main 同版本号） |
 | 授权 | MIT（上游 package.json 声明） |
-| 改动 | **有** —— 本副本经本地改装（主题细节调整） |
 | 许可文件 | [`../plugins/dsh-theme-cyberpunk2077/LICENSE`](../plugins/dsh-theme-cyberpunk2077/LICENSE) |
 
-⚠️ 上游**未随包提供 LICENSE 文件**（只在 package.json 里声明 MIT）。本包内的 LICENSE 是
+### 改装内容（与上游 main 的实际 diff，非推测）
+
+对比基准：`git clone --depth 1 https://github.com/Tommy00748/dsh-theme-cyberpunk2077.git`
+（HEAD `a3681ee`，version 0.1.4）。
+
+**只有一个文件不同：`lib/client.js`**（253 行 diff）。
+`lib/index.js`、`package.json`、`cordis.patch.yml`、`README.md` 与上游**逐字节相同**。
+
+改动分三类：
+
+1. **主题开关偏好持久化** —— 新增 `PREF_STORE_KEY` / `readStoredPref` / `writeStoredPref`
+   与 `wantUs` / `isActive`，让主题的启用状态可以被记住并按偏好决定是否生效。
+2. **生命周期重构** —— 用 `startVisuals` / `stopVisuals` / `removeCyberpunkStyles`
+   取代上游的 7 个独立 `stopXxx`（`stopClock` / `stopNotices` / `stopPending` / `stopRelic`
+   / `stopTitle` / `stopWake` 及 `observer`），收敛成一对启动/停止入口。
+3. **宿主痕迹还原** —— 通过 `hostTitle` / `writeTitle` / `lastWrittenTitle` 保存并还原
+   `document.title`，通过 `prevIcon` / `createdIcon` 保存并还原站点图标；
+   主题卸下时不再留下自己的标题与 favicon。
+
+⚠️ 上游**未在仓库内提供 LICENSE 文件**（只在 package.json 里声明 MIT）。本包内的 LICENSE 是
 按该声明与仓库地址补写的，并已在文件头部注明这一点 —— 若上游日后发布自己的 LICENSE，
 以上游为准。
 

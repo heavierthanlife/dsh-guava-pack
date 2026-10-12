@@ -19,6 +19,7 @@
     "cordis.patch.yml",
     "plugins/",
     "services/",
+    "patches/",
     "LICENSES/",
     "install.mjs",
     "README.md"

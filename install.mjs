@@ -3,7 +3,8 @@
  * dsh-guava-pack — 安装自检与本机配置助手。
  *
  * 用法：
- *   node install.mjs --check     只检查包是否完整、能否被 DSH 解析
+ *   node install.mjs --check     只检查包是否完整、补丁是否已打
+ *   node install.mjs --patch     应用两个 node_modules 补丁（幂等；不打则 agentrouter 400）
  *   node install.mjs --init      生成 providers.json（若不存在）并打印后续步骤
  *   node install.mjs             等同于 --check
  *
@@ -13,6 +14,7 @@
  */
 
 import { existsSync, readFileSync, writeFileSync, copyFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -34,7 +36,78 @@ const REQUIRED = [
   'plugins/provider-router/lib/router.mjs',
   'plugins/dsh-opencode-session-header/package.json',
   'services/commandcode-bridge/server.mjs',
+  'patches/apply-required-array.sh',
+  'patches/apply-anthropic-tool-fixes.sh',
 ];
+
+/**
+ * DSH 安装目录（这两个补丁打的是它下面的 node_modules，不是本包）。
+ * 与补丁脚本用同一套判断：DSH_HOME > ~/dsh。
+ */
+const DSH_HOME = process.env.DSH_HOME || join(process.env.HOME || '', 'dsh');
+
+/**
+ * 两个补丁都是「node_modules 级」的，dsh 依赖一升级就丢，必须能随时重跑。
+ * 所以这里只做「检测 + 调用包里那份脚本」，不重复实现打补丁逻辑
+ * （脚本自带幂等标记与锚点断言，锚点找不到会直接报错而不是静默改坏）。
+ */
+const PATCHES = [
+  {
+    name: 'dsh-tools 恒输出 required:[]',
+    script: 'patches/apply-required-array.sh',
+    file: join(DSH_HOME, 'node_modules/@deepseek-ai/dsh-tools/lib/index.js'),
+    marker: 'Always emit `required`',
+    why: 'AgentRouter 的 deepseek-v4-flash 通道把「缺失的 required」判成 null 并 400',
+  },
+  {
+    name: 'pi-ai Anthropic 两处协议兜底',
+    script: 'patches/apply-anthropic-tool-fixes.sh',
+    file: join(DSH_HOME, 'node_modules/@earendil-works/pi-ai/dist/api/anthropic-messages.js'),
+    marker: 'enforceToolResultAdjacency',
+    why: '修 400 tool_use ids were found without tool_result blocks',
+  },
+];
+
+function patchState() {
+  return PATCHES.map((p) => {
+    if (!existsSync(p.file)) return { ...p, state: 'missing' };
+    try {
+      const applied = readFileSync(p.file, 'utf8').includes(p.marker);
+      return { ...p, state: applied ? 'applied' : 'pending' };
+    } catch {
+      return { ...p, state: 'unreadable' };
+    }
+  });
+}
+
+function reportPatches() {
+  console.log('\nnode_modules \u8865\u4e01\uff08\u4e0d\u6253\u5c31\u7528\u4e0d\u4e86 agentrouter\uff09\uff1a');
+  let bad = 0;
+  for (const p of patchState()) {
+    if (p.state === 'applied') ok(`${p.name} \u5df2\u6253`);
+    else if (p.state === 'missing') { info(`${p.name}\uff1a\u627e\u4e0d\u5230 ${p.file}`); bad++; }
+    else { bad(`${p.name} \u672a\u6253 \u2014\u2014 ${p.why}`); bad++; }
+  }
+  return bad;
+}
+
+function applyPatches() {
+  console.log('dsh-guava-pack \u8865\u4e01\n');
+  console.log(`DSH_HOME = ${DSH_HOME}\n`);
+  for (const p of patchState()) {
+    const script = join(PACK_DIR, p.script);
+    if (p.state === 'applied') { ok(`${p.name}\uff1a\u5df2\u6253\u8fc7\uff0c\u8df3\u8fc7`); continue; }
+    if (p.state === 'missing') { bad(`${p.name}\uff1a\u76ee\u6807\u6587\u4ef6\u4e0d\u5b58\u5728\uff08${p.file}\uff09\u2014\u2014 DSH_HOME \u5bf9\u5417\uff1f`); continue; }
+    try {
+      const out = execFileSync('bash', [script], { encoding: 'utf8', env: { ...process.env, DSH_HOME } });
+      ok(`${p.name}\uff1a${out.trim().split('\n').pop()}`);
+    } catch (err) {
+      bad(`${p.name} \u5931\u8d25\uff1a${(err.stdout || err.message || '').toString().trim().split('\n').pop()}`);
+      info('\u811a\u672c\u81ea\u5e26\u9526\u70b9\u65ad\u8a00\uff1b\u62a5\u300c\u9526\u70b9\u672a\u627e\u5230\u300d\u901a\u5e38\u662f dsh \u4f9d\u8d56\u5347\u7ea7\u4e86\uff0c\u9700\u4eba\u5de5\u6838\u5bf9');
+    }
+  }
+  console.log('\n\u6253\u5b8c\u540e\u91cd\u542f DSH \u751f\u6548\uff1asystemctl --user restart dsh.service');
+}
 
 function check() {
   console.log('dsh-guava-pack \u5b89\u88c5\u81ea\u68c0\n');
@@ -91,7 +164,9 @@ function check() {
     ok('DSH_ROUTER_CAPTURE \u672a\u5f00\uff08\u6b63\u5e38\uff09');
   }
 
-  console.log(`\n\u7ed3\u679c\uff1a${failed === 0 ? '\u5305\u5b8c\u6574\uff0c\u53ef\u4ee5\u88c5' : failed + ' \u9879\u9700\u4fee\u590d'}`);
+  failed += reportPatches();
+
+  console.log(`\n\u7ed3\u679c\uff1a${failed === 0 ? '\u5305\u5b8c\u6574\uff0c\u53ef\u4ee5\u88c5' : failed + ' \u9879\u9700\u5904\u7406'}`);
   return failed === 0 ? 0 : 1;
 }
 
@@ -126,5 +201,6 @@ function init() {
 `);
 }
 
-if (args.has('--init')) init();
+if (args.has('--patch')) applyPatches();
+else if (args.has('--init')) init();
 else process.exit(check());

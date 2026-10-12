@@ -10,3 +10,6 @@ services/commandcode-bridge/bridge.pid
 services/commandcode-bridge/.session-id
 *.tgz
 *.log
+
+# 抓包产物（含提示词明文）：绝不入库、绝不入包
+plugins/provider-router/captures/

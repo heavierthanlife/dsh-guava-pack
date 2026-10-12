@@ -62,6 +62,31 @@ curl -s http://127.0.0.1:8318/health
 整段对话）明文写入 `capture-last-request.json`。默认关闭；只在排障时临时打开，用完立刻删除文件，
 **不要把抓到的内容随包分发**。
 
+### ⚠️ node_modules 补丁 —— 不打就用不了 agentrouter
+
+有两个补丁**不在插件目录里**，而是改 DSH 安装目录下的 `node_modules`。
+换机器只装包不打补丁，**agentrouter 的模型仍然会 400**：
+
+| 补丁 | 改的文件 | 修什么 |
+|---|---|---|
+| `patches/apply-required-array.sh` | `@deepseek-ai/dsh-tools/lib/index.js` | 工具 schema 恒输出 `required`（含空数组）。AgentRouter 的 deepseek-v4-flash 通道把「缺失的 required」判成 null → `400 null is not of type "array"` |
+| `patches/apply-anthropic-tool-fixes.sh` | `@earendil-works/pi-ai/dist/api/anthropic-messages.js` | ① 每个 `tool_use` 补上缺失的 `tool_result`（上下文裁剪会删掉大结果）② `tool_use` 稳定重排到 assistant 消息末尾。修 `400 tool_use ids were found without tool_result blocks immediately after` |
+
+```sh
+node install.mjs --patch          # 幂等，已打过就跳过
+# 或直接：bash patches/apply-required-array.sh
+```
+
+**作用域**（都已核实，不会误伤其他模型）：
+
+- 补丁①是全局的 —— 影响 dsh 自己声明的内置工具 schema；语义等价（`required: []` ≡ 不写），
+  已实测 xiaomi 两种写法都 200。MCP 工具的 schema 原样透传，不受影响。
+- 补丁②只作用于 `api: anthropic-messages` 的 provider（即 antigravity、agentrouter）；
+  openai 系走另一个文件，完全没动。
+
+**这两个补丁会在 dsh 依赖升级后丢失** —— 升级完重跑 `node install.mjs --patch` 即可。
+脚本自带幂等标记和锚点断言：锚点找不到会**直接报错**而不是静默改坏代码。
+
 ### 让 DSH 真的走路由代理
 
 路由代理只在供应商的 `baseURL` 指向它时才起作用。在该 profile 的 `cordis.patch.yml` 里：
