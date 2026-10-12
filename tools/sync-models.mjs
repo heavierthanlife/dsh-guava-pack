@@ -47,9 +47,12 @@
  * - 「自动升级到新模型」这种事同步器查不到。实测 antigravity 的
  *   `gemini-3.5-flash` 直接返回 "Gemini 3.5 Flash is no longer…"，
  *   **并没有**自动连到 3.8 —— 官方说法和实际行为不一致，以实测为准。
- * - 新模型没有 endpoint 元数据时用默认值（contextWindow 200000 等），
- *   需要精确值请手工补 —— 补过之后下次同步会**保留**你的值。
- * - `input: [text, image]` 是默认猜测，纯文本模型请手工改成 `[text]`。
+ * - 新模型没有 endpoint 元数据时**按 id 家族**给兜底值（`gemini-*` → 1M/65536、
+ *   `claude-*` → 200k/64k、`gpt-oss*` → 128k/32k 且纯文本、其余 200k/64k）。
+ *   家族表是**启发式**，不是端点事实 —— 需要精确值请手工改，改过之后
+ *   下次同步会**保留**你的值。
+ * - 有意**不**自动生成 `reasoningEfforts`：它改变请求负载，跨协议容忍度未知；
+ *   且档位已写在 id 后缀（`-low`/`-high`/…）的型号本来就不需要选择器。
  */
 
 import { existsSync, readFileSync, writeFileSync, copyFileSync } from 'node:fs';
@@ -91,16 +94,37 @@ function envFromBashrc(name) {
   return undefined;
 }
 
-/** 人类可读名：`gemini-3.5-flash-low` → `Gemini 3.5 Flash Low`。 */
+/**
+ * 人类可读名：`gemini-3.5-flash-low` → `Gemini 3.5 Flash Low`。
+ *
+ * 两条规则踩过坑才写成这样：
+ *   - **别把短词全大写**：早先「长度 ≤ 3 就大写」会把 `-low` 变成 `LOW`、
+ *     `pro` 变成 `PRO`，而手工条目的风格是 `Gemini 2.5 Flash Lite`。
+ *     只有真缩写才大写（ACRONYMS）。
+ *   - **连续数字合成版本号**：`claude-opus-4-6` 应为 `Claude Opus 4.6`，
+ *     不是 `Claude Opus 4 6`。
+ */
+const ACRONYMS = new Set(['gpt', 'oss', 'ai', 'api', 'llm', 'tts', 'asr', 'vl', 'ui', 'xl', 'xxl']);
+
 function humanize(id) {
   const bare = id.includes('/') ? id.slice(id.lastIndexOf('/') + 1) : id;
-  return bare
-    .replace(/:free$/, ' (free)')
-    .replace(/-free$/, ' (free)')
+  const trailing = /[-:]free$/.test(bare) ? ' (free)' : '';
+  const core = bare.replace(/[-:]free$/, '');
+  const words = core
     .split(/[-_]/)
     .filter(Boolean)
-    .map((w) => (w.length <= 3 && /^[a-z0-9.]+$/.test(w) ? w.toUpperCase() : w[0].toUpperCase() + w.slice(1)))
-    .join(' ');
+    .map((w) => {
+      if (ACRONYMS.has(w)) return w.toUpperCase();
+      if (/^[0-9]+(\.[0-9]+)*[a-z]?$/.test(w)) return w; // 3.5 / 120b / 4
+      return w[0].toUpperCase() + w.slice(1); // low → Low, pro → Pro
+    });
+  const out = [];
+  for (const w of words) {
+    const prev = out[out.length - 1];
+    if (prev !== undefined && /^[0-9]+$/.test(w) && /^[0-9]+$/.test(prev)) out[out.length - 1] = `${prev}.${w}`;
+    else out.push(w);
+  }
+  return out.join(' ') + trailing;
 }
 
 const isFree = (id) => /(^|[/:-])free($|[-:])|[-:]free$/.test(id) || /\bfree\b/.test(id);
@@ -217,10 +241,37 @@ async function fetchModels(url, apiKey, api) {
     }));
 }
 
-/** 为一个新模型生成 YAML 行，缩进跟随探测结果。 */
+// ── 新模型的元数据兜底：按 id 家族给 ────────────────────────────────────
+// 实测：antigravity 的 /v1/models 只回 `{id, object, created, owned_by}` ——
+// **一点 context/token 信息都没有**。全用同一个默认值会把 1M 的 Gemini
+// 写成 200000，与同家族手工写的条目自相矛盾（UI 上的上下文提示会错）。
+// 所以按 id 前缀家族给值。**这只是兜底**：一旦某条被手工改过，
+// 之后每次同步都保留手工值（见 parseModels 的「保留原始文本」设计）。
+const FAMILIES = [
+  { test: /^gpt-oss/, contextWindow: 131072, maxTokens: 32768, input: ['text'] },
+  { test: /^gemini-/, contextWindow: 1000000, maxTokens: 65536, input: ['text', 'image'] },
+  { test: /^claude-/, contextWindow: 200000, maxTokens: 64000, input: ['text', 'image'] },
+  { test: /^gpt-/, contextWindow: 200000, maxTokens: 64000, input: ['text'] },
+];
+const DEFAULT_FAMILY = { contextWindow: 200000, maxTokens: 64000, input: ['text', 'image'] };
+
+function familyOf(id) {
+  const bare = id.includes('/') ? id.slice(id.lastIndexOf('/') + 1) : id;
+  return FAMILIES.find((f) => f.test.test(bare)) || DEFAULT_FAMILY;
+}
+
+/**
+ * 为一个新模型生成 YAML 行，缩进跟随探测结果。
+ *
+ * 有意**不**生成 `reasoningEfforts`：它会改变请求负载，而各供应商/协议
+ * 对它的容忍度未知（对比 agentrouter 的 schema 400 一役）。档位已写在
+ * id 后缀里的型号（`-low` / `-high` / `-tiered` …）本来也不需要选择器。
+ * 想要就手工加，手工值以后都会被保留。
+ */
 function renderModel(m) {
-  const ctx = m.contextWindow || 200000;
-  const max = m.maxTokens || 64000;
+  const fam = familyOf(m.id);
+  const ctx = m.contextWindow || fam.contextWindow;
+  const max = m.maxTokens || fam.maxTokens;
   const i0 = sp(IND.model);
   const i1 = sp(IND.item);
   const i2 = sp(IND.list);
@@ -230,8 +281,7 @@ function renderModel(m) {
     `${i1}contextWindow: ${ctx}`,
     `${i1}maxTokens: ${max}`,
     `${i1}input:`,
-    `${i2}- text`,
-    `${i2}- image`,
+    ...fam.input.map((t) => `${i2}- ${t}`),
   ];
 }
 
