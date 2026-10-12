@@ -195,21 +195,36 @@ function field(body, key) {
 function parseModels(body) {
   const modelsRe = new RegExp(`^\\s{${IND.models}}models:\\s*$`);
   const headerIdx = body.findIndex((l) => modelsRe.test(l));
-  if (headerIdx === -1) return { headerIdx: -1, models: [] };
+  if (headerIdx === -1) return { headerIdx: -1, models: [], tail: [] };
   const idRe = new RegExp(`^\\s{${IND.model}}- id:\\s*(.+?)\\s*$`);
   const models = [];
   let cur = null;
+  let tailStart = body.length;
   for (let i = headerIdx + 1; i < body.length; i++) {
-    const m = body[i].match(idRe);
+    const line = body[i];
+    const m = line.match(idRe);
     if (m) {
       if (cur) models.push(cur);
-      cur = { id: m[1].replace(/^["']|["']$/g, ''), lines: [body[i]] };
+      cur = { id: m[1].replace(/^["']|["']$/g, ''), lines: [line] };
       continue;
     }
-    if (cur) cur.lines.push(body[i]);
+    // 非空且缩进比模型项还浅 → `models:` 块已经结束，剩下的属于本 provider 的
+    // 其它字段。**这是踩过的坑**：`opencode`（zen）把 `baseURL` 声明在 `models:`
+    // **之后**，旧实现会把它当成最后一个模型的行吸走，重排时插到模型列表中间，
+    // 产出 `mapping values are not allowed here` 的非法 YAML。
+    if (line.trim() !== '' && line.match(/^(\s*)/)[1].length < IND.model) {
+      tailStart = i;
+      break;
+    }
+    if (cur) cur.lines.push(line);
   }
   if (cur) models.push(cur);
-  return { headerIdx, models };
+  // 尾随空行属于 tail，不属于最后一个模型
+  const tail = body.slice(tailStart);
+  while (models.length && models[models.length - 1].lines.length && models[models.length - 1].lines[models[models.length - 1].lines.length - 1].trim() === '') {
+    tail.unshift(models[models.length - 1].lines.pop());
+  }
+  return { headerIdx, models, tail };
 }
 
 /** 端点路径：openai 系的 baseURL 一般已含 /v1，anthropic 系要自己补。 */
@@ -312,7 +327,7 @@ async function main() {
     const api = field(p.body, 'api');
     const baseURL = field(p.body, 'baseURL');
     const apiKeyEnv = field(p.body, 'apiKeyEnv');
-    const { headerIdx, models: existing } = parseModels(p.body);
+    const { headerIdx, models: existing, tail } = parseModels(p.body);
 
     if (!baseURL) { info(`${p.name}: 没声明 baseURL（走 pi-ai 内置目录），跳过`); continue; }
     if (headerIdx === -1) { info(`${p.name}: 没声明 models，跳过`); continue; }
@@ -364,7 +379,9 @@ async function main() {
       ...newOnes.flatMap((m) => renderModel(m)),
     ];
     const before = p.body.slice(0, headerIdx + 1);
-    edits.push({ start: p.start, end: p.end, lines: [...before, ...newModelLines] });
+    // `tail` 是本 provider 在 `models:` **之后**声明的其它字段（如 opencode 的
+    // baseURL）——必须原样跟回来，否则它们会被挤到新增模型前面。
+    edits.push({ start: p.start, end: p.end, lines: [...before, ...newModelLines, ...tail] });
     changedProviders++;
   }
 
