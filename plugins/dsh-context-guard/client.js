@@ -142,6 +142,33 @@ window.__ModuleLoader__.load({
 .cguard_note[data-ok="true"]{color:var(--dsw-alias-state-success-primary)}
 .cguard_hint{margin-top:2px;color:var(--dsw-alias-label-tertiary);opacity:.8}
 .cguard_label{text-overflow:ellipsis;min-width:0;overflow:hidden}
+
+/* ── 手机适配 ────────────────────────────────────────────────────────────────
+   作用域锚在 :root.dsh-phone —— 那是 dsh-mobile-ui 给手机打的类（含它的 force 开关），
+   跟着它走就能和隔壁那套手机层自动一致。
+   为什么要单独写：手机层把同槽的 stats 药丸调成了 11px/15px，但那条规则只作用于
+   [data-composer-stats]；本插件的药丸是它的**兄弟节点**，覆盖不到，必须自己对齐。
+   最后一段 @media 是兜底：万一没装 dsh-mobile-ui，纯按屏宽也能适配。 */
+:root.dsh-phone .cguard_anchor{font-size:11px;line-height:15px}
+:root.dsh-phone .cguard_pill{gap:4px;padding:1px 6px}
+:root.dsh-phone .cguard_icon{width:12px;height:12px}
+:root.dsh-phone .cguard_panel{position:fixed;left:calc(8px + env(safe-area-inset-left,0px));
+  right:calc(8px + env(safe-area-inset-right,0px));bottom:calc(84px + env(safe-area-inset-bottom,0px));
+  width:auto;min-width:0;max-width:none;max-height:55dvh;overflow-y:auto;
+  -webkit-overflow-scrolling:touch;padding:14px;font-size:13px;line-height:19px}
+:root.dsh-phone .cguard_step{width:34px;height:34px}
+:root.dsh-phone .cguard_step svg{width:14px;height:14px}
+:root.dsh-phone .cguard_rows{gap:8px 12px;grid-template-columns:minmax(64px,auto) minmax(0,1fr)}
+:root.dsh-phone .cguard_value{min-width:36px}
+:root.dsh-phone .cguard_note{margin-top:10px;padding-top:10px}
+@media (max-width:520px){
+  .cguard_panel{position:fixed;left:calc(8px + env(safe-area-inset-left,0px));
+    right:calc(8px + env(safe-area-inset-right,0px));bottom:calc(84px + env(safe-area-inset-bottom,0px));
+    width:auto;min-width:0;max-width:none;max-height:55dvh;overflow-y:auto;
+    -webkit-overflow-scrolling:touch;padding:14px;font-size:13px;line-height:19px}
+  .cguard_step{width:34px;height:34px}
+  .cguard_step svg{width:14px;height:14px}
+}
 `;
 
     /** 有限非负数，否则 undefined。 */
