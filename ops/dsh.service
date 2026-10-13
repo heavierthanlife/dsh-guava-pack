@@ -1,0 +1,20 @@
+[Unit]
+Description=DeepSeek Harness Web (profile: web)
+Documentation=https://127.0.0.1:3080/
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/guava5tar_/dsh
+# 启动器负责：载入 .bashrc 里的 API key、追加 --trusted-host（Tailscale 域名）、
+# 拉起 commandcode 桥接与 provider-router 路由代理。
+ExecStart=/home/guava5tar_/dsh/dsh web --no-open
+# 崩溃自动拉起
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=25
+StandardOutput=append:/home/guava5tar_/dsh/logs/web-run.log
+StandardError=append:/home/guava5tar_/dsh/logs/web-run.log
+
+[Install]
+WantedBy=default.target
