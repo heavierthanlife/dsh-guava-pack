@@ -173,10 +173,9 @@ window.__ModuleLoader__.load({
 :root.dsh-phone .cguard_dock{display:grid;
   grid-template-columns:minmax(0,1fr) auto;grid-template-rows:auto auto;
   align-items:center;justify-content:stretch;column-gap:8px}
-:root.dsh-phone .cguard_dock > [data-composer-stats]{grid-area:1/1/3/2;min-width:0}
-:root.dsh-phone .cguard_dock > :not([data-composer-stats]):not(.cguard_anchor):last-child{
-  grid-area:1/2/2/3;justify-self:end}
-:root.dsh-phone .cguard_dock > .cguard_anchor{grid-area:2/2/3/3;justify-self:end}
+:root.dsh-phone .cguard_dock [data-composer-stats]{grid-area:1/1/3/2;min-width:0}
+:root.dsh-phone .cguard_dock > :last-child{grid-area:1/2/2/3;justify-self:end}
+:root.dsh-phone .cguard_dock .cguard_anchor{grid-area:2/2/3/3;justify-self:end}
 
 /* 与上面同款，但改用 JS 判定出的 cguard_phone —— 更可靠：不依赖手机层的类，
    也不依赖媒体查询（没有 viewport meta 时手机布局视口是 980px，媒体查询不触发）。 */
@@ -197,10 +196,9 @@ window.__ModuleLoader__.load({
 .cguard_dock.cguard_phone{display:grid;
   grid-template-columns:minmax(0,1fr) auto;grid-template-rows:auto auto;
   align-items:center;justify-content:stretch;column-gap:8px}
-.cguard_dock.cguard_phone > [data-composer-stats]{grid-area:1/1/3/2;min-width:0}
-.cguard_dock.cguard_phone > :not([data-composer-stats]):not(.cguard_anchor):last-child{
-  grid-area:1/2/2/3;justify-self:end}
-.cguard_dock.cguard_phone > .cguard_anchor{grid-area:2/2/3/3;justify-self:end}
+.cguard_dock.cguard_phone [data-composer-stats]{grid-area:1/1/3/2;min-width:0}
+.cguard_dock.cguard_phone > :last-child{grid-area:1/2/2/3;justify-self:end}
+.cguard_dock.cguard_phone .cguard_anchor{grid-area:2/2/3/3;justify-self:end}
 @media (max-width:520px){
   .cguard_panel{position:fixed;left:calc(8px + env(safe-area-inset-left,0px));
     right:calc(8px + env(safe-area-inset-right,0px));bottom:calc(84px + env(safe-area-inset-bottom,0px));
@@ -214,10 +212,9 @@ window.__ModuleLoader__.load({
   .cguard_dock{display:grid;
     grid-template-columns:minmax(0,1fr) auto;grid-template-rows:auto auto;
     align-items:center;justify-content:stretch;column-gap:8px}
-  .cguard_dock > [data-composer-stats]{grid-area:1/1/3/2;min-width:0}
-  .cguard_dock > :not([data-composer-stats]):not(.cguard_anchor):last-child{
-    grid-area:1/2/2/3;justify-self:end}
-  .cguard_dock > .cguard_anchor{grid-area:2/2/3/3;justify-self:end}
+  .cguard_dock [data-composer-stats]{grid-area:1/1/3/2;min-width:0}
+  .cguard_dock > :last-child{grid-area:1/2/2/3;justify-self:end}
+  .cguard_dock .cguard_anchor{grid-area:2/2/3/3;justify-self:end}
 }
 `;
 
@@ -361,9 +358,14 @@ window.__ModuleLoader__.load({
       React.useEffect(() => {
         const self = rootRef.current;
         if (self === null) return undefined;
-        // slot 条目直接挂在 dock 下（renderer 的 list 分支返回 Fragment，
-        // guarded / RootEntry 都不产生 DOM），所以父节点就是 dock。
-        const dock = self.parentElement;
+        // 向上跳过 display:contents 的包装层：slot 条目外面有一层锚点容器
+        // （renderer 的 ANCHOR_STYLE = display:contents），它不参与布局，
+        // 真正的布局容器是它上面那个 —— composer dock。
+        // 在包装层上设 display:grid 会被它的内联 display:contents 压掉，等于没做。
+        let dock = self.parentElement;
+        while (dock !== null && dock !== document.body && getComputedStyle(dock).display === 'contents') {
+          dock = dock.parentElement;
+        }
         if (dock === null || dock === document.body) return undefined;
 
         const sync = () => {
