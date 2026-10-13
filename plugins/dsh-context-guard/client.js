@@ -236,13 +236,19 @@ window.__ModuleLoader__.load({
     }
 
     /** zip 压缩包图标：方框 + 拉链虚线 + 拉链头。 */
+    /**
+     * 压缩图标：两个正方块上下堆叠。
+     *
+     * 之前是"细长拉链盒 + 虚线齿 + 拉链头"，13px 还行，手机上缩到 12px 之后
+     * 虚线糊成三个点、看不出是什么（用户反馈："高的矩形，空心，里面有点状图案"）。
+     * 小尺寸下只能用粗描边 + 少元素，所以改成两个方块堆叠。
+     */
     function ZipIcon(props) {
       return h(
         'svg',
         Object.assign({ className: 'cguard_icon', viewBox: '0 0 14 14', 'aria-hidden': true }, props),
-        h('rect', { x: 2.9, y: 1.3, width: 8.2, height: 11.4, rx: 1.6, fill: 'none', stroke: 'currentColor', strokeWidth: 1.15 }),
-        h('line', { x1: 7, y1: 3.1, x2: 7, y2: 10.9, stroke: 'currentColor', strokeWidth: 1.15, strokeDasharray: '1.5 1.6' }),
-        h('rect', { x: 6.05, y: 3.3, width: 1.9, height: 2.3, rx: 0.5, fill: 'currentColor' }),
+        h('rect', { x: 3.9, y: 0.6, width: 6.2, height: 6.2, rx: 1.3, fill: 'none', stroke: 'currentColor', strokeWidth: 1.5 }),
+        h('rect', { x: 3.9, y: 7.6, width: 6.2, height: 6.2, rx: 1.3, fill: 'none', stroke: 'currentColor', strokeWidth: 1.5 }),
       );
     }
 
