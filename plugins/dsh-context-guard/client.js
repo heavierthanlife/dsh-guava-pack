@@ -151,7 +151,7 @@ window.__ModuleLoader__.load({
    最后一段 @media 是兜底：万一没装 dsh-mobile-ui，纯按屏宽也能适配。 */
 :root.dsh-phone .cguard_anchor{font-size:11px;line-height:15px}
 :root.dsh-phone .cguard_pill{gap:4px;padding:1px 6px}
-:root.dsh-phone .cguard_icon{width:12px;height:12px}
+:root.dsh-phone .cguard_icon{width:15px;height:15px}
 :root.dsh-phone .cguard_panel{position:fixed;left:calc(8px + env(safe-area-inset-left,0px));
   right:calc(8px + env(safe-area-inset-right,0px));bottom:calc(84px + env(safe-area-inset-bottom,0px));
   width:auto;min-width:0;max-width:none;max-height:55dvh;overflow-y:auto;
@@ -181,7 +181,7 @@ window.__ModuleLoader__.load({
    也不依赖媒体查询（没有 viewport meta 时手机布局视口是 980px，媒体查询不触发）。 */
 .cguard_phone .cguard_anchor{font-size:11px;line-height:15px}
 .cguard_phone .cguard_pill{gap:4px;padding:1px 6px}
-.cguard_phone .cguard_icon{width:12px;height:12px}
+.cguard_phone .cguard_icon{width:15px;height:15px}
 .cguard_phone .cguard_full{display:none}
 .cguard_phone .cguard_short{display:inline}
 .cguard_phone .cguard_panel{position:fixed;left:calc(8px + env(safe-area-inset-left,0px));
@@ -237,18 +237,32 @@ window.__ModuleLoader__.load({
 
     /** zip 压缩包图标：方框 + 拉链虚线 + 拉链头。 */
     /**
-     * 压缩图标：两个正方块上下堆叠。
+     * 压缩图标：台钳夹住被夹物（WinZip 的"zip = vice"双关，最简笔画版）。
      *
-     * 之前是"细长拉链盒 + 虚线齿 + 拉链头"，13px 还行，手机上缩到 12px 之后
-     * 虚线糊成三个点、看不出是什么（用户反馈："高的矩形，空心，里面有点状图案"）。
-     * 小尺寸下只能用粗描边 + 少元素，所以改成两个方块堆叠。
+     * 演进：细长拉链盒 + 虚线齿（12px 下糊成三个点）→ 双方块堆叠（清楚但和压缩无关）
+     * → 现在这个。台钳在 12px 下细节会丢，所以手机端把图标放大到 15px（见 CSS）。
+     * 不用 Arcticons 的官方 WinZip 图标：那是 CC BY-SA 4.0，有传染性，这个是自绘。
      */
     function ZipIcon(props) {
       return h(
         'svg',
-        Object.assign({ className: 'cguard_icon', viewBox: '0 0 14 14', 'aria-hidden': true }, props),
-        h('rect', { x: 3.9, y: 0.6, width: 6.2, height: 6.2, rx: 1.3, fill: 'none', stroke: 'currentColor', strokeWidth: 1.5 }),
-        h('rect', { x: 3.9, y: 7.6, width: 6.2, height: 6.2, rx: 1.3, fill: 'none', stroke: 'currentColor', strokeWidth: 1.5 }),
+        Object.assign(
+          {
+            className: 'cguard_icon',
+            viewBox: '0 0 14 14',
+            fill: 'none',
+            stroke: 'currentColor',
+            strokeWidth: 1.3,
+            strokeLinecap: 'round',
+            'aria-hidden': true,
+          },
+          props,
+        ),
+        h('rect', { x: 1.2, y: 2.6, width: 7.6, height: 2.3, rx: 0.6 }),
+        h('rect', { x: 1.2, y: 9.1, width: 7.6, height: 2.3, rx: 0.6 }),
+        h('rect', { x: 3.4, y: 5.6, width: 3.2, height: 2.8, rx: 0.5 }),
+        h('path', { d: 'M9.4 1.9v10.2' }),
+        h('path', { d: 'M9.4 4.6h2.9M9.4 7h2.9M9.4 9.4h2.9' }),
       );
     }
 
