@@ -36,6 +36,7 @@ const REQUIRED = [
   'ops/dsh.service',
   'ops/bashrc.dsh.example',
   'ops/wsl.conf.example',
+  'ops/NETWORK-NOTES.md',
   'plugins/dsh-mobile-ui/package.json',
   'plugins/dsh-theme-manager/package.json',
   'plugins/dsh-theme-cyberpunk2077/package.json',
