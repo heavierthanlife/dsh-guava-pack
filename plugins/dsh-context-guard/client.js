@@ -164,18 +164,19 @@ window.__ModuleLoader__.load({
 
 /* 手机：右侧「上下文份额 / 压缩」改成上下堆叠 —— 与左侧两行 stats 左右对称，
    同时把药丸压到只剩图标 + N×，少占横宽（原先会挤掉最左边的图标）。
-   用 :has() 从本插件自己的锚点反查父级（composer dock），**不依赖宿主的哈希类名**。
-   若 slot 外面还包了一层容器，这几条会静默不生效，退化为原来的横向排列。 */
+   cguard_dock 这个标记类由 JS 打在 composer dock 上（见 GuardPill 里的 effect）：
+   不用 :has() —— 旧浏览器（Chrome <105 / Safari <15.4）会整条丢弃选择器，
+   宿主 dock 的类名又是哈希的、不能写死。 */
 .cguard_short{display:none}
 :root.dsh-phone .cguard_full{display:none}
 :root.dsh-phone .cguard_short{display:inline}
-:root.dsh-phone *:has(> .cguard_anchor){display:grid;
+:root.dsh-phone .cguard_dock{display:grid;
   grid-template-columns:minmax(0,1fr) auto;grid-template-rows:auto auto;
   align-items:center;justify-content:stretch;column-gap:8px}
-:root.dsh-phone *:has(> .cguard_anchor) > [data-composer-stats]{grid-area:1/1/3/2;min-width:0}
-:root.dsh-phone *:has(> .cguard_anchor) > :not([data-composer-stats]):not(.cguard_anchor){
+:root.dsh-phone .cguard_dock > [data-composer-stats]{grid-area:1/1/3/2;min-width:0}
+:root.dsh-phone .cguard_dock > :not([data-composer-stats]):not(.cguard_anchor):last-child{
   grid-area:1/2/2/3;justify-self:end}
-:root.dsh-phone *:has(> .cguard_anchor) > .cguard_anchor{grid-area:2/2/3/3;justify-self:end}
+:root.dsh-phone .cguard_dock > .cguard_anchor{grid-area:2/2/3/3;justify-self:end}
 @media (max-width:520px){
   .cguard_panel{position:fixed;left:calc(8px + env(safe-area-inset-left,0px));
     right:calc(8px + env(safe-area-inset-right,0px));bottom:calc(84px + env(safe-area-inset-bottom,0px));
@@ -183,6 +184,16 @@ window.__ModuleLoader__.load({
     -webkit-overflow-scrolling:touch;padding:14px;font-size:13px;line-height:19px}
   .cguard_step{width:34px;height:34px}
   .cguard_step svg{width:14px;height:14px}
+  /* 兜底：手机层没装/没判定成手机时，纯按屏宽也做同样的堆叠 */
+  .cguard_full{display:none}
+  .cguard_short{display:inline}
+  .cguard_dock{display:grid;
+    grid-template-columns:minmax(0,1fr) auto;grid-template-rows:auto auto;
+    align-items:center;justify-content:stretch;column-gap:8px}
+  .cguard_dock > [data-composer-stats]{grid-area:1/1/3/2;min-width:0}
+  .cguard_dock > :not([data-composer-stats]):not(.cguard_anchor):last-child{
+    grid-area:1/2/2/3;justify-self:end}
+  .cguard_dock > .cguard_anchor{grid-area:2/2/3/3;justify-self:end}
 }
 `;
 
@@ -311,8 +322,39 @@ window.__ModuleLoader__.load({
       // 而改设置不产生会话事件，回落到投影会让面板立刻弹回旧值（看着像"没保存"）。
       const [saved, setSaved] = React.useState(null);
       const [savedFlash, setSavedFlash] = React.useState(false);
-      const [saveError, setSaveError] = React.useState(null);
+      // 提前声明：下面的 dock 标记 effect 要用它（否则 TDZ 报错，整个药丸会崩）。
       const rootRef = React.useRef(null);
+
+      /**
+       * 给 composer dock 打标记类 `cguard_dock`（手机端要在这个容器上做网格，
+       * 让「上下文份额」在上、压缩药丸在下）。
+       *
+       * 为什么用 JS 打类，而不是 CSS 的 `:has()`：`:has()` 要 Chrome 105+ / Safari 15.4+，
+       * 旧浏览器会**整条丢弃**选择器（就是"改了没反应"的元凶）；而宿主 dock 的类名是
+       * CSS-module 哈希（如 `uV2eYG_dock`），写死它升级即失效。
+       *
+       * 定位方式只用自己的节点关系：向上找"同时直接包含我、又直接包含原生 stats 的祖先"，
+       * 那就是 dock。找不到（例如还没有会话）就不打标记，退化为原来的横向排列。
+       */
+      React.useEffect(() => {
+        const self = rootRef.current;
+        if (self === null) return undefined;
+        const stats = document.querySelector('[data-composer-stats]');
+        let node = self.parentElement;
+        let dock = null;
+        while (node !== null && node !== document.body) {
+          const kids = Array.from(node.children);
+          if (stats !== null && kids.includes(stats) && kids.includes(self)) {
+            dock = node;
+            break;
+          }
+          node = node.parentElement;
+        }
+        if (dock === null) return undefined;
+        dock.classList.add('cguard_dock');
+        return () => dock.classList.remove('cguard_dock');
+      }, []);
+      const [saveError, setSaveError] = React.useState(null);
       const draftRef = React.useRef(null);
       const saveTimer = React.useRef(undefined);
       const flashTimer = React.useRef(undefined);
