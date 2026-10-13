@@ -177,6 +177,30 @@ window.__ModuleLoader__.load({
 :root.dsh-phone .cguard_dock > :not([data-composer-stats]):not(.cguard_anchor):last-child{
   grid-area:1/2/2/3;justify-self:end}
 :root.dsh-phone .cguard_dock > .cguard_anchor{grid-area:2/2/3/3;justify-self:end}
+
+/* 与上面同款，但改用 JS 判定出的 cguard_phone —— 更可靠：不依赖手机层的类，
+   也不依赖媒体查询（没有 viewport meta 时手机布局视口是 980px，媒体查询不触发）。 */
+.cguard_phone .cguard_anchor{font-size:11px;line-height:15px}
+.cguard_phone .cguard_pill{gap:4px;padding:1px 6px}
+.cguard_phone .cguard_icon{width:12px;height:12px}
+.cguard_phone .cguard_full{display:none}
+.cguard_phone .cguard_short{display:inline}
+.cguard_phone .cguard_panel{position:fixed;left:calc(8px + env(safe-area-inset-left,0px));
+  right:calc(8px + env(safe-area-inset-right,0px));bottom:calc(84px + env(safe-area-inset-bottom,0px));
+  width:auto;min-width:0;max-width:none;max-height:55dvh;overflow-y:auto;
+  -webkit-overflow-scrolling:touch;padding:14px;font-size:13px;line-height:19px}
+.cguard_phone .cguard_step{width:34px;height:34px}
+.cguard_phone .cguard_step svg{width:14px;height:14px}
+.cguard_phone .cguard_rows{gap:8px 12px;grid-template-columns:minmax(64px,auto) minmax(0,1fr)}
+.cguard_phone .cguard_value{min-width:36px}
+.cguard_phone .cguard_note{margin-top:10px;padding-top:10px}
+.cguard_dock.cguard_phone{display:grid;
+  grid-template-columns:minmax(0,1fr) auto;grid-template-rows:auto auto;
+  align-items:center;justify-content:stretch;column-gap:8px}
+.cguard_dock.cguard_phone > [data-composer-stats]{grid-area:1/1/3/2;min-width:0}
+.cguard_dock.cguard_phone > :not([data-composer-stats]):not(.cguard_anchor):last-child{
+  grid-area:1/2/2/3;justify-self:end}
+.cguard_dock.cguard_phone > .cguard_anchor{grid-area:2/2/3/3;justify-self:end}
 @media (max-width:520px){
   .cguard_panel{position:fixed;left:calc(8px + env(safe-area-inset-left,0px));
     right:calc(8px + env(safe-area-inset-right,0px));bottom:calc(84px + env(safe-area-inset-bottom,0px));
@@ -326,33 +350,43 @@ window.__ModuleLoader__.load({
       const rootRef = React.useRef(null);
 
       /**
-       * 给 composer dock 打标记类 `cguard_dock`（手机端要在这个容器上做网格，
-       * 让「上下文份额」在上、压缩药丸在下）。
+       * 给 composer dock 打标记类（手机端要在这个容器上做网格：上下文份额在上、
+       * 压缩药丸在下），并由 JS 判定手机、加 `cguard_phone`。
        *
-       * 为什么用 JS 打类，而不是 CSS 的 `:has()`：`:has()` 要 Chrome 105+ / Safari 15.4+，
-       * 旧浏览器会**整条丢弃**选择器（就是"改了没反应"的元凶）；而宿主 dock 的类名是
-       * CSS-module 哈希（如 `uV2eYG_dock`），写死它升级即失效。
-       *
-       * 定位方式只用自己的节点关系：向上找"同时直接包含我、又直接包含原生 stats 的祖先"，
-       * 那就是 dock。找不到（例如还没有会话）就不打标记，退化为原来的横向排列。
+       * 为什么不用 CSS 的 `:has()`：要 Chrome 105+ / Safari 15.4+，旧浏览器会**整条丢弃**
+       * 选择器。为什么不只靠媒体查询：没有 viewport meta 时手机布局视口是 980px，
+       * `max-width:520px` 永远不触发。为什么不只靠手机层的 `dsh-phone` 类：它可能没打。
+       * 宿主 dock 的类名又是 CSS-module 哈希，写死即失效 —— 所以三者都别依赖，用 JS 判定。
        */
       React.useEffect(() => {
         const self = rootRef.current;
         if (self === null) return undefined;
-        const stats = document.querySelector('[data-composer-stats]');
-        let node = self.parentElement;
-        let dock = null;
-        while (node !== null && node !== document.body) {
-          const kids = Array.from(node.children);
-          if (stats !== null && kids.includes(stats) && kids.includes(self)) {
-            dock = node;
-            break;
-          }
-          node = node.parentElement;
-        }
-        if (dock === null) return undefined;
-        dock.classList.add('cguard_dock');
-        return () => dock.classList.remove('cguard_dock');
+        // slot 条目直接挂在 dock 下（renderer 的 list 分支返回 Fragment，
+        // guarded / RootEntry 都不产生 DOM），所以父节点就是 dock。
+        const dock = self.parentElement;
+        if (dock === null || dock === document.body) return undefined;
+
+        const sync = () => {
+          const phone =
+            document.documentElement.classList.contains('dsh-phone') ||
+            window.matchMedia('(pointer: coarse)').matches ||
+            window.matchMedia('(max-width: 520px)').matches;
+          dock.classList.add('cguard_dock');
+          dock.classList.toggle('cguard_phone', phone);
+        };
+        sync();
+
+        // 手机层的开关、旋转、改窗口都要跟着重算。
+        const observer = new MutationObserver(sync);
+        observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+        window.addEventListener('resize', sync);
+        window.addEventListener('orientationchange', sync);
+        return () => {
+          observer.disconnect();
+          window.removeEventListener('resize', sync);
+          window.removeEventListener('orientationchange', sync);
+          dock.classList.remove('cguard_dock', 'cguard_phone');
+        };
       }, []);
       const [saveError, setSaveError] = React.useState(null);
       const draftRef = React.useRef(null);
