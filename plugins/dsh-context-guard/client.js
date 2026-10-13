@@ -180,7 +180,7 @@ window.__ModuleLoader__.load({
 :root.dsh-phone .cguard_dock > :last-child{grid-area:1/2/2/3;justify-self:end}
 /* margin-top 是负值：上下文圆圈那格的行高由原生组件的盒高决定，
    视觉上空出一截，跟左边两行的紧凑间距一比就很明显。这里把它往上提。 */
-:root.dsh-phone .cguard_dock .cguard_anchor{grid-area:2/2/3/3;justify-self:end;margin-top:-4px}
+:root.dsh-phone .cguard_dock .cguard_anchor{grid-area:2/2/3/3;justify-self:end;margin-top:-2px}
 
 /* 与上面同款，但改用 JS 判定出的 cguard_phone —— 更可靠：不依赖手机层的类，
    也不依赖媒体查询（没有 viewport meta 时手机布局视口是 980px，媒体查询不触发）。 */
@@ -204,7 +204,7 @@ window.__ModuleLoader__.load({
   align-items:center;justify-content:stretch;column-gap:8px;row-gap:0}
 .cguard_dock.cguard_phone [data-composer-stats]{grid-area:1/1/3/2;min-width:0}
 .cguard_dock.cguard_phone > :last-child{grid-area:1/2/2/3;justify-self:end}
-.cguard_dock.cguard_phone .cguard_anchor{grid-area:2/2/3/3;justify-self:end;margin-top:-4px}
+.cguard_dock.cguard_phone .cguard_anchor{grid-area:2/2/3/3;justify-self:end;margin-top:-2px}
 @media (max-width:520px){
   .cguard_panel{position:fixed;left:calc(8px + env(safe-area-inset-left,0px));
     right:calc(8px + env(safe-area-inset-right,0px));bottom:calc(84px + env(safe-area-inset-bottom,0px));
@@ -260,6 +260,10 @@ window.__ModuleLoader__.load({
           {
             className: 'cguard_icon',
             viewBox: '0 0 14 14',
+            // 显式宽高兜底：HMR 重载时组件内联的 <style> 会短暂消失，
+            // 没有 CSS 约束的 SVG 会按默认尺寸（约 300×150）撑开。
+            width: 13,
+            height: 13,
             fill: 'none',
             stroke: 'currentColor',
             strokeWidth: 1.3,

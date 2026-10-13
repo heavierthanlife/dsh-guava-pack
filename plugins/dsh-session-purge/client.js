@@ -187,7 +187,9 @@ window.__ModuleLoader__.load({
     function Icon(props) {
       return h(
         'svg',
-        Object.assign({ className: 'spurge_icon', viewBox: '0 0 16 16', 'aria-hidden': true }, props),
+        // 显式宽高兜底：HMR 重载组件时内联 <style> 会短暂消失，
+        // 失去 CSS 约束的 SVG 会按默认尺寸（约 300×150）撑开，看着"膨胀到和对话框一样高"。
+        Object.assign({ className: 'spurge_icon', viewBox: '0 0 16 16', width: 16, height: 16, 'aria-hidden': true }, props),
         h('rect', { x: 2, y: 3.2, width: 12, height: 2.6, rx: 0.7, fill: 'none', stroke: 'currentColor', strokeWidth: 1.2 }),
         h('path', { d: 'M3.1 5.8h9.8v7.2a0.9 0.9 0 0 1-0.9 0.9H4a0.9 0.9 0 0 1-0.9-0.9z', fill: 'none', stroke: 'currentColor', strokeWidth: 1.2 }),
         h('path', { d: 'M6.6 8.6h2.8', stroke: 'currentColor', strokeWidth: 1.2, strokeLinecap: 'round' }),
@@ -434,6 +436,14 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'locale'],
       apply(ctx) {
         ctx.effect(() => ctx.locale.register(NS, DICT), 'session-purge: dictionaries');
+        // 样式表挂在插件生命周期上，而不是只放在组件里：HMR 重载组件时内联 <style>
+        // 会短暂消失，图标就失去尺寸约束而膨胀（刷新才恢复）。组件内那份保留作兜底。
+        ctx.effect(() => {
+          const el = document.createElement('style');
+          el.textContent = CSS;
+          document.head.appendChild(el);
+          return () => el.remove();
+        }, 'session-purge: styles');
         // sidebar.footer.action 渲染在 sidebar.settings 之上那一行。
         ctx.slots.inject('sidebar.footer.action', () =>
           ctx.slots.register({ name: 'sidebar.footer.action', id: 'session-purge', order: 0, locale: NS }, PurgeRow),
