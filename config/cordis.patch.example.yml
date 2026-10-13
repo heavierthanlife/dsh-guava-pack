@@ -1,7 +1,7 @@
 # ⚠️ 这是**模板**，不是可直接生效的文件。
 #    用法：把内容合并进 <profile>/cordis.patch.yml（本机是 profiles/web/cordis.patch.yml）。
 #
-# 来源：dsh-home 的 profiles/web/cordis.patch.yml
+# 来源：本机 profiles/web/cordis.patch.yml（原 dsh-home 仓库已删除，这里保留的是最终版）
 #   6 家 provider、184 个模型，全部经本机路由代理 http://127.0.0.1:8318/<provider>
 # 密钥：只写环境变量名（apiKeyEnv: XIAOMI_TOKEN_PLAN_CN_API_KEY 等），
 #   不含任何明文 key —— 换机后设好对应环境变量即可。
