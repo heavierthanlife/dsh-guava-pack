@@ -29,6 +29,7 @@ const info = (m) => console.log(`  \u2139\ufe0f  ${m}`);
 const REQUIRED = [
   'cordis.patch.yml',
   'package.json',
+  'config/cordis.patch.example.yml',
   'plugins/dsh-mobile-ui/package.json',
   'plugins/dsh-theme-manager/package.json',
   'plugins/dsh-theme-cyberpunk2077/package.json',
