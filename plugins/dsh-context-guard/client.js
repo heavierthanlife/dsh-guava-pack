@@ -161,6 +161,21 @@ window.__ModuleLoader__.load({
 :root.dsh-phone .cguard_rows{gap:8px 12px;grid-template-columns:minmax(64px,auto) minmax(0,1fr)}
 :root.dsh-phone .cguard_value{min-width:36px}
 :root.dsh-phone .cguard_note{margin-top:10px;padding-top:10px}
+
+/* 手机：右侧「上下文份额 / 压缩」改成上下堆叠 —— 与左侧两行 stats 左右对称，
+   同时把药丸压到只剩图标 + N×，少占横宽（原先会挤掉最左边的图标）。
+   用 :has() 从本插件自己的锚点反查父级（composer dock），**不依赖宿主的哈希类名**。
+   若 slot 外面还包了一层容器，这几条会静默不生效，退化为原来的横向排列。 */
+.cguard_short{display:none}
+:root.dsh-phone .cguard_full{display:none}
+:root.dsh-phone .cguard_short{display:inline}
+:root.dsh-phone *:has(> .cguard_anchor){display:grid;
+  grid-template-columns:minmax(0,1fr) auto;grid-template-rows:auto auto;
+  align-items:center;justify-content:stretch;column-gap:8px}
+:root.dsh-phone *:has(> .cguard_anchor) > [data-composer-stats]{grid-area:1/1/3/2;min-width:0}
+:root.dsh-phone *:has(> .cguard_anchor) > :not([data-composer-stats]):not(.cguard_anchor){
+  grid-area:1/2/2/3;justify-self:end}
+:root.dsh-phone *:has(> .cguard_anchor) > .cguard_anchor{grid-area:2/2/3/3;justify-self:end}
 @media (max-width:520px){
   .cguard_panel{position:fixed;left:calc(8px + env(safe-area-inset-left,0px));
     right:calc(8px + env(safe-area-inset-right,0px));bottom:calc(84px + env(safe-area-inset-bottom,0px));
@@ -473,7 +488,17 @@ window.__ModuleLoader__.load({
             title: aria,
             onClick: () => setOpen((value) => !value),
           },
-          [h(ZipIcon, { key: 'icon' }), h('span', { key: 'label', className: 'cguard_label' }, label)],
+          [
+            h(ZipIcon, { key: 'icon' }),
+            // 手机只显示 "N×"（省横宽），桌面显示完整文案。
+            // 按钮本身带 aria-label，所以这层显示切换不影响无障碍。
+            h('span', { key: 'label', className: 'cguard_label cguard_full' }, label),
+            h(
+              'span',
+              { key: 'short', className: 'cguard_label cguard_short', 'aria-hidden': true },
+              `${compactions}×`,
+            ),
+          ],
         ),
         open &&
           h('div', { key: 'panel', className: 'cguard_panel', role: 'dialog', 'aria-label': tr('panel.title') }, [
