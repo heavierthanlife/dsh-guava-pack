@@ -22,19 +22,11 @@ import { Agent as HttpsAgent } from 'node:https';
 import net from 'node:net';
 import tls from 'node:tls';
 import { readFile, writeFile, mkdir, readdir, rm } from 'node:fs/promises';
-import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// ── 可配置项 ────────────────────────────────────────────────────────────
-// 多机/云端部署的关键：下面每一项都能用环境变量覆盖，**不需要改代码**。
-//   DSH_ROUTER_HOST / DSH_ROUTER_PORT   监听地址与端口（默认 127.0.0.1:8318）
-//   DSH_SSR_PROXY / SSR_PROXY           翻墙代理地址（默认 http://127.0.0.1:2080）
-//   DSH_ROUTER_PROVIDERS                上游表 JSON 的路径（默认 <包>/providers.json）
-//   DSH_ROUTER_CAPTURE=1                排障抓包，**默认关闭**（见文件末尾警告）
-//   DSH_ROUTER_CAPTURE_DIR              抓包落盘目录（默认 <包>/captures）
-const LISTEN_HOST = process.env.DSH_ROUTER_HOST || '127.0.0.1';
-const LISTEN_PORT = Number(process.env.DSH_ROUTER_PORT || 8318);
+const LISTEN_HOST = '127.0.0.1';
+const LISTEN_PORT = 8318;
 // SSR 代理地址：DSH_SSR_PROXY > SSR_PROXY > 默认 127.0.0.1:2080
 const SSR_PROXY = process.env.DSH_SSR_PROXY || process.env.SSR_PROXY || 'http://127.0.0.1:2080';
 const SSR_URL = new URL(SSR_PROXY);
@@ -43,19 +35,10 @@ const SSR_PORT = Number(SSR_URL.port || (SSR_URL.protocol === 'https:' ? 443 : 8
 /** Give up on a CONNECT handshake that never answers, so a request cannot hang. */
 const CONNECT_TIMEOUT_MS = 15000;
 
-const ROUTER_DIR = join(dirname(fileURLToPath(import.meta.url)), '..');
-const MODE_FILE = join(ROUTER_DIR, 'mode.json');
-const CAPTURE_ENABLED = process.env.DSH_ROUTER_CAPTURE === '1';
-const CAPTURE_DIR = process.env.DSH_ROUTER_CAPTURE_DIR || join(ROUTER_DIR, 'captures');
-/** 抓包保留最近几份，避免排障时把磁盘写满。 */
-const CAPTURE_KEEP = Number(process.env.DSH_ROUTER_CAPTURE_KEEP || 8);
+const MODE_FILE = join(dirname(fileURLToPath(import.meta.url)), '..', 'mode.json');
 
 /**
- * 内置上游表（默认值）。可以用同目录的 `providers.json` 增补/覆盖，
- * 路径也能用 DSH_ROUTER_PROVIDERS 指到别处 —— 云端换上游不必改代码。
- *
- * 每条形如：
- *   "<provider>": { "baseURL": "https://…/v1", "headers": { "user-agent": "…" } }
+ * Every provider the router can carry, mapped to its REAL upstream.
  *
  * Local entries (`127.0.0.1:…`) are bridges or third-party reverse proxies that
  * already perform their own outward request; a loopback target is always sent
@@ -67,7 +50,7 @@ const CAPTURE_KEEP = Number(process.env.DSH_ROUTER_CAPTURE_KEEP || 8);
  *   agentrouter 000 TIMEOUT vs 401 1.70s → **only this one needs SSR**
  *   commandcode 200 0.81s vs 200 2.09s   → direct wins
  */
-const BUILTIN_PROVIDERS = {
+const PROVIDERS = {
   'xiaomi-token-plan-cn': { baseURL: 'https://token-plan-cn.xiaomimimo.com/v1' },
   'opencode-go': { baseURL: 'https://opencode.ai/zen/go/v1' },
   'antigravity': { baseURL: 'http://127.0.0.1:8045' },
@@ -85,35 +68,6 @@ const DEFAULT_MODES = {
   'agentrouter': 'ssr',
   'commandcode': 'direct',
 };
-
-/**
- * 合并 `providers.json` 到内置表之上。启动时读一次（改完重启生效），
- * 这样云端部署只要写个 JSON，不用碰这个文件。
- */
-function loadProviders() {
-  const file = process.env.DSH_ROUTER_PROVIDERS || join(ROUTER_DIR, 'providers.json');
-  let overrides = {};
-  try {
-    const parsed = JSON.parse(readFileSync(file, 'utf8'));
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) overrides = parsed;
-  } catch (err) {
-    // 文件不存在是正常情况（用内置表）；其余错误值得报出来
-    if (err && err.code !== 'ENOENT') {
-      console.log(`[dsh-provider-router] ${file} 读取失败，改用内置上游表：${err.message}`);
-    }
-  }
-  const merged = {};
-  for (const [name, def] of Object.entries({ ...BUILTIN_PROVIDERS, ...overrides })) {
-    if (!def || typeof def.baseURL !== 'string' || def.baseURL === '') {
-      console.log(`[dsh-provider-router] 跳过无效 provider "${name}"：缺 baseURL`);
-      continue;
-    }
-    merged[name] = def;
-  }
-  return merged;
-}
-
-const PROVIDERS = loadProviders();
 
 function isLoopbackHost(host) {
   return host === '127.0.0.1' || host === 'localhost' || host === '::1' || host === '[::1]';
@@ -280,24 +234,23 @@ const server = createServer(async (req, res) => {
       res.end('upstream error: ' + describeUpstreamError(err) + '\n');
     });
 
+    // ⚠️ 排障抓包，**默认关闭**（要显式 DSH_ROUTER_CAPTURE=1 才开）。
+    // 开启后会把 agentrouter 的完整请求体（含提示词与整段对话）明文写入 captures/，
+    // 最多保留最近 8 份。只在排障时临时开，用完删掉 captures/。
     const chunks = [];
     for await (const chunk of req) chunks.push(chunk);
     const body = Buffer.concat(chunks);
-
-    // ⚠️ 排障抓包，**默认关闭**（要显式 DSH_ROUTER_CAPTURE=1 才开）。
-    // 开启后会把 agentrouter 的完整请求体 —— 包含你的提示词与整段对话 —— 明文写入
-    // <captures>/req-<时间戳>.json（最多保留 CAPTURE_KEEP 份，默认 8）。
-    // 只在排障时临时开，用完删掉 captures/；**不要随包分发抓到的内容**。
     let captureBase = null;
-    if (CAPTURE_ENABLED && provider === 'agentrouter' && req.method === 'POST') {
+    if (provider === 'agentrouter' && req.method === 'POST' && process.env.DSH_ROUTER_CAPTURE === '1') {
+      const capDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'captures');
       try {
-        await mkdir(CAPTURE_DIR, { recursive: true });
-        captureBase = join(CAPTURE_DIR, 'req-' + Date.now());
+        await mkdir(capDir, { recursive: true });
+        captureBase = join(capDir, 'req-' + Date.now());
         await writeFile(captureBase + '.json', body);
-        const existing = (await readdir(CAPTURE_DIR)).filter((n) => n.endsWith('.json')).sort();
-        for (const name of existing.slice(0, Math.max(0, existing.length - CAPTURE_KEEP))) {
-          await rm(join(CAPTURE_DIR, name.replace(/\.json$/, '.status')), { force: true });
-          await rm(join(CAPTURE_DIR, name), { force: true });
+        const existing = (await readdir(capDir)).filter((n) => n.endsWith('.json')).sort();
+        for (const name of existing.slice(0, Math.max(0, existing.length - 8))) {
+          await rm(join(capDir, name.replace(/\.json$/, '.status')), { force: true });
+          await rm(join(capDir, name), { force: true });
         }
       } catch (err) {
         console.log('[dsh-provider-router] capture failed: ' + err.message);
@@ -315,7 +268,5 @@ const server = createServer(async (req, res) => {
 server.listen(LISTEN_PORT, LISTEN_HOST, () => {
   console.log(`[dsh-provider-router] listening on ${LISTEN_HOST}:${LISTEN_PORT}`);
   console.log(`[dsh-provider-router] providers: ${Object.keys(PROVIDERS).join(', ')}`);
-  console.log(`[dsh-provider-router] providers file: ${process.env.DSH_ROUTER_PROVIDERS || join(ROUTER_DIR, 'providers.json')}`);
   console.log(`[dsh-provider-router] SSR proxy: ${SSR_HOST}:${SSR_PORT}  (${SSR_PROXY})`);
-  console.log(`[dsh-provider-router] capture: ${CAPTURE_ENABLED ? 'ON → ' + CAPTURE_DIR + ' (最多 ' + CAPTURE_KEEP + ' 份)' : 'off (DSH_ROUTER_CAPTURE=1 可开)'}`);
 });

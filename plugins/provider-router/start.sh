@@ -10,11 +10,8 @@ set -u
 DIR="$(cd "$(dirname "$0")" && pwd)"
 PID_FILE="$DIR/router.pid"
 LOG_FILE="$DIR/router.log"
-# 与 router.mjs 用同一套环境变量，云端换端口/监听地址不必改脚本。
-# setsid 会继承环境，所以这里的变量会原样传给 node 进程。
-PORT="${DSH_ROUTER_PORT:-8318}"
-HOST="${DSH_ROUTER_HOST:-127.0.0.1}"
-HEALTH_URL="http://$HOST:$PORT/health"
+PORT=8318
+HEALTH_URL="http://127.0.0.1:$PORT/health"
 
 healthy() { curl -sf "$HEALTH_URL" >/dev/null 2>&1; }
 

@@ -162,7 +162,7 @@ function sendJson(res, status, body) {
 
 /**
  * The MagicDNS authority the launcher adds to `--trusted-host`, e.g.
- * `<host>.<tailnet>.ts.net`: `<hostname>.<resolv.conf search domain>`.
+ * `ygy12.tailef4f13.ts.net`: `<hostname>.<resolv.conf search domain>`.
  * Returns null when no search domain is configured.
  */
 function tailnetHost() {

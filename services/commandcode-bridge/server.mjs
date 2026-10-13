@@ -30,25 +30,8 @@ const MODELS = `${UPSTREAM}/provider/v1/models`;
 
 // 出口模式由 provider-router 插件的 mode.json 决定（热读，无需重启）：
 //   direct → 直连上游（实测 0.81s，当前最优）
-//   ssr    → 经 SSR 代理（DSH_SSR_PROXY / SSR_PROXY，默认 127.0.0.1:2080）出去
-//
-// mode.json 的位置随布局而变，所以自动探测两种：
-//   源码布局  themes/commandcode-bridge  ↔  themes/provider-router
-//   打包布局  <pack>/services/commandcode-bridge ↔ <pack>/plugins/provider-router
-// 也可以用 DSH_PROVIDER_MODES 直接指定。
-const MODE_FILE = process.env.DSH_PROVIDER_MODES || (() => {
-  const candidates = [
-    join(HERE, "..", "provider-router", "mode.json"),
-    join(HERE, "..", "..", "plugins", "provider-router", "mode.json"),
-  ];
-  // 文件本身可能还没生成（插件首次运行时才写），所以退一步看父目录是否存在，
-  // 这样打包布局下也能选对。
-  return (
-    candidates.find((p) => existsSync(p)) ||
-    candidates.find((p) => existsSync(dirname(p))) ||
-    candidates[0]
-  );
-})();
+//   ssr    → 经 ShadowsocksR(127.0.0.1:2080) 出去（上游变慢/被墙时可切）
+const MODE_FILE = join(HERE, "..", "provider-router", "mode.json");
 const SSR_PROXY = process.env.DSH_SSR_PROXY || process.env.SSR_PROXY || "http://127.0.0.1:2080";
 let ssrDispatcher = null;
 
