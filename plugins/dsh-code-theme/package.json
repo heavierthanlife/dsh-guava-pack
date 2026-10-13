@@ -1,0 +1,23 @@
+{
+  "name": "dsh-code-theme",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "只给代码上色的主题插件：Monokai Pro / Material 调色板，自动跟随明暗，也可手动强制代码区的明暗。",
+  "meta": {
+    "title": "Code Theme",
+    "description": "代码块与行内代码的配色（Monokai Pro / Material），只影响代码，不动正文。"
+  },
+  "exports": { ".": "./index.js", "./client": "./client.js" },
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-theme",
+        "@deepseek-ai/dsh-client-ui-settings-general"
+      ]
+    }
+  }
+}

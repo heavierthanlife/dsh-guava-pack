@@ -1,0 +1,104 @@
+#!/usr/bin/env node
+/**
+ * dsh-code-theme/tools/check-contrast.mjs — 确定性的视觉验收。
+ *
+ * 为什么要有它：配色"好不好看"可以让人（或模型）看，但"看不看得清"是**可计算的**。
+ * 这个脚本按 WCAG 2.1 逐项算对比度，低于 AA（4.5:1）就报错退出。
+ * 手机屏幕小、亮度高，低于 4.5 的 token（原版 Monokai 的注释色只有 ~2.6:1）
+ * 基本等于看不见。
+ *
+ * 调色板**不复制**：直接从 client.js 里把 `const PALETTES = {…}` 抽出来解析，
+ * 保证这份检查永远对着真实生效的那份数据。
+ *
+ * 用法：node tools/check-contrast.mjs [--min 4.5]
+ */
+
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const CLIENT = join(HERE, '..', 'client.js');
+
+const minFlag = process.argv.indexOf('--min');
+const MIN = minFlag >= 0 ? Number(process.argv[minFlag + 1]) : 4.5;
+
+/** sRGB 相对亮度（WCAG 2.1）。 */
+function luminance(hex) {
+  const clean = hex.replace('#', '');
+  const full = clean.length === 3 ? clean.split('').map((c) => c + c).join('') : clean;
+  const channels = [0, 2, 4].map((i) => parseInt(full.slice(i, i + 2), 16) / 255);
+  const [r, g, b] = channels.map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/** 对比度（1~21）。 */
+function contrast(a, b) {
+  const la = luminance(a);
+  const lb = luminance(b);
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+}
+
+/** 从 client.js 里抽出 PALETTES 对象字面量（不复制数据，避免两份真相）。 */
+function loadPalettes() {
+  const src = readFileSync(CLIENT, 'utf8');
+  const start = src.indexOf('const PALETTES = ');
+  if (start < 0) throw new Error('client.js 里找不到 const PALETTES');
+  const open = src.indexOf('{', start);
+  let depth = 0;
+  let end = -1;
+  for (let i = open; i < src.length; i += 1) {
+    const ch = src[i];
+    if (ch === '{') depth += 1;
+    else if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        end = i + 1;
+        break;
+      }
+    }
+  }
+  if (end < 0) throw new Error('PALETTES 花括号不平衡');
+  const literal = src.slice(open, end);
+  // 只求值这一段字面量；它不含函数或外部引用。
+  return new Function(`return ${literal};`)();
+}
+
+const TOKENS = ['constant', 'string', 'comment', 'keyword', 'parameter', 'function', 'string-expression', 'punctuation', 'link'];
+
+function main() {
+  const palettes = loadPalettes();
+  let failed = 0;
+  let checked = 0;
+
+  for (const [id, palette] of Object.entries(palettes)) {
+    for (const mode of ['light', 'dark']) {
+      const m = palette[mode];
+      const bg = m.background;
+      console.log(`\n${palette.label} · ${mode}  (bg ${bg})`);
+      const rows = [['foreground', m.foreground], ...TOKENS.map((t) => [t, m[t]])];
+      for (const [name, color] of rows) {
+        if (typeof color !== 'string') {
+          console.log(`  ✗ ${name}: 缺色`);
+          failed += 1;
+          continue;
+        }
+        const ratio = contrast(color, bg);
+        checked += 1;
+        const pass = ratio >= MIN;
+        if (!pass) failed += 1;
+        console.log(`  ${pass ? '✅' : '❌'} ${name.padEnd(18)} ${color}  ${ratio.toFixed(2)}:1`);
+      }
+      // 行内代码：底色是 inline，文字用 foreground
+      const inlineRatio = contrast(m.foreground, m.inline);
+      checked += 1;
+      if (inlineRatio < MIN) failed += 1;
+      console.log(`  ${inlineRatio >= MIN ? '✅' : '❌'} ${'inline(前景/底)'.padEnd(16)} ${m.inline}  ${inlineRatio.toFixed(2)}:1`);
+    }
+  }
+
+  console.log(`\n共检查 ${checked} 项，低于 ${MIN}:1 的有 ${failed} 项`);
+  return failed === 0 ? 0 : 1;
+}
+
+process.exit(main());

@@ -31,3 +31,6 @@
 
     - id: session-purge
       name: ./plugins/dsh-session-purge
+
+    - id: code-theme
+      name: ./plugins/dsh-code-theme
