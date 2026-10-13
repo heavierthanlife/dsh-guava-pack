@@ -45,6 +45,12 @@ systemctl --user restart dsh.service      # 或你原来的启动方式
 
 > 本包不再发布 `.tgz`。要更新就直接 `cd ~/dsh-guava-pack && git pull`。
 > 本机（开发侧）改完插件后，用 `node tools/sync-plugins.mjs` 把工作副本同步进包再提交。
+>
+> ⚠️ **改客户端插件（`client.js`）后，只刷新页面不会生效。**
+> 客户端 bundle 由 `/plugins/<combo>` 按版本号提供，响应头是
+> `public, max-age=31536000, immutable`；版本号在 DSH 启动/重装时预读文件系统算出，
+> 之后不再重算。所以改完 `client.js` **必须重启 DSH**（`systemctl --user restart dsh.service`），
+> 否则浏览器一年内都吃旧字节。host 侧（`index.js`）同理。
 
 ## 安装后配置（重要）
 
