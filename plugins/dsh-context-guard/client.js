@@ -149,18 +149,21 @@ window.__ModuleLoader__.load({
    为什么要单独写：手机层把同槽的 stats 药丸调成了 11px/15px，但那条规则只作用于
    [data-composer-stats]；本插件的药丸是它的**兄弟节点**，覆盖不到，必须自己对齐。
    最后一段 @media 是兜底：万一没装 dsh-mobile-ui，纯按屏宽也能适配。 */
-:root.dsh-phone .cguard_anchor{font-size:11px;line-height:15px}
-:root.dsh-phone .cguard_pill{gap:4px;padding:1px 6px}
+:root.dsh-phone .cguard_anchor{font-size:11px;line-height:14px}
+:root.dsh-phone .cguard_pill{gap:4px;padding:0 6px}
 :root.dsh-phone .cguard_icon{width:15px;height:15px}
 :root.dsh-phone .cguard_panel{position:fixed;left:calc(8px + env(safe-area-inset-left,0px));
   right:calc(8px + env(safe-area-inset-right,0px));bottom:calc(84px + env(safe-area-inset-bottom,0px));
   width:auto;min-width:0;max-width:none;max-height:55dvh;overflow-y:auto;
-  -webkit-overflow-scrolling:touch;padding:14px;font-size:13px;line-height:19px}
-:root.dsh-phone .cguard_step{width:34px;height:34px}
-:root.dsh-phone .cguard_step svg{width:14px;height:14px}
-:root.dsh-phone .cguard_rows{gap:8px 12px;grid-template-columns:minmax(64px,auto) minmax(0,1fr)}
-:root.dsh-phone .cguard_value{min-width:36px}
-:root.dsh-phone .cguard_note{margin-top:10px;padding-top:10px}
+  -webkit-overflow-scrolling:touch;padding:12px 14px;font-size:13px;line-height:19px}
+/* 面板瘦身：两个带箭头条目原来各占 34px + 8px 行距，两条就近 90px，
+   展开后面板接近半屏。改成 28px 触摸目标 + 3px 行距。 */
+:root.dsh-phone .cguard_title{margin-bottom:6px}
+:root.dsh-phone .cguard_step{width:28px;height:28px}
+:root.dsh-phone .cguard_step svg{width:13px;height:13px}
+:root.dsh-phone .cguard_rows{gap:3px 10px;grid-template-columns:minmax(60px,auto) minmax(0,1fr)}
+:root.dsh-phone .cguard_value{min-width:32px}
+:root.dsh-phone .cguard_note{margin-top:6px;padding-top:6px}
 
 /* 手机：右侧「上下文份额 / 压缩」改成上下堆叠 —— 与左侧两行 stats 左右对称，
    同时把药丸压到只剩图标 + N×，少占横宽（原先会挤掉最左边的图标）。
@@ -172,40 +175,47 @@ window.__ModuleLoader__.load({
 :root.dsh-phone .cguard_short{display:inline}
 :root.dsh-phone .cguard_dock{display:grid;
   grid-template-columns:minmax(0,1fr) auto;grid-template-rows:auto auto;
-  align-items:center;justify-content:stretch;column-gap:8px}
+  align-items:center;justify-content:stretch;column-gap:8px;row-gap:0}
 :root.dsh-phone .cguard_dock [data-composer-stats]{grid-area:1/1/3/2;min-width:0}
 :root.dsh-phone .cguard_dock > :last-child{grid-area:1/2/2/3;justify-self:end}
-:root.dsh-phone .cguard_dock .cguard_anchor{grid-area:2/2/3/3;justify-self:end}
+/* margin-top 是负值：上下文圆圈那格的行高由原生组件的盒高决定，
+   视觉上空出一截，跟左边两行的紧凑间距一比就很明显。这里把它往上提。 */
+:root.dsh-phone .cguard_dock .cguard_anchor{grid-area:2/2/3/3;justify-self:end;margin-top:-4px}
 
 /* 与上面同款，但改用 JS 判定出的 cguard_phone —— 更可靠：不依赖手机层的类，
    也不依赖媒体查询（没有 viewport meta 时手机布局视口是 980px，媒体查询不触发）。 */
-.cguard_phone .cguard_anchor{font-size:11px;line-height:15px}
-.cguard_phone .cguard_pill{gap:4px;padding:1px 6px}
+.cguard_phone .cguard_anchor{font-size:11px;line-height:14px}
+.cguard_phone .cguard_pill{gap:4px;padding:0 6px}
 .cguard_phone .cguard_icon{width:15px;height:15px}
 .cguard_phone .cguard_full{display:none}
 .cguard_phone .cguard_short{display:inline}
 .cguard_phone .cguard_panel{position:fixed;left:calc(8px + env(safe-area-inset-left,0px));
   right:calc(8px + env(safe-area-inset-right,0px));bottom:calc(84px + env(safe-area-inset-bottom,0px));
   width:auto;min-width:0;max-width:none;max-height:55dvh;overflow-y:auto;
-  -webkit-overflow-scrolling:touch;padding:14px;font-size:13px;line-height:19px}
-.cguard_phone .cguard_step{width:34px;height:34px}
-.cguard_phone .cguard_step svg{width:14px;height:14px}
-.cguard_phone .cguard_rows{gap:8px 12px;grid-template-columns:minmax(64px,auto) minmax(0,1fr)}
-.cguard_phone .cguard_value{min-width:36px}
-.cguard_phone .cguard_note{margin-top:10px;padding-top:10px}
+  -webkit-overflow-scrolling:touch;padding:12px 14px;font-size:13px;line-height:19px}
+.cguard_phone .cguard_title{margin-bottom:6px}
+.cguard_phone .cguard_step{width:28px;height:28px}
+.cguard_phone .cguard_step svg{width:13px;height:13px}
+.cguard_phone .cguard_rows{gap:3px 10px;grid-template-columns:minmax(60px,auto) minmax(0,1fr)}
+.cguard_phone .cguard_value{min-width:32px}
+.cguard_phone .cguard_note{margin-top:6px;padding-top:6px}
 .cguard_dock.cguard_phone{display:grid;
   grid-template-columns:minmax(0,1fr) auto;grid-template-rows:auto auto;
-  align-items:center;justify-content:stretch;column-gap:8px}
+  align-items:center;justify-content:stretch;column-gap:8px;row-gap:0}
 .cguard_dock.cguard_phone [data-composer-stats]{grid-area:1/1/3/2;min-width:0}
 .cguard_dock.cguard_phone > :last-child{grid-area:1/2/2/3;justify-self:end}
-.cguard_dock.cguard_phone .cguard_anchor{grid-area:2/2/3/3;justify-self:end}
+.cguard_dock.cguard_phone .cguard_anchor{grid-area:2/2/3/3;justify-self:end;margin-top:-4px}
 @media (max-width:520px){
   .cguard_panel{position:fixed;left:calc(8px + env(safe-area-inset-left,0px));
     right:calc(8px + env(safe-area-inset-right,0px));bottom:calc(84px + env(safe-area-inset-bottom,0px));
     width:auto;min-width:0;max-width:none;max-height:55dvh;overflow-y:auto;
-    -webkit-overflow-scrolling:touch;padding:14px;font-size:13px;line-height:19px}
-  .cguard_step{width:34px;height:34px}
-  .cguard_step svg{width:14px;height:14px}
+    -webkit-overflow-scrolling:touch;padding:12px 14px;font-size:13px;line-height:19px}
+  .cguard_title{margin-bottom:6px}
+  .cguard_step{width:28px;height:28px}
+  .cguard_step svg{width:13px;height:13px}
+  .cguard_rows{gap:3px 10px}
+  .cguard_note{margin-top:6px;padding-top:6px}
+  .cguard_anchor{line-height:14px}
   /* 兜底：手机层没装/没判定成手机时，纯按屏宽也做同样的堆叠 */
   .cguard_full{display:none}
   .cguard_short{display:inline}
