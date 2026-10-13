@@ -1,0 +1,6 @@
+# dsh-code-theme — bundle patch layer。
+#
+# 纯客户端插件（配色只发生在浏览器里），所以 host 半边是空实现。
+- insert:
+    - id: code-theme
+      name: 'dsh-code-theme'
