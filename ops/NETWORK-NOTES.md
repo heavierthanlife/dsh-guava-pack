@@ -119,3 +119,19 @@ reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings" /v
 ```
 
 **教训**：改系统代理前先 `reg query` 记下三项原值；用 PAC 就先把 PAC 文件写成功再切过去。
+
+## 7. 改后实测（2026-10-13，管理员写入系统级 NO_PROXY + 重启服务后）
+
+```
+系统级 NO_PROXY : localhost,127.0.0.1,::1,.tailscale.com,…  ✓ 已生效
+netcheck        : 'tshttpproxy: using proxy' 那行**消失** ✓
+tailscale ping  : 1.339s / 382ms / 323ms / 344ms / 383ms / 424ms
+                  改前对照：333ms / 1.53s / 432ms / 945ms / 842ms / **4.738s**
+                  → 4.7 秒的尖峰消失，抖动大幅收敛 ✓
+tailscale status: v2339fa 仍是 relay "tok"；direct connection not established
+Nearest DERP    : San Francisco 161ms（本机国际出口绕美，换 DERP 无用）
+```
+
+**结论**：控制面不再绕美国、抖动收敛；剩余 ~350ms 的"地板"是中继路径本身
+（手机 → 东京 DERP → 本机），要再降只能打通直连（上游放行 UDP 41641）。
+手机端若仍觉得卡，去做第 5 节（渲染）。
