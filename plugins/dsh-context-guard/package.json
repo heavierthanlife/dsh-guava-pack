@@ -1,0 +1,23 @@
+{
+  "name": "dsh-context-guard",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "轮次结束后的上下文守卫：60% 阈值自动压缩、压缩次数统计、达到 N 次自动写 handoff 并提示开新会话。",
+  "meta": {
+    "title": "Context Guard",
+    "description": "在对话自然结束后按阈值自动压缩，统计已压缩次数，达到 N 次自动写 handoff 并提示开新会话。"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js"
+  },
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": ["@deepseek-ai/dsh-client-ui-conversation"]
+    }
+  }
+}

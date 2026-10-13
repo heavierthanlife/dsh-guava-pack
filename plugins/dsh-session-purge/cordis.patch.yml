@@ -1,0 +1,11 @@
+# dsh-session-purge — bundle patch layer。
+#
+# 只挂载一个 host 插件：注册 `/purge` 命令。
+#
+# 注意分工：
+#   `/purge`（聊天里）**只出 dry-run 计划**，不删任何东西。
+#   真正的删除走 CLI（见 README），因为要清理 workspace.json 的花名册，
+#   而 DSH 运行时那份状态由内存持有并会重写 —— 运行时改会被覆盖。
+- insert:
+    - id: session-purge
+      name: 'dsh-session-purge'

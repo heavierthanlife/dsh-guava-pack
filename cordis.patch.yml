@@ -25,3 +25,9 @@
 
     - id: dsh-opencode-session-header
       name: ./plugins/dsh-opencode-session-header
+
+    - id: context-guard
+      name: ./plugins/dsh-context-guard
+
+    - id: session-purge
+      name: ./plugins/dsh-session-purge

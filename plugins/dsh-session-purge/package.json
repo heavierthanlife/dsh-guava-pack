@@ -1,0 +1,20 @@
+{
+  "name": "dsh-session-purge",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "清理已归档会话的记录（日志/投影缓存/无人引用的附件），保留工作产出品并先写产出清单。",
+  "meta": {
+    "title": "Session Purge",
+    "description": "只清理已归档会话的记录，保留工作区产出品；删除前先写 PURGED-<id>.md 清单。"
+  },
+  "exports": { ".": "./index.js", "./client": "./client.js" },
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": ["@deepseek-ai/dsh-client-ui-sidebar"]
+    }
+  }
+}

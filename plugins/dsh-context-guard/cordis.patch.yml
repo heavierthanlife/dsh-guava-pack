@@ -1,0 +1,28 @@
+# dsh-context-guard — bundle patch layer。
+#
+# 这个 patch 只做一件事：挂载本插件。
+#
+# ## 关于「收窄 compaction-basic 的步间自动压缩」——做不到，而且不该在这里做
+#
+# 这个 profile 的 `dsh-web-app/cordis.patch.yml` 已经把**根平面**的
+# `compaction-basic` 与 `command-compact` 设成 `disabled: true`（注释说明是有意的：
+# compaction 是 preset 拥有的能力，而它的投影表是进程级的，不能变成"哪个 preset
+# 恰好挂着"的函数），改由 `dsh-web-app/presets/cordis.patch.yml` 的 `compaction`
+# group 按 preset 挂载，并 `isolate: { compaction: true }`。
+#
+# 所以对那两行做 `config` 覆盖是**空操作**（行已禁用），而且 preset 里的
+# `compaction-basic` 行在四个 preset 里各有一份、id 相同，按 id 覆盖只会命中其中
+# 一个 —— 不能这么干。
+#
+# 结果：preset 自带的"步间"压缩（默认 thresholdRatio 0.8）仍然存在。
+# 本插件的做法是每轮对话自然结束、超过 60% 时主动压缩，正常会把压力压在 0.8 以下，
+# 于是步间压缩在实践中很少介入。**要彻底禁止步间压缩，需要改 agent preset**
+# （属于另一件事，应单独评估，见 README「已知限制」）。
+- insert:
+    - id: context-guard
+      name: 'dsh-context-guard'
+      config:
+        thresholdRatio: 0.6
+        handoffAfterCompactions: 2
+        writeHandoff: true
+        triggerOn: ['completed']
