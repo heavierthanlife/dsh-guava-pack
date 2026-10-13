@@ -1,0 +1,6 @@
+# 放到 /etc/wsl.conf（需要 sudo；每台机器各做一次）
+[boot]
+systemd=true
+
+[user]
+default=guava5tar_

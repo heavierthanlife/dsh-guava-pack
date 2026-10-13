@@ -16,6 +16,7 @@
 | `plugins/dsh-context-guard` | 轮次结束后按阈值自动压缩、统计压缩次数、达上限写 handoff | 自研 |
 | `plugins/dsh-session-purge` | 清理已归档会话记录（保留产出并写清单），侧栏入口在设置上方一行 | 自研 |
 | `config/cordis.patch.example.yml` | provider / 模型目录示例（6 家、184 个模型，全走本机路由） | 自研 |
+| `ops/` | 运维脚本：`bootstrap-machine.sh`（新机装 dsh.service + linger）、`restart-dsh.sh`、`tailnet-url.sh`（打印带 token 的手机访问地址）、`dsh.service`、`bashrc.dsh.example`、`wsl.conf.example` | 自研 |
 | `services/commandcode-bridge` | 把 OpenAI 格式转成 Command Code 内部端点 | 自研 |
 
 第三方组件的授权与出处见 [`LICENSES/`](LICENSES/)。**两个第三方包都保持 MIT 原样分发**，

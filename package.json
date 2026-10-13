@@ -21,6 +21,7 @@
     "services/",
     "patches/",
     "config/",
+    "ops/",
     "LICENSES/",
     "install.mjs",
     "README.md",

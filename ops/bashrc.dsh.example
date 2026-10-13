@@ -1,0 +1,19 @@
+# 追加到 ~/.bashrc（每台机器各做一次，值自己填；本文件只是模板，不含真 key）
+export DSH_HOME="$HOME/dsh"
+export PNPM_HOME="$HOME/.local/share/pnpm"
+# npm 全局 bin（pnpm / command-code 装在这）：用下面的命令查真实路径后替换
+#   npm prefix -g     → 例如 /home/<user>/.npm-global
+# export PATH="$HOME/.npm-global/bin:$PATH"
+case ":$PATH:" in
+  *":$PNPM_HOME/bin:"*) ;;
+  *) export PATH="$PNPM_HOME/bin:$PATH" ;;
+esac
+
+# ── LLM provider keys（dsh 启动器会 grep '^export [A-Z_]+_API_KEY=' 载入）──
+export MIMO_API_KEY=
+export XIAOMI_TOKEN_PLAN_CN_API_KEY=
+export DEEPSEEK_API_KEY=
+export OPENCODE_GO_API_KEY=
+export COMMANDCODE_API_KEY=
+export ANTIGRAVITY_API_KEY=
+export AGENTROUTER_API_KEY=
