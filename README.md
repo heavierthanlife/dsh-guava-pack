@@ -1,7 +1,8 @@
 # dsh-guava-pack — 一个包带走全部插件
 
-把本机这套 DSH 定制（手机 UI、供应商路由、主题管理、改装赛博主题、OpenCode 会话头修复）
-连同 CommandCode 桥接服务，打成一个**可离线分发**的包。换台机器（含云端）装一次就能用。
+把本机这套 DSH 定制（手机 UI、供应商路由、主题管理、改装赛博主题、OpenCode 会话头修复、
+上下文守卫、已归档会话清理）连同 CommandCode 桥接服务，打成一个**可离线分发**的包。
+换台机器（含云端）**git clone 一次就能用**。
 
 ## 里面有什么
 
@@ -12,6 +13,9 @@
 | `plugins/provider-router` | 供应商直连 / 经 SSR 路由 + 状态面板（**可配置**） | 自研 |
 | `plugins/dsh-theme-cyberpunk2077` | 赛博朋克 2077 主题（**改装版**） | ⚠️ 原作者 Tommy00748，MIT |
 | `plugins/dsh-opencode-session-header` | 修 OpenCode 的 `400 MissingSessionID` | ⚠️ 原作者 beihzb，MIT |
+| `plugins/dsh-context-guard` | 轮次结束后按阈值自动压缩、统计压缩次数、达上限写 handoff | 自研 |
+| `plugins/dsh-session-purge` | 清理已归档会话记录（保留产出并写清单），侧栏入口在设置上方一行 | 自研 |
+| `config/cordis.patch.example.yml` | provider / 模型目录示例（6 家、184 个模型，全走本机路由） | 自研 |
 | `services/commandcode-bridge` | 把 OpenAI 格式转成 Command Code 内部端点 | 自研 |
 
 第三方组件的授权与出处见 [`LICENSES/`](LICENSES/)。**两个第三方包都保持 MIT 原样分发**，
@@ -20,19 +24,27 @@
 ## 安装
 
 ```sh
-# 1) 装进目标 profile（包名或 .tgz 路径都行）
-dsh plugin --profile web add /path/to/dsh-guava-pack-1.0.0.tgz
+# 0) 取包 —— 统一走 git clone，不再用 .tgz
+git clone git@github.com:heavierthanlife/dsh-guava-pack.git ~/dsh-guava-pack
+
+# 1) 装进目标 profile
+dsh plugin --profile web add ~/dsh-guava-pack
 
 #    等价于：在该 profile 目录里 pnpm add，并把包名写进 dsh.profile.bundles
 #    旧版 CLI 也可手工两步：
-#      cd <dsh>/profiles/web && pnpm add /path/to/xxx.tgz
+#      cd <dsh>/profiles/web && pnpm add ~/dsh-guava-pack
 #      然后在 profiles/web/package.json 的 dsh.profile.bundles 里加上 "dsh-guava-pack"
 
 # 2) 重启 DSH（host 侧插件必须重启才加载）
 systemctl --user restart dsh.service      # 或你原来的启动方式
 
 # 3) 浏览器刷新一次（客户端 bundle 会重建）
+
+# 以后更新：git pull 后重复 2、3
 ```
+
+> 本包不再发布 `.tgz`。要更新就直接 `cd ~/dsh-guava-pack && git pull`。
+> 本机（开发侧）改完插件后，用 `node tools/sync-plugins.mjs` 把工作副本同步进包再提交。
 
 ## 安装后配置（重要）
 
