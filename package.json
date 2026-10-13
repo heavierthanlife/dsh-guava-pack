@@ -20,6 +20,7 @@
     "plugins/",
     "services/",
     "patches/",
+    "config/",
     "LICENSES/",
     "install.mjs",
     "README.md",
