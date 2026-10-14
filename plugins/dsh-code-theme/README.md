@@ -95,10 +95,44 @@ node tools/check-contrast.mjs
 
 真机看：**设置 → 代码配色**，面板里的预览直接引用 `--shiki-token-*` 变量，所以显示的就是真实生效的颜色。
 
+## OpenCode 调色板：官方原值 + 4 项 AA 调整
+
+`PALETTES.opencode` 用的是上游内置主题的**真实色值**，不再是拼出来的近似配色。
+
+来源 `github.com/anomalyco/opencode`（`sst/opencode` 已 301 重定向到此），分支 **`dev`**（该仓库**没有 `main`**）：
+
+| schema | 路径 | blob SHA-1 | 字节 |
+|---|---|---|---|
+| v1（token 名可直接对应） | `packages/tui/src/theme/assets/opencode.json` | `e92dca8c…d290cd` | 5393 |
+| v2（**当前 live 默认**，`$hue` 引用式） | `packages/tui/src/theme/assets/v2/opencode.json` | `804f4957…f38f23b` | 8902 |
+
+两个文件解析后的语法色完全一致，互为交叉验证。原文留档在 `upstream/`（含取回与 blob 校验命令）。
+
+**深色**：全部官方原值，逐项都 ≥4.5:1，无需调整。
+**浅色**：4 个官方原值在白底上不达 AA，按**最小幅度等比压暗**（保色相）处理 —— 这是本插件"手机上看得清"这条底线唯一的让步：
+
+| token | 官方原值 | 原对比度 | 本插件取值 | 调整后 | 系数 |
+|---|---|---|---|---|---|
+| `keyword` / `constant` | `#d68c27` | 2.75:1 | `#a16a1d` | 4.57:1 | ×0.755 |
+| `string` | `#3d9a57` | 3.52:1 | `#35854b` | 4.56:1 | ×0.867 |
+| `comment` | `#8a8a8a` | 3.45:1 | `#757575` | 4.61:1 | ×0.851 |
+| `function` / `link` | `#3b7dd8` | 4.11:1 | `#3775cb` | 4.60:1 | ×0.940 |
+
+想要 100% 原值：把 `client.js` 里这 4 处换回官方色即可（`upstream/README.md` 有对照表）——
+换回后 `check-contrast.mjs` 会立刻报红，属预期行为。
+
+另外两处**照搬上游**、看起来像 bug 但确实是有意为之的地方：
+
+- 上游 `syntaxFunction` 与 `markdownLink` 同指 primary → 本插件 `function` 与 `link` 同色。
+- 上游浅色 `syntaxKeyword` 与 `syntaxNumber` 都指向 `#d68c27` → 浅色下 `keyword` 与 `constant` 同色。
+
+> 上游文档页 <https://opencode.ai/docs/themes/> 只写格式与加载顺序，**不含任何内置主题的色值**；
+> 它唯一的色值表是 Nord 的示例，与 OpenCode 内置调色板无关，别拿它当来源。
+
 ## 已知边界
 
 - **CSS-module 类名是哈希的**（`o3BgMG_codeBody`）：所以用 `[class*="_codeBody"]` 匹配后缀。宿主改命名后缀时这几条失效，但 `pre`/`code` 两条仍在。
 - **Shiki 支持哪些语言与本插件无关** —— 这里只改颜色，不碰分词。
-- **OpenCode 那套是近似配色**：官方内置主题的十六进制值没有公开文档，这份是按它的 token 结构 + 品牌观感拼的。拿到官方色值后替换 `PALETTES.opencode` 即可。
-- 少数颜色相对原版做了亮度调整（One Dark 浅色版的 string 原色只有 3.07:1）。调整项由 `check-contrast.mjs` 逐条报出。
+- **OpenCode 那套已是官方原值**（2026-10 起，见上一节），不再是近似配色。
+- 少数颜色相对原版做了亮度调整（One Dark 浅色版的 string 原色只有 3.07:1；OpenCode 浅色有 4 项）。调整项由 `check-contrast.mjs` 逐条报出，并在上一节列成表。
 - 偏好存在 `localStorage`（`dsh-code-theme.preference`），换设备不跟随 —— 和 `dsh-theme-manager` 的做法一致。

@@ -248,50 +248,78 @@ window.__ModuleLoader__.load({
           diffDeleted: '#ffebe9',
         },
       },
-      // ⚠️ 近似配色：OpenCode 官方内置主题的十六进制值没有公开文档，这份是按它的
-      // token 结构（comment/keyword/function/variable/string/number/type/operator/
-      // punctuation）加品牌观感拼的。拿到官方色值后替换这一段即可。
+      // ── OpenCode：官方内置主题的真实色值（不再是近似）────────────────────
+      // 来源：github.com/anomalyco/opencode（sst/opencode 已 301 重定向到此），
+      //       默认分支是 dev（**没有 main**）。
+      //   v1 表 —— token 名与本插件一一对应：
+      //     packages/tui/src/theme/assets/opencode.json
+      //     blob e92dca8c2f11603fb050ac94dc59c9d7d0d290cd（5393 B）
+      //   v2 表 —— 当前 live 默认（$hue 引用式，另一套 schema）：
+      //     packages/tui/src/theme/assets/v2/opencode.json
+      //     blob 804f4957198725cf2cfca0d3924be7b93538f23b（8902 B）
+      //   两表解析后的语法色**完全一致** —— 互为交叉验证。
+      //   取回方式：raw.githubusercontent.com 在部分网络下不可达，改用 Contents API：
+      //     curl -s https://api.github.com/repos/anomalyco/opencode/contents/<path>
+      //   本地留档见 upstream/（含 blob 校验值与取回脚本）。
+      //
+      // DSH token ← OpenCode token：
+      //   constant ← syntaxNumber          string / string-expression ← syntaxString
+      //   comment  ← syntaxComment         keyword  ← syntaxKeyword
+      //   parameter← syntaxVariable        function ← syntaxFunction
+      //   punctuation ← syntaxPunctuation  link     ← markdownLink
+      // 注：上游 syntaxFunction 与 markdownLink 同指 primary，因此 function 与 link 同色
+      //     是有意为之，不是笔误。
+      //
+      // 深色全部是官方原值（每一项都 ≥4.5:1，无需调整）。
+      // 浅色有 4 个原值在白底上不达 WCAG AA，做了**最小幅度等比压暗**（保色相）——
+      // 这是本插件"手机上看得清"这条底线唯一的让步：
+      //   keyword/constant  #d68c27  2.75:1 → #a16a1d  4.57:1   (×0.755)
+      //   string            #3d9a57  3.52:1 → #35854b  4.56:1   (×0.867)
+      //   comment           #8a8a8a  3.45:1 → #757575  4.61:1   (×0.851)
+      //   function/link     #3b7dd8  4.11:1 → #3775cb  4.60:1   (×0.940)
+      // 想要 100% 原值：把下面 light 里这 4 处换回上面注释的官方色即可
+      // （换回后 node tools/check-contrast.mjs 会立刻报红，属预期）。
       opencode: {
-        label: 'OpenCode（近似）',
+        label: 'OpenCode',
         dark: {
-          background: '#0b0b0c',
-          foreground: '#e6e6e6',
-          constant: '#d2a8ff',
-          string: '#a6e3a1',
-          'string-expression': '#a6e3a1',
-          comment: '#8a8a8a',
-          keyword: '#ff8f40',
-          parameter: '#ffcc66',
-          function: '#8ab4f8',
-          punctuation: '#b0b0b0',
-          link: '#7fd1e0',
-          block: '#0b0b0c',
-          banner: '#141416',
-          inline: '#1e1e21',
-          selected: '#26262a',
-          unselected: '#0b0b0c',
-          diffAdded: '#1f3a25',
-          diffDeleted: '#43242a',
+          background: '#0a0a0a', // darkStep1
+          foreground: '#eeeeee', // darkStep12
+          constant: '#f5a742', // syntaxNumber ← darkOrange
+          string: '#7fd88f', // syntaxString ← darkGreen
+          'string-expression': '#7fd88f',
+          comment: '#808080', // syntaxComment ← darkStep11
+          keyword: '#9d7cd8', // syntaxKeyword ← darkAccent
+          parameter: '#e06c75', // syntaxVariable ← darkRed
+          function: '#fab283', // syntaxFunction ← darkStep9
+          punctuation: '#eeeeee', // syntaxPunctuation ← darkStep12
+          link: '#fab283', // markdownLink ← darkStep9（与 function 同色，见上）
+          block: '#0a0a0a', // background
+          banner: '#141414', // backgroundPanel ← darkStep2
+          inline: '#1e1e1e', // backgroundElement ← darkStep3
+          selected: '#282828', // darkStep4
+          unselected: '#0a0a0a', // darkStep1
+          diffAdded: '#20303b', // diffAddedBg
+          diffDeleted: '#37222c', // diffRemovedBg
         },
         light: {
-          background: '#fafafa',
-          foreground: '#1f2328',
-          constant: '#6b21a8',
-          string: '#166534',
-          'string-expression': '#166534',
-          comment: '#6b7280',
-          keyword: '#c2410c',
-          parameter: '#92400e',
-          function: '#1d4ed8',
-          punctuation: '#4b5563',
-          link: '#0e7490',
-          block: '#fafafa',
-          banner: '#f1f1f2',
-          inline: '#ececee',
-          selected: '#e3e3e6',
-          unselected: '#fafafa',
-          diffAdded: '#dff0d8',
-          diffDeleted: '#fbe4e6',
+          background: '#ffffff', // lightStep1
+          foreground: '#1a1a1a', // lightStep12
+          constant: '#a16a1d', // 官方 lightOrange #d68c27 → AA 调整
+          string: '#35854b', // 官方 lightGreen  #3d9a57 → AA 调整
+          'string-expression': '#35854b',
+          comment: '#757575', // 官方 lightStep11 #8a8a8a → AA 调整
+          keyword: '#a16a1d', // 官方 lightAccent #d68c27 → AA 调整
+          parameter: '#d1383d', // syntaxVariable ← lightRed（原值即达标）
+          function: '#3775cb', // 官方 lightStep9  #3b7dd8 → AA 调整
+          punctuation: '#1a1a1a', // syntaxPunctuation ← lightStep12
+          link: '#3775cb', // 官方 markdownLink ← lightStep9 → AA 调整
+          block: '#ffffff', // background
+          banner: '#fafafa', // backgroundPanel ← lightStep2
+          inline: '#f5f5f5', // backgroundElement ← lightStep3
+          selected: '#ebebeb', // lightStep4
+          unselected: '#ffffff', // lightStep1
+          diffAdded: '#d5e5d5', // diffAddedBg
+          diffDeleted: '#f7d8db', // diffRemovedBg
         },
       },
     };
