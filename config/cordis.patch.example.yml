@@ -82,8 +82,9 @@
         apiKeyEnv: OPENCODE_GO_API_KEY
         api: openai-completions
         baseURL: http://127.0.0.1:8318/opencode-go
-        headers:
-          x-opencode-session: 00000000-0000-0000-0000-000000000000
+        # 不要在这里写死 x-opencode-session：该 header 由插件
+        # dsh-opencode-session-header 按会话动态注入。写死会让所有机器共用同一个
+        # session，破坏 prompt cache 亲和性（也会把真实 session id 分发出去）。
         models:
           - id: deepseek-v4.1-flash
             name: DeepSeek V4.1 Flash
@@ -1437,7 +1438,7 @@
       - provider: xiaomi-token-plan-cn
         model: mimo-v2.6-pro
       - provider: deepseek
-        model: deepseek-v41-flash
+        model: deepseek-flash
       - provider: deepseek
         model: deepseek-v4-pro
       - provider: agentrouter

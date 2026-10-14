@@ -16,5 +16,9 @@ node_modules/
 *.tgz
 *.log
 
+# 编辑器与手工备份：`cp x x.bak` 出来的文件不进版本库
+*.bak*
+.DS_Store
+
 # 抓包产物（含提示词明文）：绝不入库、绝不入包
 plugins/provider-router/captures/

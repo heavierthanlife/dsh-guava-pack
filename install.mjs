@@ -13,7 +13,7 @@
  * 装完发现「面板在但没生效」。
  */
 
-import { existsSync, readFileSync, writeFileSync, copyFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, copyFileSync, readdirSync, statSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,11 +25,12 @@ const ok = (m) => console.log(`  \u2705 ${m}`);
 const bad = (m) => console.log(`  \u274c ${m}`);
 const info = (m) => console.log(`  \u2139\ufe0f  ${m}`);
 
-/** 包里必须存在的条目：patch + 每个插件的 package.json。 */
+/** 包里必须存在的条目：patch + 每个插件的 package.json 及其自身 patch 层。 */
 const REQUIRED = [
   'cordis.patch.yml',
   'package.json',
   'config/cordis.patch.example.yml',
+  'LICENSES/README.md',
   'ops/bootstrap-machine.sh',
   'ops/restart-dsh.sh',
   'ops/tailnet-url.sh',
@@ -38,21 +39,64 @@ const REQUIRED = [
   'ops/wsl.conf.example',
   'ops/NETWORK-NOTES.md',
   'plugins/dsh-mobile-ui/package.json',
+  'plugins/dsh-mobile-ui/cordis.patch.yml',
   'plugins/dsh-theme-manager/package.json',
+  'plugins/dsh-theme-manager/cordis.patch.yml',
   'plugins/dsh-theme-cyberpunk2077/package.json',
+  'plugins/dsh-theme-cyberpunk2077/cordis.patch.yml',
   'plugins/provider-router/package.json',
+  'plugins/provider-router/cordis.patch.yml',
   'plugins/provider-router/lib/router.mjs',
+  'plugins/provider-router/start.sh',
+  'plugins/provider-router/providers.example.json',
   'plugins/dsh-opencode-session-header/package.json',
+  'plugins/dsh-opencode-session-header/cordis.patch.yml',
   'plugins/dsh-context-guard/package.json',
+  'plugins/dsh-context-guard/cordis.patch.yml',
   'plugins/dsh-session-purge/package.json',
+  'plugins/dsh-session-purge/cordis.patch.yml',
   'plugins/dsh-session-purge/lib/core.mjs',
+  'plugins/dsh-session-purge/clean-roster.sh',
   'plugins/dsh-code-theme/package.json',
+  'plugins/dsh-code-theme/cordis.patch.yml',
   'plugins/dsh-code-theme/client.js',
   'plugins/dsh-code-theme/tools/check-contrast.mjs',
   'services/commandcode-bridge/server.mjs',
+  'services/commandcode-bridge/start.sh',
+  'services/commandcode-bridge/stop.sh',
+  'tools/sync-plugins.mjs',
+  'tools/sync-models.mjs',
   'patches/apply-required-array.sh',
   'patches/apply-anthropic-tool-fixes.sh',
 ];
+
+/**
+ * 内容文件的最小字节数：只查存在会被空文件 / 被截断的文件骗过。
+ * 阈值都取得远小于当前实际大小，仅用于抓「空壳」。
+ */
+const MIN_BYTES = {
+  'package.json': 200,
+  'cordis.patch.yml': 200,
+  'config/cordis.patch.example.yml': 5000,
+  'LICENSES/README.md': 200,
+  'ops/bootstrap-machine.sh': 1000,
+  'ops/restart-dsh.sh': 300,
+  'ops/NETWORK-NOTES.md': 500,
+  'plugins/provider-router/lib/router.mjs': 2000,
+  'plugins/provider-router/start.sh': 300,
+  'plugins/provider-router/providers.example.json': 100,
+  'plugins/dsh-session-purge/lib/core.mjs': 2000,
+  'plugins/dsh-session-purge/clean-roster.sh': 100,
+  'plugins/dsh-code-theme/client.js': 2000,
+  'plugins/dsh-code-theme/tools/check-contrast.mjs': 500,
+  'services/commandcode-bridge/server.mjs': 2000,
+  'services/commandcode-bridge/start.sh': 300,
+  'services/commandcode-bridge/stop.sh': 100,
+  'tools/sync-plugins.mjs': 1000,
+  'tools/sync-models.mjs': 2000,
+  'patches/apply-required-array.sh': 300,
+  'patches/apply-anthropic-tool-fixes.sh': 500,
+};
 
 /**
  * DSH 安装目录（这两个补丁打的是它下面的 node_modules，不是本包）。
@@ -77,60 +121,109 @@ const PATCHES = [
     name: 'pi-ai Anthropic 两处协议兜底',
     script: 'patches/apply-anthropic-tool-fixes.sh',
     file: join(DSH_HOME, 'node_modules/@earendil-works/pi-ai/dist/api/anthropic-messages.js'),
-    marker: 'enforceToolResultAdjacency',
+    // 脚本自己的 guard 要求 Fix A + Fix B 的标记**都**在才算打过；
+    // 只认一个的话，机器上只有 Fix A 时会被误判成「已打」，Fix B 永远补不上。
+    markers: ['enforceToolResultAdjacency', 'tool_use always trails'],
     why: '修 400 tool_use ids were found without tool_result blocks',
   },
 ];
 
+/** 统一取标记：单条用 marker，多条用 markers（全部存在才算已打）。 */
+function patchMarkers(p) {
+  return Array.isArray(p.markers) ? p.markers : [p.marker];
+}
+
 function patchState() {
   return PATCHES.map((p) => {
-    if (!existsSync(p.file)) return { ...p, state: 'missing' };
+    const markers = patchMarkers(p);
+    if (!existsSync(p.file)) return { ...p, markers, state: 'missing' };
     try {
-      const applied = readFileSync(p.file, 'utf8').includes(p.marker);
-      return { ...p, state: applied ? 'applied' : 'pending' };
+      const content = readFileSync(p.file, 'utf8');
+      const missing = markers.filter((m) => !content.includes(m));
+      return { ...p, markers, missing, state: missing.length === 0 ? 'applied' : 'pending' };
     } catch {
-      return { ...p, state: 'unreadable' };
+      return { ...p, markers, state: 'unreadable' };
     }
   });
 }
 
 function reportPatches() {
   console.log('\nnode_modules \u8865\u4e01\uff08\u4e0d\u6253\u5c31\u7528\u4e0d\u4e86 agentrouter\uff09\uff1a');
-  let bad = 0;
+  // 注意：不能叫 bad —— 那会遮蔽模块级的 bad() 报告函数。
+  let failures = 0;
   for (const p of patchState()) {
     if (p.state === 'applied') ok(`${p.name} \u5df2\u6253`);
-    else if (p.state === 'missing') { info(`${p.name}\uff1a\u627e\u4e0d\u5230 ${p.file}`); bad++; }
-    else { bad(`${p.name} \u672a\u6253 \u2014\u2014 ${p.why}`); bad++; }
+    else if (p.state === 'missing') { bad(`${p.name}\uff1a\u627e\u4e0d\u5230 ${p.file}`); failures++; }
+    else {
+      const lack = p.state === 'pending' && p.missing?.length ? `\uff08\u8fd8\u7f3a ${p.missing.join(' + ')}\uff09` : '';
+      bad(`${p.name} \u672a\u6253${lack} \u2014\u2014 ${p.why}`);
+      failures++;
+    }
   }
-  return bad;
+  return failures;
 }
 
 function applyPatches() {
   console.log('dsh-guava-pack \u8865\u4e01\n');
   console.log(`DSH_HOME = ${DSH_HOME}\n`);
+  let failures = 0;
   for (const p of patchState()) {
     const script = join(PACK_DIR, p.script);
     if (p.state === 'applied') { ok(`${p.name}\uff1a\u5df2\u6253\u8fc7\uff0c\u8df3\u8fc7`); continue; }
-    if (p.state === 'missing') { bad(`${p.name}\uff1a\u76ee\u6807\u6587\u4ef6\u4e0d\u5b58\u5728\uff08${p.file}\uff09\u2014\u2014 DSH_HOME \u5bf9\u5417\uff1f`); continue; }
+    if (p.state === 'missing') {
+      bad(`${p.name}\uff1a\u76ee\u6807\u6587\u4ef6\u4e0d\u5b58\u5728\uff08${p.file}\uff09\u2014\u2014 DSH_HOME \u5bf9\u5417\uff1f`);
+      failures++;
+      continue;
+    }
     try {
       const out = execFileSync('bash', [script], { encoding: 'utf8', env: { ...process.env, DSH_HOME } });
       ok(`${p.name}\uff1a${out.trim().split('\n').pop()}`);
     } catch (err) {
       bad(`${p.name} \u5931\u8d25\uff1a${(err.stdout || err.message || '').toString().trim().split('\n').pop()}`);
       info('\u811a\u672c\u81ea\u5e26\u9526\u70b9\u65ad\u8a00\uff1b\u62a5\u300c\u9526\u70b9\u672a\u627e\u5230\u300d\u901a\u5e38\u662f dsh \u4f9d\u8d56\u5347\u7ea7\u4e86\uff0c\u9700\u4eba\u5de5\u6838\u5bf9');
+      failures++;
     }
   }
-  console.log('\n\u6253\u5b8c\u540e\u91cd\u542f DSH \u751f\u6548\uff1asystemctl --user restart dsh.service');
+  if (failures === 0) {
+    console.log('\n\u6253\u5b8c\u540e\u91cd\u542f DSH \u751f\u6548\uff1asystemctl --user restart dsh.service');
+  } else {
+    console.log(`\n${failures} \u4e2a\u8865\u4e01\u672a\u80fd\u5e94\u7528 \u2014\u2014 \u5148\u89e3\u51b3\u4e0a\u9762\u7684\u95ee\u9898\uff08\u4f8b\u5982 DSH_HOME \u6307\u5411\uff09\uff0c\u4e0d\u8981\u76f4\u63a5\u91cd\u542f`);
+  }
+  return failures;
 }
 
 function check() {
   console.log('dsh-guava-pack \u5b89\u88c5\u81ea\u68c0\n');
   let failed = 0;
 
+  /** plugins/ 下的一级目录（每个插件一个）。 */
+  let pluginDirs = [];
+  try {
+    pluginDirs = readdirSync(join(PACK_DIR, 'plugins'), { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name)
+      .sort();
+  } catch (err) {
+    bad(`plugins/ \u8bfb\u4e0d\u4e86\uff1a${err.message}`);
+    failed++;
+  }
+
   console.log('\u5305\u5185\u5bb9\uff1a');
   for (const rel of REQUIRED) {
-    if (existsSync(join(PACK_DIR, rel))) ok(rel);
-    else { bad(`${rel} \u7f3a\u5931`); failed++; }
+    const abs = join(PACK_DIR, rel);
+    if (!existsSync(abs)) { bad(`${rel} \u7f3a\u5931`); failed++; continue; }
+    let size = 0;
+    try {
+      size = statSync(abs).size;
+    } catch (err) {
+      bad(`${rel} \u8bfb\u4e0d\u4e86\uff1a${err.message}`);
+      failed++;
+      continue;
+    }
+    if (size === 0) { bad(`${rel} \u662f\u7a7a\u6587\u4ef6`); failed++; continue; }
+    const min = MIN_BYTES[rel];
+    if (min && size < min) { bad(`${rel} \u53ea\u6709 ${size} \u5b57\u8282\uff08\u5e94 \u2265 ${min}\uff09\u2014\u2014 \u7591\u4f3c\u88ab\u622a\u65ad`); failed++; continue; }
+    ok(rel);
   }
 
   console.log('\nbundle \u58f0\u660e\uff1a');
@@ -151,15 +244,59 @@ function check() {
     failed++;
   }
 
+  console.log('\n\u5b50\u63d2\u4ef6\u7684 dsh.bundle.patch\uff08\u6bcf\u4e2a\u63d2\u4ef6\u81ea\u5df1\u7684 package.json\uff09\uff1a');
+  for (const dir of pluginDirs) {
+    const pkgRel = `plugins/${dir}/package.json`;
+    let sub;
+    try {
+      sub = JSON.parse(readFileSync(join(PACK_DIR, pkgRel), 'utf8'));
+    } catch (err) {
+      bad(`${pkgRel} \u8bfb\u4e0d\u4e86\uff1a${err.message}`);
+      failed++;
+      continue;
+    }
+    const subPatch = sub?.dsh?.bundle?.patch;
+    if (typeof subPatch !== 'string' || subPatch.trim() === '') {
+      bad(`${pkgRel} \u7f3a dsh.bundle.patch\uff0cDSH \u4e0d\u4f1a\u52a0\u8f7d\u8fd9\u4e2a\u5b50\u63d2\u4ef6`);
+      failed++;
+      continue;
+    }
+    const subTarget = join(PACK_DIR, 'plugins', dir, subPatch);
+    if (existsSync(subTarget)) ok(`${dir}: ${subPatch} \u2192 \u5b58\u5728`);
+    else { bad(`${dir}: dsh.bundle.patch=${subPatch} \u2192 \u76ee\u6807\u4e0d\u5b58\u5728`); failed++; }
+  }
+
   console.log('\npatch \u884c\uff08\u76f8\u5bf9\u8def\u5f84\u5e94\u951a\u5728 patch \u65c1\u8fb9\uff09\uff1a');
   try {
-    const yml = readFileSync(join(PACK_DIR, 'cordis.patch.yml'), 'utf8');
-    const names = [...yml.matchAll(/^\s*name:\s*['"]?(\.\/[^'"\s]+)['"]?\s*$/gm)].map((m) => m[1]);
-    if (names.length === 0) {
-      bad('\u6ca1\u627e\u5230\u76f8\u5bf9\u8def\u5f84\u884c');
+    const lines = readFileSync(join(PACK_DIR, 'cordis.patch.yml'), 'utf8').split(/\r?\n/);
+    const names = [];
+    let idCount = 0;
+    for (let i = 0; i < lines.length; i++) {
+      if (!/^\s*-\s*id:\s*\S/.test(lines[i])) continue;
+      idCount++;
+      // 「- id:」的下一行必须是带值的 name: —— 光有 name: 空行不能静默跳过。
+      const m = (lines[i + 1] ?? '').match(/^\s*name:\s*(.*)$/);
+      const value = m ? m[1].trim().replace(/^['"]|['"]$/g, '') : '';
+      if (value === '') {
+        bad(`\u7b2c ${i + 1} \u884c\u7684\u300c- id:\u300d\u540e\u9762\u6ca1\u6709\u5e26\u503c\u7684 name: \u884c`);
+        failed++;
+      } else {
+        names.push(value);
+      }
+    }
+    if (idCount === 0) {
+      bad('\u6ca1\u627e\u5230\u300c- id:\u300d\u6761\u76ee');
       failed++;
+    } else if (pluginDirs.length === 0) {
+      // plugins/ 读不到时前面已经报错，这里不重复报
+    } else if (idCount !== pluginDirs.length) {
+      bad(`cordis.patch.yml \u6709 ${idCount} \u4e2a\u300c- id:\u300d\u6761\u76ee\uff0cplugins/ \u4e0b\u6709 ${pluginDirs.length} \u4e2a\u76ee\u5f55 \u2014\u2014 \u4e24\u8fb9\u5fc5\u987b\u4e00\u4e00\u5bf9\u5e94`);
+      failed++;
+    } else {
+      ok(`\u6761\u76ee\u6570 ${idCount} == plugins/ \u76ee\u5f55\u6570 ${pluginDirs.length}`);
     }
     for (const rel of names) {
+      if (!rel.startsWith('./')) { info(`name: ${rel}\uff08\u975e\u76f8\u5bf9\u8def\u5f84\uff0c\u8df3\u8fc7\u5b58\u5728\u6027\u68c0\u67e5\uff09`); continue; }
       const target = rel.replace(/^\.\//, '');
       if (existsSync(join(PACK_DIR, target))) ok(`${rel} \u2192 \u5b58\u5728`);
       else { bad(`${rel} \u2192 \u76ee\u6807\u4e0d\u5b58\u5728`); failed++; }
@@ -187,6 +324,7 @@ function check() {
 function init() {
   const example = join(PACK_DIR, 'plugins/provider-router/providers.example.json');
   const target = join(PACK_DIR, 'plugins/provider-router/providers.json');
+  let failures = 0;
   if (existsSync(target)) {
     info(`providers.json \u5df2\u5b58\u5728\uff0c\u4e0d\u8986\u76d6\uff1a${target}`);
   } else if (existsSync(example)) {
@@ -195,6 +333,7 @@ function init() {
     info('\u91cc\u9762\u7684 my-cloud-llm \u662f\u5360\u4f4d\u793a\u4f8b\uff0c\u8bf7\u6309\u9700\u6539\u6210\u4f60\u7684\u4e0a\u6e38');
   } else {
     bad('\u627e\u4e0d\u5230 providers.example.json');
+    failures++;
   }
 
   console.log(`
@@ -213,8 +352,9 @@ function init() {
   4) \u9700\u8981\u7ffb\u5899\u65f6\u8bbe DSH_SSR_PROXY\uff1b\u6ca1\u6709\u5c31\u4e0d\u7ba1\uff08\u76f4\u8fde\u7167\u6837\u5de5\u4f5c\uff09
   5) \u9700\u8981 CommandCode \u5c31\u8bbe COMMANDCODE_API_KEY \u5e76\u8d77 services/commandcode-bridge/start.sh
 `);
+  return failures === 0 ? 0 : 1;
 }
 
-if (args.has('--patch')) applyPatches();
-else if (args.has('--init')) init();
+if (args.has('--patch')) process.exit(applyPatches());
+else if (args.has('--init')) process.exit(init());
 else process.exit(check());

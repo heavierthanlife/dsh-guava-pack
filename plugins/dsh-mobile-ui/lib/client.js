@@ -83,7 +83,11 @@ window.__ModuleLoader__.load({
      * ---------------------------------------------------------------- */
 
     function readSettings() {
-      var out = { fontPx: DEFAULTS.fontPx, press: DEFAULTS.press, force: DEFAULTS.force };
+      // 从 DEFAULTS 起步：enterNewline / rememberLocale / onlineWatchdog 三个键
+      // 在旧版本里只有 localStorage 里存过才会出现，导致全新安装时它们是 undefined
+      // （面板勾选框 checked={undefined} 显示"关闭"，而功能判定用的是 `!== false`，
+      // 实际是开启）。逐键校验/夹取逻辑保持不变。
+      var out = Object.assign({}, DEFAULTS);
       try {
         var raw = localStorage.getItem(STORE_KEY);
         if (raw) {
@@ -170,13 +174,26 @@ window.__ModuleLoader__.load({
     function installOnlineWatchdog(ctx, isEnabled) {
       var probing = false;
       var disposers = [];
-      var host = null;
-      try { host = ctx.remote && ctx.remote.$host; } catch (e) {}
+      // 连接状态与重连都来自 `connection` 服务（@deepseek-ai/dsh-client-connection：
+      // state.getSnapshot() / state.subscribe() / reconnect()）。
+      // 之前读的 ctx.remote.$host 只有 { home, isLoopback }，既没有 state 也没有
+      // reconnect —— 于是 phaseOf() 永远返回 null，探活与诊断全是死的。
+      // 服务可能比本插件晚就绪（connection 由 client-connection 的 apply 里 provide），
+      // 所以懒取并缓存，订阅也延后到服务可用时再挂一次。
+      var conn = null;
+      var connOf = function () {
+        if (!conn) {
+          try { conn = ctx.get ? ctx.get('connection') : null; } catch (e) {}
+        }
+        return conn;
+      };
+      var stateWatched = false;
 
       /** 连接状态：'connected' | 'connecting' | 'disconnected'（兼容对象或字符串两种形状）。 */
       var phaseOf = function () {
         try {
-          var raw = host && host.state && host.state.getSnapshot ? host.state.getSnapshot() : null;
+          var c = connOf();
+          var raw = c && c.state && c.state.getSnapshot ? c.state.getSnapshot() : null;
           if (raw && typeof raw === 'object') return raw.phase || raw.status || raw.state || null;
           return typeof raw === 'string' ? raw : null;
         } catch (e) { return null; }
@@ -184,17 +201,22 @@ window.__ModuleLoader__.load({
       onlineStats.phaseOf = phaseOf;
 
       // 断连次数统计（诊断用，只读不干预）
-      try {
-        if (host && host.state && typeof host.state.subscribe === 'function') {
+      var watchState = function () {
+        if (stateWatched) return;
+        var c = connOf();
+        if (!c || !c.state || typeof c.state.subscribe !== 'function') return;
+        stateWatched = true;
+        try {
           var last = phaseOf();
-          disposers.push(host.state.subscribe(function () {
+          disposers.push(c.state.subscribe(function () {
             var now = phaseOf();
             if (now === last) return;
             if (now === 'disconnected') onlineStats.disconnects++;
             last = now;
           }));
-        }
-      } catch (e) {}
+        } catch (e) { stateWatched = false; }
+      };
+      watchState();
 
       /**
        * 探活成功后的唤醒：补发标准 online 事件（把 networkAvailable 翻回 true），
@@ -205,11 +227,15 @@ window.__ModuleLoader__.load({
         onlineStats.recoveries++;
         onlineStats.lastAt = Date.now();
         try { window.dispatchEvent(new Event('online')); } catch (e) {}
-        try { if (host && typeof host.reconnect === 'function') host.reconnect(); } catch (e) {}
+        try {
+          var c = connOf();
+          if (c && typeof c.reconnect === 'function') c.reconnect();
+        } catch (e) {}
       };
 
       var verify = function () {
         if (probing || !isEnabled()) return;
+        watchState(); // 服务晚就绪时在这里补挂状态订阅
         // 只在「自称离线」或「确实处于断连」时才发请求，平时零开销
         if (navigator.onLine !== false && phaseOf() !== 'disconnected') return;
         probing = true;

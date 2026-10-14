@@ -5,16 +5,19 @@ After=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/guava5tar_/dsh
+# `%h` 是 systemd 的"用户家目录"说明符（用户级单元里可用），所以这份模板不再写死
+# 用户名 —— 换机器直接能用，不需要 bootstrap 再 sed 一遍。
+# 需要 DSH 装在别处时，设 `systemctl --user edit dsh.service` 覆盖 WorkingDirectory/ExecStart。
+WorkingDirectory=%h/dsh
 # 启动器负责：载入 .bashrc 里的 API key、追加 --trusted-host（Tailscale 域名）、
 # 拉起 commandcode 桥接与 provider-router 路由代理。
-ExecStart=/home/guava5tar_/dsh/dsh web --no-open
+ExecStart=%h/dsh/dsh web --no-open
 # 崩溃自动拉起
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=25
-StandardOutput=append:/home/guava5tar_/dsh/logs/web-run.log
-StandardError=append:/home/guava5tar_/dsh/logs/web-run.log
+StandardOutput=append:%h/dsh/logs/web-run.log
+StandardError=append:%h/dsh/logs/web-run.log
 
 [Install]
 WantedBy=default.target

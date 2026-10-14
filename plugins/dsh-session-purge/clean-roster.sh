@@ -12,11 +12,16 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLI="$HERE/lib/core.mjs"
 
+# 无论中间哪一步失败，都要把服务拉回来 —— 否则一次失败就留下一个停着的 dsh。
+trap 'systemctl --user start dsh.service >/dev/null 2>&1 || true' EXIT
+
 echo "==> 停止 dsh.service"
 systemctl --user stop dsh.service
 
-echo "==> 清理花名册残留（只改 workspace.json，不删任何会话数据）"
-node "$CLI" --confirm --clean-roster
+# --roster-only 是必须的：不加它的话，没有 --id 就等于"清理全部归档会话"，
+# 那会把所有归档会话一起移走，而本脚本的定位只是摘掉花名册里的残留 id。
+echo "==> 清理花名册残留（--roster-only：只改 workspace.json，不删任何会话数据）"
+node "$CLI" --confirm --roster-only
 
 echo "==> 启动 dsh.service"
 systemctl --user start dsh.service

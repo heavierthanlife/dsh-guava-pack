@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 # 在**新机器**上把 dsh 装到与本机一致（幂等；sudo 步骤会先问）。
 #   DSH_REPO_URL=git@github.com:<you>/<repo>.git ./bootstrap-machine.sh
+#
+# 位置：本脚本是 **DSH 主仓库根目录** 的安装器 —— 它 clone DSH 仓库、对仓库根与
+# profiles/web 各跑 pnpm install、装 systemd 服务。pack 的 ops/ 里是同一份的副本，
+# 从那里跑也可以（资产文件会在"仓库根布局"与"ops/ 布局"之间自动找），但它装的是
+# **DSH 本身**，不是 pack；pack 的安装方式是把 dsh-guava-pack 加进已有 profile。
 set -uo pipefail
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 say()  { printf '\033[1m==> %s\033[0m\n' "$*"; }
 warn() { printf '\033[33m[warn] %s\033[0m\n' "$*"; }
 ask_sudo() {  # ask_sudo <说明> <命令...>
@@ -9,6 +15,16 @@ ask_sudo() {  # ask_sudo <说明> <命令...>
   printf '\033[1m[sudo] %s\033[0m\n   想执行：%s\n   现在执行吗？[y/N] ' "$desc" "$*"
   read -r a </dev/tty || a=n
   case "$a" in y|Y) sudo "$@" ;; *) warn "跳过：$desc"; return 1 ;; esac
+}
+# 在若干候选路径里找第一个存在的文件；都不存在就返回最后一个（让报错直白些）。
+# 为什么要它：本脚本既可能躺在 DSH 仓库根，也可能是 pack 的 ops/ 副本，两边的
+# 资产目录名不同（machine/ vs ops/、systemd/ vs ops/）。
+find_asset() {  # find_asset <path...>
+  local last=""
+  for last in "$@"; do
+    [ -f "$last" ] && { printf '%s' "$last"; return 0; }
+  done
+  printf '%s' "$last"
 }
 
 # ── WSL interop 探测：Windows 的 node/npm 透传进来时，它装的包 WSL 跑不了 ──
@@ -25,11 +41,15 @@ is_interop() {
   head -c2 "$p" 2>/dev/null | grep -q 'MZ' && return 0
   return 1
 }
-npm_prefix_is_windows() { case "$("$NPM" prefix -g 2>/dev/null)" in [A-Za-z]:*) return 0 ;; *) return 1 ;; esac; }
+npm_prefix_is_windows() { case "$("${NPM:-npm}" prefix -g 2>/dev/null)" in [A-Za-z]:*) return 0 ;; *) return 1 ;; esac; }
 # PATH 里可能有 Windows 的 npm 排在前面（WSL interop）-> 一律用 Linux node 旁边的那个
 resolve_npm() {
-  local nd; nd="$(command -v node 2>/dev/null)" || return 1
-  if [ -x "${nd%/*}/npm" ]; then NPM="${nd%/*}/npm"; else NPM="npm"; fi
+  # 无论成败都要给 NPM 赋值：本脚本是 `set -u`，后面几处 `"$NPM"` 若在失败路径上
+  # 引用未定义变量，会直接 `unbound variable` 中止（而那条路径正是"新机没装 Linux Node"，
+  # 也就是最需要它继续走安装流程的场景）。
+  local nd=""
+  nd="$(command -v node 2>/dev/null)" || nd=""
+  if [ -n "$nd" ] && [ -x "${nd%/*}/npm" ]; then NPM="${nd%/*}/npm"; else NPM="${NPM:-npm}"; fi
   case "$("$NPM" prefix -g 2>/dev/null)" in [A-Za-z]:*) return 1 ;; esac
   return 0
 }
@@ -49,8 +69,19 @@ KEYS="MIMO_API_KEY XIAOMI_TOKEN_PLAN_CN_API_KEY DEEPSEEK_API_KEY OPENCODE_GO_API
 # ── 1) WSL: systemd + 默认用户 ────────────────────────────────────────
 if ! grep -q '^systemd=true' /etc/wsl.conf 2>/dev/null; then
   say "启用 WSL systemd"
-  ask_sudo "写入 /etc/wsl.conf" tee /etc/wsl.conf < machine/wsl.conf.example >/dev/null
-  warn "改 /etc/wsl.conf 后需要 wsl --shutdown 再进（在 Windows 里执行）"
+  # 资产在两种布局下位置不同：DSH 仓库根是 machine/，pack 的 ops/ 副本就在旁边。
+  WSL_CONF="$(find_asset "$SELF_DIR/wsl.conf.example" "$TARGET/machine/wsl.conf.example")"
+  if [ ! -f "$WSL_CONF" ]; then
+    warn "找不到 wsl.conf.example（试过 $SELF_DIR/ 与 $TARGET/machine/），跳过这一步"
+  else
+    # 模板里的 default= 是占位用户名，必须替换成本机 $USER —— 否则另一台机器会把
+    # 默认 WSL 用户设成一个不存在的账号，直接进不去。
+    WSL_TMP="$(mktemp)"
+    sed "s/^default=.*/default=$USER/" "$WSL_CONF" > "$WSL_TMP"
+    ask_sudo "写入 /etc/wsl.conf（默认用户 = $USER）" tee /etc/wsl.conf < "$WSL_TMP" >/dev/null
+    rm -f "$WSL_TMP"
+    warn "改 /etc/wsl.conf 后需要 wsl --shutdown 再进（在 Windows 里执行）"
+  fi
 fi
 command -v systemctl >/dev/null && systemctl --user >/dev/null 2>&1 && say "systemd --user 可用 ✓" || warn "systemd --user 不可用（上面那步没生效？）"
 
@@ -72,8 +103,13 @@ fi
 
 if ! resolve_npm; then
   warn "PATH 里的 npm 是 Windows 的（前缀 $("$NPM" prefix -g 2>/dev/null)）—— WSL 里装不了包"
-  warn "  Linux node: $(command -v node)；它旁边有 npm 吗？ $( [ -x "$(dirname "$(command -v node)")/npm" ] && echo 有 || echo '没有（需 sudo apt-get install -y npm，或用 corepack）' )"
-  warn "  临时绕过：export PATH=\"$(dirname "$(command -v node)"):\$PATH\"（让 Linux npm 排前面）后重跑"
+  NODE_BIN="$(command -v node 2>/dev/null || true)"
+  if [ -n "$NODE_BIN" ]; then
+    warn "  Linux node: $NODE_BIN；它旁边有 npm 吗？ $( [ -x "$(dirname "$NODE_BIN")/npm" ] && echo 有 || echo '没有（需 sudo apt-get install -y npm，或用 corepack）' )"
+    warn "  临时绕过：export PATH=\"$(dirname "$NODE_BIN"):\$PATH\"（让 Linux npm 排前面）后重跑"
+  else
+    warn "  连 node 都没有 —— 先装 Linux Node 22 再重跑"
+  fi
   exit 1
 fi
 say "npm: $NPM（$("$NPM" --version 2>/dev/null || echo '?')）"
@@ -179,11 +215,24 @@ cd "$TARGET" || exit 1
 say "submodule update --init --recursive（赛博主题是独立仓库）"
 git submodule update --init --recursive
 
+# 布局守卫：本脚本装的是 **DSH 主仓库**，不是 pack。若 $TARGET 里既没有 profiles/
+# 也没有 dsh 入口，说明 DSH_REPO_URL 指错了（比如指到了 pack），再往下只会以
+# "pnpm install 找不到 package.json" 这种含糊方式失败，且因为本脚本没有 set -e，
+# 它还会一路跑到最后、以 0 退出。这里直接说清楚。
+if [ ! -d profiles ] && [ ! -f dsh ]; then
+  warn "$TARGET 看起来不是 DSH 主仓库（既没有 profiles/ 也没有 dsh 入口）"
+  warn "  本脚本是 **DSH 主仓库根目录** 的安装器：它 clone DSH、对仓库根与 profiles/web"
+  warn "  跑 pnpm install、装 systemd 服务。pack 的 ops/ 里只是同一份脚本的副本。"
+  warn "  pack 的安装方式是：把 dsh-guava-pack 作为 bundle 加进已有 profile，不是跑这个脚本。"
+  exit 1
+fi
+
 # ── 3b) 用户名不同：profile 里是 link:/home/<user>/dsh/... 绝对路径 ──
 if [ "$HOME" != "/home/guava5tar_" ]; then
   say "重写绝对路径 /home/guava5tar_ → $HOME（profiles/*/package.json 等）"
-  sed -i "s#/home/guava5tar_#$HOME#g" profiles/*/package.json profiles/*/pnpm-lock.yaml restart-dsh.sh systemd/dsh.service 2>/dev/null
-  warn "这会让本机工作区变脏；dsh-sync 会因此拒绝 pull —— 建议两台机器用同一个 Linux 用户名"
+  sed -i "s#/home/guava5tar_#$HOME#g" profiles/*/package.json profiles/*/pnpm-lock.yaml restart-dsh.sh systemd/dsh.service ops/restart-dsh.sh ops/dsh.service 2>/dev/null
+  warn "这会让本机工作区变脏 —— 建议两台机器用同一个 Linux 用户名"
+  warn "（dsh-sync 已退役：它现在直接 exit 1 并打印迁移步骤，所以这里不再提它拒绝 pull）"
 fi
 
 # ── 4) 依赖 ─────────────────────────────────────────────────────────
@@ -200,20 +249,26 @@ missing=""
 for k in $KEYS; do grep -qE "^export $k=.+" "$HOME/.bashrc" 2>/dev/null || missing="$missing $k"; done
 if [ -n "$missing" ]; then
   warn "~/.bashrc 缺少这些 key（需要你手填）：$missing"
-  printf '   模板：%s\n' "$TARGET/machine/bashrc.dsh.example"
-  printf '   追加：cat %s >> ~/.bashrc  # 然后填值\n' "$TARGET/machine/bashrc.dsh.example"
+  BASHRC_EX="$(find_asset "$TARGET/machine/bashrc.dsh.example" "$SELF_DIR/bashrc.dsh.example")"
+  printf '   模板：%s\n' "$BASHRC_EX"
+  printf '   追加：cat %s >> ~/.bashrc  # 然后填值\n' "$BASHRC_EX"
 else
   say "~/.bashrc 里 7 把 key 齐了 ✓"
 fi
 
 # ── 6) systemd 服务 + linger ─────────────────────────────────────────
 mkdir -p ~/.config/systemd/user
-cp systemd/dsh.service ~/.config/systemd/user/dsh.service
-sed -i "s#/home/guava5tar_#$HOME#g" ~/.config/systemd/user/dsh.service   # 用户名不同也能用
-systemctl --user daemon-reload
-systemctl --user enable --now dsh.service
-say "dsh.service: $(systemctl --user is-active dsh.service)"
-[ "$(loginctl show-user "$USER" -p Linger --value 2>/dev/null)" = yes ] || ask_sudo "开启 linger（WSL 一启动就自起）" loginctl enable-linger "$USER"
+SERVICE_SRC="$(find_asset "$TARGET/systemd/dsh.service" "$SELF_DIR/dsh.service")"
+if [ ! -f "$SERVICE_SRC" ]; then
+  warn "找不到 dsh.service（试过 $TARGET/systemd/ 与 $SELF_DIR/）—— 跳过服务安装"
+else
+  cp "$SERVICE_SRC" ~/.config/systemd/user/dsh.service
+  sed -i "s#/home/guava5tar_#$HOME#g" ~/.config/systemd/user/dsh.service   # 用户名不同也能用
+  systemctl --user daemon-reload
+  systemctl --user enable --now dsh.service
+  say "dsh.service: $(systemctl --user is-active dsh.service)"
+  [ "$(loginctl show-user "$USER" -p Linger --value 2>/dev/null)" = yes ] || ask_sudo "开启 linger（WSL 一启动就自起）" loginctl enable-linger "$USER"
+fi
 
 # ── 7) 自检 ─────────────────────────────────────────────────────────
 sleep 3
@@ -221,4 +276,5 @@ say "自检"
 printf '   dsh --version : %s\n' "$(./dsh --version 2>&1 | tail -1)"
 printf '   端口          : %s\n' "$(ss -tln 2>/dev/null | grep -cE ':3080|:8317|:8318') / 3"
 printf '   启动错误      : %s\n' "$(grep -icE 'did not activate|startup failed' logs/web-run.log 2>/dev/null)"
-./tailnet-url.sh 2>/dev/null | sed 's/^/   /' | head -6
+TAILNET_URL_SH="$(find_asset "$TARGET/tailnet-url.sh" "$SELF_DIR/tailnet-url.sh")"
+[ -f "$TAILNET_URL_SH" ] && "$TAILNET_URL_SH" 2>/dev/null | sed 's/^/   /' | head -6

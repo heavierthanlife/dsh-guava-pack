@@ -176,6 +176,38 @@ function tailnetHost() {
 }
 
 /**
+ * 从请求本身推导它的 origin：优先浏览器给的 `Origin` 头，否则按 `Host` +
+ * socket 是否加密拼。拿不到就返回 null。
+ */
+function requestOrigin(req) {
+  const raw = req.headers.origin;
+  if (typeof raw === 'string' && raw !== '' && raw !== 'null') {
+    try {
+      return new URL(raw).origin;
+    } catch {
+      /* 非法 Origin 头：退回 Host */
+    }
+  }
+  const scheme = req.socket && req.socket.encrypted ? 'https' : 'http';
+  const host = req.headers.host;
+  if (typeof host === 'string' && host !== '') return `${scheme}://${host}`;
+  return null;
+}
+
+/**
+ * 只比较 authority（hostname:port），**不比较 scheme**。
+ * 反代终止 TLS 时 `req.socket.encrypted` 是 false，scheme 推不准；而 Host 已经被
+ * `requestRejection` 的围栏校验过，按 authority 比较才是可靠的判据。
+ */
+function sameAuthority(a, b) {
+  try {
+    return new URL(a).host === new URL(b).host;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Required Host services.
  *   webServer  — the HTTP route surface this plugin mounts on.
  *   connection — `authenticatedUrl()` (the fresh process token) and
@@ -187,7 +219,10 @@ function tailnetHost() {
 export const inject = ['webServer', 'connection'];
 
 export function apply(ctx) {
-  ctx.webServer.register({
+  // 挂在 effect 上：`webServer.register()` 返回 disposer，不登记的话插件重挂
+  // （Plugin Manager 禁用再启用、配置变更 re-apply）会留下旧路由 —— 再注册直接抛
+  // `duplicate prefix route`，而真正生效的是旧 handler 的闭包（旧 settings/旧 ctx）。
+  ctx.effect(() => ctx.webServer.register({
     kind: 'prefix',
     path: ROUTE_PATH,
     handler: async (req, res) => {
@@ -240,13 +275,24 @@ export function apply(ctx) {
             result = { ok: true, value: await resetModes() };
             break;
           case 'getToken': {
-            // The page passes its own origin so the scheme (http on loopback,
-            // https on the tailnet) is preserved; falling back to the request's
-            // Host keeps a plain curl usable.
-            const origin =
+            // 页面把自己的 origin 传上来，好让 scheme 保留（loopback 上是 http、
+            // tailnet 上是 https）。但**只采信与请求同 authority 的 origin** ——
+            // 以前直接采信 payload.origin，于是任何同源脚本（含任何客户端插件）
+            // 都能铸造 `https://evil.com/?token=<真 token>`；而进程 token 比
+            // SameSite=Strict 的 cookie 更强（可跨 origin 用，直到重启）。
+            const own = requestOrigin(req);
+            const asked =
               body.payload && typeof body.payload.origin === 'string' && body.payload.origin
                 ? body.payload.origin
-                : 'http://' + (req.headers.host || '127.0.0.1:3080');
+                : null;
+            let origin = own ?? 'http://127.0.0.1:3080';
+            if (asked !== null && own !== null && sameAuthority(asked, own)) {
+              origin = asked;
+            } else if (asked !== null && own !== null) {
+              console.log(
+                `[dsh-provider-router] getToken：忽略不同源的 origin=${asked}（请求自身是 ${own}）`,
+              );
+            }
             let tokenizedUrl = null;
             try {
               tokenizedUrl = ctx.connection.authenticatedUrl(origin.replace(/\/+$/, '') + '/');
@@ -278,7 +324,7 @@ export function apply(ctx) {
         }
       }
     },
-  });
+  }), 'dsh-provider-router: route');
 
   // Seed mode.json so the routing proxy and the Client agree from the start.
   ctx.effect(() => {
