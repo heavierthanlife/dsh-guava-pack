@@ -1249,7 +1249,44 @@ window.__ModuleLoader__.load({
 				// (switching a model, saving any preference, …). Treating that as a
 				// user switch is what used to drop the theme; a missing value means
 				// "no choice recorded yet", and ours is the default.
+				//
+				// …but that reasoning only holds while the store actually WORKS.
+				// `setTheme(pluginThemeId)` never writes to the host settings
+				// document (only light/dark/system are persistable there — see
+				// dsh-client-ui-theme `isThemePreference`), so localStorage is the
+				// ONLY durable record that the user wants us. When storage is
+				// unavailable (Safari "block all cookies", some in-app webviews —
+				// exactly the phone case) there is no such record, and "unreadable
+				// ⇒ ours" turns every theme/change into a re-assert: the user can
+				// never switch away.
+				function storageUsable() {
+					try {
+						const probe = "__dsh_cyberpunk_probe__";
+						localStorage.setItem(probe, "1");
+						const ok = localStorage.getItem(probe) === "1";
+						localStorage.removeItem(probe);
+						return ok;
+					} catch (e) {
+						return false;
+					}
+				}
+				const canStore = storageUsable();
+
+				/**
+				 * Should we be the active theme right now?
+				 *
+				 * - storage works → keep the original semantics: no record means the
+				 *   user never picked anything else, so we are the default (this is
+				 *   what stops unrelated settings writes from dropping the theme).
+				 * - storage is unusable → do NOT impersonate the default; take over
+				 *   only while the theme service's preference is genuinely us. The
+				 *   cost is that an unrelated settings write still falls back to
+				 *   light/dark/system (that is what the host document records), but
+				 *   the user can always switch away — and always switch back, since
+				 *   picking us makes `isActive()` true.
+				 */
 				function wantUs() {
+					if (!canStore) return isActive();
 					const s = readStoredPref();
 					return s === null || s === "" || s === THEME_ID;
 				}

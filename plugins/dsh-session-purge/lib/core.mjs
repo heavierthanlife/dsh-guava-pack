@@ -41,6 +41,7 @@ import {
   openSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   renameSync,
   rmSync,
   statSync,
@@ -323,6 +324,42 @@ export function attachmentPath(home, id) {
 }
 
 /**
+ * 把工作目录解析成**真实路径**（符号链接展开）。
+ *
+ * 为什么清单要写到真实路径：`entry.cwd` 来自会话日志记录的工作目录，路径中间任何
+ * 一环都可能是符号链接（WSL 下 `/home/x/proj → /mnt/d/proj` 很常见）。
+ * `writeFileSync` 会跟随符号链接，于是"写到工作目录"实际落到链接指向的地方 ——
+ * 解析成真实路径后，写的位置就是日志里那个目录**本体**。
+ *
+ * @returns {string|null} 存在且确为目录时的真实路径；否则 null。
+ */
+function realDir(path) {
+  if (typeof path !== 'string' || path === '') return null;
+  try {
+    const real = realpathSync(path);
+    return statSync(real).isDirectory() ? real : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 产出清单该写到哪。
+ *
+ * 工作目录拿不到（已被删除 / 不是目录 / 解析失败）时落到 `.purge-trash/`，
+ * 与旧行为一致 —— 清单不能因为工作目录没了就不写。
+ *
+ * @returns {{path: string, resolved: boolean}} `resolved=false` 表示落到了 trash。
+ */
+export function manifestPathFor(entry, home = dshHome()) {
+  const dir = realDir(entry.cwd);
+  if (dir !== null) {
+    return { path: join(dir, `PURGED-${entry.id.replace(/^session-/, '').slice(0, 8)}.md`), resolved: true };
+  }
+  return { path: join(home, '.purge-trash', `${entry.id}.md`), resolved: false };
+}
+
+/**
  * 生成计划（只读，不写任何东西）。
  *
  * @param options.ids - 明确要清的会话 id；缺省用已归档的那些。
@@ -459,12 +496,16 @@ export function executePlan(
   if (!rosterOnly) {
     for (const entry of plan.entries) {
       const moved = [];
-      const manifestTarget = entry.cwd
-        ? join(entry.cwd, `PURGED-${entry.id.replace(/^session-/, '').slice(0, 8)}.md`)
-        : join(plan.home, '.purge-trash', `${entry.id}.md`);
+      // 与 renderPlan 共用同一个解析函数，预览与实做不会跑偏。
+      const manifestTarget = manifestPathFor(entry, plan.home).path;
       let manifestWritten = false;
       let manifestError = null;
       try {
+        // 先把清单的父目录建出来。落到 `.purge-trash/` 时那目录**还不存在**
+        // （trashRoot 原来是在这次写入之后才 mkdir 的），于是"工作目录不可用 →
+        // 清单落回 trash"这条兜底路径一直以 ENOENT 静默失败 —— 也就是说
+        // "删前写一份产出清单"的承诺，对任何没记录工作目录的会话都是空头支票。
+        mkdirSync(dirname(manifestTarget), { recursive: true });
         writeFileSync(manifestTarget, renderManifest(entry, plan), 'utf8');
         manifestWritten = true;
         moved.push(manifestTarget);
@@ -580,7 +621,8 @@ export function renderPlan(plan, { attachments = false } = {}) {
     lines.push(`   目录      ${e.dir}  (${human(e.bytes)})`);
     lines.push(`   投影缓存  ${existsSync(e.projCache) ? human(e.projCacheBytes) : '无'}`);
     lines.push(`   工作目录  ${e.cwd || '(未记录)'}`);
-    lines.push(`   清单将写到 ${e.cwd ? join(e.cwd, `PURGED-${e.id.replace(/^session-/, '').slice(0, 8)}.md`) : '(DSH_HOME/.purge-trash)'}`);
+    const manifest = manifestPathFor(e, plan.home);
+    lines.push(`   清单将写到 ${manifest.path}${manifest.resolved ? '' : '（工作目录不可用，落到 trash）'}`);
     lines.push(`   产出文件  ${e.files.length} 个`);
     if (attachments) {
       lines.push(
