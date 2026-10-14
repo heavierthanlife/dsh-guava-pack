@@ -54,6 +54,25 @@ body[data-ds-dark-theme] { --shiki-token-keyword:#faa2c1; … }   /* 深色 */
 
 **侧栏的文件查看器、日志、JSON 面板走的是另一条路**：它们用的是 `--dsw-font-mono`，而宿主里**没有任何地方定义它** —— 所以它们的 `var(--dsw-font-mono, ui-monospace…)` 永远取回退值。开启字体时插件会额外写一条 `:root:root{--dsw-font-mono:…}`（双写 `:root` 提权），一次性覆盖这些等宽区域。`--dsw-font-mono` 的消费方只有 4 个包（文件查看器 / 日志 / 插件管理 / agent preset），全是等宽技术区域，所以设成全局是安全的。
 
+### 字体变量全景（以后遇到"某处字体没变"先看这里）
+
+全项目被 `var()` 消费、但**无人定义**的字体变量（即永远走回退值）：
+
+| 变量 | 消费方 | 本插件 |
+|---|---|---|
+| `--dsw-font-mono` | 文件查看器 / 日志 / 插件管理 / agent preset | ✅ 设置 |
+| `--dsh-font-mono` | cordis 面板的 row id（**不是代码**） | ❌ 有意不动 |
+| `--dsw-font` | 正文（`var(--dsw-font, inherit)`，34 处走 `--dsw-font-family`） | ❌ 动了会改正文 |
+| `--dsh-content-font-size` / `--dsw-font-sm-13` / `--min-font-size` | 字号，不是字体族 | ❌ 无关 |
+
+自查命令（在 `node_modules/@deepseek-ai` 下跑）：
+
+```sh
+grep -rhoE 'var\(--[a-z0-9-]*font[a-z0-9-]*' */lib/*.js | sed 's/var(//' | sort -u > /tmp/u
+grep -rhoE '\-\-[a-z0-9-]*font[a-z0-9-]* *:' */lib/*.js | sed 's/ *:$//' | sort -u > /tmp/d
+comm -23 /tmp/u /tmp/d      # 用了但没人定义 = 永远走回退
+```
+
 ## 加一套调色板
 
 1. 在 `client.js` 的 `PALETTES` 里加一项（必须同时给 `light` 与 `dark`，宿主要求成对）
