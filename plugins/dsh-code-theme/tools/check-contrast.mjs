@@ -92,6 +92,15 @@ function checkCss() {
   let failed = 0;
   let combos = 0;
 
+  // 防呆：源文件里的调色板 label 数量必须等于解析出的键数量。
+  // 曾经把新调色板插进了别的对象（锚点选错）—— 语法合法、node --check 不报、
+  // 但静默失效。这一条专门拦这种情况。
+  const labelCount = (readFileSync(CLIENT, 'utf8').match(/^\s*label: '/gm) ?? []).length;
+  if (labelCount !== PALETTE_IDS.length) {
+    failed += 1;
+    console.log(`  ❌ 源文件有 ${labelCount} 个调色板 label，但 PALETTES 只解析出 ${PALETTE_IDS.length} 个 —— 有调色板没进对象`);
+  }
+
   for (const id of PALETTE_IDS) {
     for (const scheme of ['auto', 'dark', 'light']) {
       for (const font of [true, false]) {
