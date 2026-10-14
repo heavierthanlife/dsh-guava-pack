@@ -66,6 +66,64 @@ function loadPalettes() {
 
 const TOKENS = ['constant', 'string', 'comment', 'keyword', 'parameter', 'function', 'string-expression', 'punctuation', 'link'];
 
+/**
+ * 从 client.js 抽出纯函数区并在沙箱里求值，拿到真实的 buildCss。
+ * 抽的是 `const SHIKI_TOKENS` 到样例数据之前那一段（含 varsFor / scope / buildCss）。
+ */
+function loadBuilder() {
+  const src = readFileSync(CLIENT, 'utf8');
+  const start = src.indexOf('const SHIKI_TOKENS');
+  let end = src.indexOf('/** 代码预览用的样例');
+  if (end < 0) end = src.indexOf('function overrideLayer');
+  if (start < 0 || end < 0 || end <= start) throw new Error('client.js 结构变了：找不到纯函数区');
+  const body = src.slice(start, end);
+  return new Function(`const PKG_ID = 'dsh-code-theme';\n${body}\nreturn { buildCss, PALETTE_IDS };`)();
+}
+
+/**
+ * 结构检查：对每种调色板 × 明暗 × 字体开关，检查生成的 CSS。
+ *
+ * 最重要的一条：**每个声明块都必须带 color**。没有语言标签的代码块不会分词，
+ * 那段文字的颜色只由容器的 color 决定 —— 只设 --shiki-* 变量会被主题的
+ * `code{color:…}` 接管（真实踩过的坑）。
+ */
+function checkCss() {
+  const { buildCss, PALETTE_IDS } = loadBuilder();
+  let failed = 0;
+  let combos = 0;
+
+  for (const id of PALETTE_IDS) {
+    for (const scheme of ['auto', 'dark', 'light']) {
+      for (const font of [true, false]) {
+        combos += 1;
+        const css = buildCss(id, scheme, font);
+        const problems = [];
+        const open = (css.match(/\{/g) ?? []).length;
+        const close = (css.match(/\}/g) ?? []).length;
+        if (open !== close) problems.push(`花括号不平衡 ${open}/${close}`);
+        for (const block of css.match(/\{[^}]*\}/g) ?? []) {
+          if (!block.includes('color:')) problems.push('有声明块缺少 color');
+        }
+        for (const token of TOKENS) {
+          if (!css.includes(`--shiki-token-${token}:`)) problems.push(`缺 --shiki-token-${token}`);
+        }
+        if (!css.includes('--shiki-background:')) problems.push('缺 --shiki-background');
+        if (font && !css.includes('--ds-font-family-code')) problems.push('开了字体却没写 --ds-font-family-code');
+        if (!font && css.includes('--ds-font-family-code')) problems.push('关了字体却仍写 --ds-font-family-code');
+        if (scheme !== 'auto' && !css.includes(`.dct-force-${scheme}`)) problems.push(`强制 ${scheme} 没有对应规则`);
+        if (scheme === 'auto' && css.includes('.dct-force-')) problems.push('auto 模式不该出现强制规则');
+        if (problems.length > 0) {
+          failed += 1;
+          console.log(`  ❌ ${id} / ${scheme} / font=${font}：${[...new Set(problems)].join('；')}`);
+        }
+      }
+    }
+  }
+
+  console.log(`\nCSS 结构：${combos} 种组合，问题 ${failed} 处`);
+  return failed;
+}
+
 function main() {
   const palettes = loadPalettes();
   let failed = 0;
@@ -98,7 +156,10 @@ function main() {
   }
 
   console.log(`\n共检查 ${checked} 项，低于 ${MIN}:1 的有 ${failed} 项`);
-  return failed === 0 ? 0 : 1;
+
+  const cssProblems = checkCss();
+
+  return failed === 0 && cssProblems === 0 ? 0 : 1;
 }
 
 process.exit(main());
