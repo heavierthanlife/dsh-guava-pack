@@ -162,10 +162,142 @@ window.__ModuleLoader__.load({
           diffDeleted: '#ffcdd2',
         },
       },
+      'one-dark': {
+        label: 'One Dark',
+        dark: {
+          background: '#282c34',
+          foreground: '#abb2bf',
+          constant: '#d19a66',
+          string: '#98c379',
+          'string-expression': '#98c379',
+          comment: '#949ba8',
+          keyword: '#c678dd',
+          parameter: '#d19a66',
+          function: '#61afef',
+          punctuation: '#9da5b4',
+          link: '#56b6c2',
+          block: '#282c34',
+          banner: '#21252b',
+          inline: '#3a3f4b',
+          selected: '#3e4451',
+          unselected: '#282c34',
+          diffAdded: '#34472f',
+          diffDeleted: '#4a2f34',
+        },
+        light: {
+          background: '#fafafa',
+          foreground: '#383a42',
+          constant: '#986801',
+          string: '#3d7a3c',
+          'string-expression': '#3d7a3c',
+          comment: '#6f7278',
+          keyword: '#a626a4',
+          parameter: '#986801',
+          function: '#2f5fd0',
+          punctuation: '#696c77',
+          link: '#016f9e',
+          block: '#fafafa',
+          banner: '#f0f0f1',
+          inline: '#ececed',
+          selected: '#e5e5e6',
+          unselected: '#fafafa',
+          diffAdded: '#dff0d8',
+          diffDeleted: '#fbe4e6',
+        },
+      },
+      github: {
+        label: 'GitHub',
+        dark: {
+          background: '#0d1117',
+          foreground: '#c9d1d9',
+          constant: '#79c0ff',
+          string: '#a5d6ff',
+          'string-expression': '#a5d6ff',
+          comment: '#8b949e',
+          keyword: '#ff7b72',
+          parameter: '#ffa657',
+          function: '#d2a8ff',
+          punctuation: '#c9d1d9',
+          link: '#58a6ff',
+          block: '#0d1117',
+          banner: '#161b22',
+          inline: '#21262d',
+          selected: '#30363d',
+          unselected: '#0d1117',
+          diffAdded: '#1b3a24',
+          diffDeleted: '#4a1f24',
+        },
+        light: {
+          background: '#ffffff',
+          foreground: '#24292f',
+          constant: '#0550ae',
+          string: '#0a3069',
+          'string-expression': '#0a3069',
+          comment: '#6e7781',
+          keyword: '#cf222e',
+          parameter: '#953800',
+          function: '#8250df',
+          punctuation: '#24292f',
+          link: '#0969da',
+          block: '#ffffff',
+          banner: '#f6f8fa',
+          inline: '#f0f2f4',
+          selected: '#eaeef2',
+          unselected: '#ffffff',
+          diffAdded: '#dafbe1',
+          diffDeleted: '#ffebe9',
+        },
+      },
+      // ⚠️ 近似配色：OpenCode 官方内置主题的十六进制值没有公开文档，这份是按它的
+      // token 结构（comment/keyword/function/variable/string/number/type/operator/
+      // punctuation）加品牌观感拼的。拿到官方色值后替换这一段即可。
+      opencode: {
+        label: 'OpenCode（近似）',
+        dark: {
+          background: '#0b0b0c',
+          foreground: '#e6e6e6',
+          constant: '#d2a8ff',
+          string: '#a6e3a1',
+          'string-expression': '#a6e3a1',
+          comment: '#8a8a8a',
+          keyword: '#ff8f40',
+          parameter: '#ffcc66',
+          function: '#8ab4f8',
+          punctuation: '#b0b0b0',
+          link: '#7fd1e0',
+          block: '#0b0b0c',
+          banner: '#141416',
+          inline: '#1e1e21',
+          selected: '#26262a',
+          unselected: '#0b0b0c',
+          diffAdded: '#1f3a25',
+          diffDeleted: '#43242a',
+        },
+        light: {
+          background: '#fafafa',
+          foreground: '#1f2328',
+          constant: '#6b21a8',
+          string: '#166534',
+          'string-expression': '#166534',
+          comment: '#6b7280',
+          keyword: '#c2410c',
+          parameter: '#92400e',
+          function: '#1d4ed8',
+          punctuation: '#4b5563',
+          link: '#0e7490',
+          block: '#fafafa',
+          banner: '#f1f1f2',
+          inline: '#ececee',
+          selected: '#e3e3e6',
+          unselected: '#fafafa',
+          diffAdded: '#dff0d8',
+          diffDeleted: '#fbe4e6',
+        },
+      },
     };
 
     const PALETTE_IDS = Object.keys(PALETTES);
-    const DEFAULT_PREF = { palette: 'monokai-pro', scheme: 'auto' };
+    const DEFAULT_PREF = { palette: 'monokai-pro', scheme: 'auto', font: true };
     const SCHEMES = ['auto', 'dark', 'light'];
 
     const DICT = {
@@ -175,6 +307,9 @@ window.__ModuleLoader__.load({
         'section.desc': '只影响代码块与行内代码，正文和其他界面不受影响。',
         'row.palette': '调色板',
         'row.scheme': '代码区明暗',
+        'row.font': '代码字体',
+        'font.maple': 'Maple Mono CN',
+        'font.theme': '跟随主题',
         'scheme.auto': '跟随界面',
         'scheme.dark': '强制深色',
         'scheme.light': '强制浅色',
@@ -187,6 +322,9 @@ window.__ModuleLoader__.load({
         'section.desc': 'Affects code blocks and inline code only — prose and other UI stay untouched.',
         'row.palette': 'Palette',
         'row.scheme': 'Code scheme',
+        'row.font': 'Code font',
+        'font.maple': 'Maple Mono CN',
+        'font.theme': 'Follow theme',
         'scheme.auto': 'Follow UI',
         'scheme.dark': 'Force dark',
         'scheme.light': 'Force light',
@@ -194,6 +332,12 @@ window.__ModuleLoader__.load({
         'note.contrast': 'Contrast checked against WCAG AA (≥4.5:1) so it stays readable on a phone.',
       },
     };
+
+    /** 代码字体栈：Maple Mono CN 系列 + 完整回退（没装该字体也不会变丑）。 */
+    const CODE_FONT =
+      "'Maple Mono CN', 'Maple Mono NF CN', 'Maple Mono', 'JetBrains Mono', " +
+      "ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', " +
+      "'PingFang SC', 'Microsoft YaHei', monospace";
 
     /** 读偏好（localStorage；解析失败回默认）。 */
     function readPref() {
@@ -204,6 +348,7 @@ window.__ModuleLoader__.load({
         return {
           palette: PALETTE_IDS.includes(parsed?.palette) ? parsed.palette : DEFAULT_PREF.palette,
           scheme: SCHEMES.includes(parsed?.scheme) ? parsed.scheme : DEFAULT_PREF.scheme,
+          font: parsed?.font !== false,
         };
       } catch {
         return { ...DEFAULT_PREF };
@@ -233,27 +378,48 @@ window.__ModuleLoader__.load({
       return out.join(';');
     }
 
-    /** 生成整份样式表（只含代码容器选择器）。 */
-    function buildCss(paletteId, scheme) {
+    /** 给选择器列表统一加作用域前缀。 */
+    function scope(prefix, selector) {
+      return selector
+        .split(',')
+        .map((part) => `${prefix} ${part.trim()}`)
+        .join(',');
+    }
+
+    /**
+     * 生成整份样式表（只含代码容器选择器）。
+     *
+     * 两个关键点：
+     *
+     * 1. **必须同时设 `color`，不能只设 `--shiki-*`。** 没有语言标签的代码块不会分词
+     *    （Shiki 不产出 token span），那段文字的颜色只由容器的 `color` 决定 —— 不设
+     *    就会被主题自己的 `code{color:…}` 接管（赛博主题就是明黄 #fcee0a）。
+     * 2. **用 `:root` 前缀提权。** 主题也写 `code{color:…}`，同特异性时胜负取决于样式表
+     *    顺序，不可靠；`:root code` 稳定压过 `code`。
+     */
+    function buildCss(paletteId, scheme, codeFont) {
       const palette = PALETTES[paletteId] ?? PALETTES[DEFAULT_PREF.palette];
-      const light = varsFor(palette.light);
-      const dark = varsFor(palette.dark);
-      const force = scheme === 'dark' || scheme === 'light';
-      const forced = scheme === 'dark' ? dark : light;
+      const fontVars = codeFont
+        ? `--ds-font-family-code:${CODE_FONT};` +
+          `--dsw-font-markdown-code-font-family:${CODE_FONT};` +
+          `--dsw-font-markdown-code-block-font-family:${CODE_FONT};` +
+          `--dsw-font-markdown-code-block-small-font-family:${CODE_FONT};`
+        : '';
+      const decls = (mode) => `${fontVars}${varsFor(mode)};color:${mode.foreground}`;
 
       const lines = [
-        `/* ${PKG_ID} · ${palette.label} · ${scheme} */`,
-        `${CODE_SEL}{${light}}`,
-        `body[data-ds-dark-theme] ${CODE_SEL.split(',').join(',body[data-ds-dark-theme] ')}{${dark}}`,
-        // 行内代码：底色变量在宿主里是按元素读的，这里顺带把圆角里的前景色也对齐
-        `:not(pre) > code{color:${palette.light.foreground}}`,
-        `body[data-ds-dark-theme] :not(pre) > code{color:${palette.dark.foreground}}`,
+        `/* ${PKG_ID} · ${palette.label} · ${scheme}${codeFont ? ' · Maple Mono CN' : ''} */`,
+        `${scope(':root', CODE_SEL)}{${decls(palette.light)}}`,
+        `${scope(':root body[data-ds-dark-theme]', CODE_SEL)}{${decls(palette.dark)}}`,
+        `:root :not(pre) > code{color:${palette.light.foreground};background:${palette.light.inline}}`,
+        `:root body[data-ds-dark-theme] :not(pre) > code{color:${palette.dark.foreground};background:${palette.dark.inline}}`,
       ];
-      if (force) {
-        // 类名写两遍提权：压过 body[data-ds-dark-theme]（同特异性、靠顺序决胜）。
-        const scope = scheme === 'dark' ? '.dct-force-dark.dct-force-dark' : '.dct-force-light.dct-force-light';
-        lines.push(`body${scope} ${CODE_SEL.split(',').join(`,body${scope} `)}{${forced}}`);
-        lines.push(`body${scope} :not(pre) > code{color:${scheme === 'dark' ? palette.dark.foreground : palette.light.foreground}}`);
+      if (scheme === 'dark' || scheme === 'light') {
+        const forced = scheme === 'dark' ? palette.dark : palette.light;
+        // 类名写两遍 + :root 前缀 → 特异性 (0,3,2)，压过上面的深色规则 (0,2,2)。
+        const prefix = `:root body.dct-force-${scheme}.dct-force-${scheme}`;
+        lines.push(`${scope(prefix, CODE_SEL)}{${decls(forced)}}`);
+        lines.push(`${prefix} :not(pre) > code{color:${forced.foreground};background:${forced.inline}}`);
       }
       return lines.join('\n');
     }
@@ -372,6 +538,29 @@ window.__ModuleLoader__.load({
           ),
         ]),
 
+        h('div', { key: 'font', className: 'dct_row' }, [
+          h('div', { key: 'l', className: 'dct_label' }, tr('row.font')),
+          h(
+            'div',
+            { key: 'v', className: 'dct_seg' },
+            [
+              { id: true, label: tr('font.maple') },
+              { id: false, label: tr('font.theme') },
+            ].map((opt) =>
+              h(
+                'button',
+                {
+                  key: String(opt.id),
+                  type: 'button',
+                  'data-on': pref.font === opt.id ? 'true' : 'false',
+                  onClick: () => update({ font: opt.id }),
+                },
+                opt.label,
+              ),
+            ),
+          ),
+        ]),
+
         h('div', { key: 'pl', className: 'dct_label dct_previewLabel' }, tr('preview.label')),
         // 预览直接引用 --shiki-token-* 变量 → 显示的就是真实生效的颜色，不会和实际跑偏。
         h(
@@ -422,7 +611,7 @@ window.__ModuleLoader__.load({
         const applyPreference = (pref) => {
           current = pref;
           const palette = PALETTES[pref.palette] ?? PALETTES[DEFAULT_PREF.palette];
-          if (styleEl !== null) styleEl.textContent = buildCss(pref.palette, pref.scheme);
+          if (styleEl !== null) styleEl.textContent = buildCss(pref.palette, pref.scheme, pref.font !== false);
           applyForceClass(pref.scheme);
           // 第 2 层：注册成正式的主题覆盖层（拿不到 API 也不影响第 1 层）。
           try {
