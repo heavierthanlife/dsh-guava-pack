@@ -15,6 +15,8 @@
 #   journalctl --user -u dsh.service -f      # 看日志
 
 SERVICE=dsh.service
+# 目标 DSH 安装目录：与 bootstrap-machine.sh 同一套约定（DSH_HOME > ~/dsh）。
+DSH_HOME="${DSH_HOME:-$HOME/dsh}"
 
 if systemctl --user is-enabled "$SERVICE" >/dev/null 2>&1; then
   echo "[restart] 停止服务"
@@ -32,12 +34,13 @@ fi
 if [ "${DSH_RESTART_IN_UNIT:-}" != "1" ]; then
   exec systemd-run --user --collect \
     --setenv=DSH_RESTART_IN_UNIT=1 \
+    --setenv="DSH_HOME=$DSH_HOME" \
     --setenv="DSH_RESTART_DELAY=${DSH_RESTART_DELAY:-5}" \
-    /home/guava5tar_/dsh/restart-dsh.sh
+    "$DSH_HOME/restart-dsh.sh"
 fi
 
-LOG=/home/guava5tar_/dsh/logs/restart.log
-mkdir -p /home/guava5tar_/dsh/logs 2>/dev/null
+LOG="$DSH_HOME/logs/restart.log"
+mkdir -p "$DSH_HOME/logs" 2>/dev/null
 
 sleep "${DSH_RESTART_DELAY:-5}"
 
@@ -46,5 +49,5 @@ pkill -f "@deepseek-ai/dsh/lib/bin.js web" 2>/dev/null
 sleep 3
 
 echo "[restart] $(date '+%F %T') 启动 dsh web（启动器会先拉起 commandcode 桥接 + provider-router）" >> "$LOG"
-cd /home/guava5tar_/dsh || exit 1
-exec ./dsh web --no-open >> /home/guava5tar_/dsh/logs/web-run.log 2>&1
+cd "$DSH_HOME" || exit 1
+exec ./dsh web --no-open >> "$DSH_HOME/logs/web-run.log" 2>&1

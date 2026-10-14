@@ -28,6 +28,7 @@ window.__ModuleLoader__.load({
       title: '主题管理',
       desc: '切换当前生效的主题。列表来自主题服务已注册的主题。',
       active: '使用中',
+      following: '跟随系统',
       switch: '切换',
       empty: '暂无已注册主题',
       schemeLight: '浅色',
@@ -59,6 +60,7 @@ window.__ModuleLoader__.load({
     function ThemeRow(props) {
       var theme = props.theme;
       var isActive = props.isActive;
+      var following = props.following === true;
       var onSwitch = props.onSwitch;
       var scheme = theme.colorScheme === 'light' ? T.schemeLight : T.schemeDark;
 
@@ -88,7 +90,7 @@ window.__ModuleLoader__.load({
                 fontSize: 12, padding: '3px 10px', borderRadius: 10,
                 background: 'var(--dsw-alias-brand-primary, #4f8cff)', color: '#fff'
               }
-            }, T.active)
+            }, following ? T.following : T.active)
           : h('button', {
               type: 'button',
               onClick: function () { onSwitch(theme.id); },
@@ -101,12 +103,13 @@ window.__ModuleLoader__.load({
       );
     }
 
-    function rowsFor(themes, current, onSwitch) {
+    function rowsFor(themes, current, onSwitch, following) {
       return themes.map(function (t) {
         return h(ThemeRow, {
           key: t.id,
           theme: t,
           isActive: t.id === current,
+          following: following === true,
           onSwitch: onSwitch
         });
       });
@@ -133,7 +136,14 @@ window.__ModuleLoader__.load({
       }, []);
 
       var themes = (snap && snap.themes) || [];
-      var current = snap ? snap.preference : '';
+      var preference = snap ? snap.preference : '';
+      // preference 可能是 'system'：主题服务已把系统色偏好解析进 snap.active
+      // （ThemeSnapshot.active 是生效的 ThemeDefinition）。用它标记真正生效的那一行，
+      // 否则 system 下没有任何一行显示"使用中"，页脚也只打印 'system'。
+      var resolved = snap && snap.active && typeof snap.active.id === 'string' ? snap.active.id : '';
+      var isSystem = preference === 'system';
+      var current = isSystem && resolved ? resolved : preference;
+      var currentLabel = isSystem && resolved ? resolved + '（' + T.following + '）' : current;
 
       var primary = themes.filter(function (t) { return PRIMARY_IDS.indexOf(t.id) !== -1; });
       var others = themes.filter(function (t) { return PRIMARY_IDS.indexOf(t.id) === -1; });
@@ -155,7 +165,7 @@ window.__ModuleLoader__.load({
         children.push(h('div', {
           key: 'primary',
           style: { display: 'flex', flexDirection: 'column', gap: 8 }
-        }, rowsFor(primary.length ? primary : themes, current, onSwitch)));
+        }, rowsFor(primary.length ? primary : themes, current, onSwitch, isSystem)));
 
         if (others.length) {
           children.push(h('button', {
@@ -177,7 +187,7 @@ window.__ModuleLoader__.load({
                 display: 'flex', flexDirection: 'column', gap: 8,
                 marginTop: 8, maxHeight: 420, overflowY: 'auto', paddingRight: 4
               }
-            }, rowsFor(others, current, onSwitch)));
+            }, rowsFor(others, current, onSwitch, isSystem)));
           }
         }
       }
@@ -189,7 +199,7 @@ window.__ModuleLoader__.load({
       children.push(h('div', {
         key: 'footer',
         style: { marginTop: 4, fontSize: 11, opacity: 0.5 }
-      }, T.footer(themes.length, current)));
+      }, T.footer(themes.length, currentLabel)));
 
       return h('div', { style: { padding: '2px 0' } }, children);
     }

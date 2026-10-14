@@ -111,7 +111,10 @@ async function apply(ctx) {
 
   // ── 侧栏面板用的路由 ────────────────────────────────────────────────
   ctx.inject(['webServer', 'connection'], (cctx) => {
-    cctx.webServer.register({
+    // 必须挂在 effect 上：`webServer.register()` 返回 disposer，不登记的话插件重挂
+    // （Plugin Manager 禁用再启用、配置变更导致 re-apply）会留下旧路由 —— 再注册直接抛
+    // `duplicate prefix route`，而真正生效的是旧 handler 的闭包。
+    cctx.effect(() => cctx.webServer.register({
       kind: 'prefix',
       path: ROUTE_PATH,
       handler: async (req, res) => {
@@ -139,7 +142,9 @@ async function apply(ctx) {
 
           if (endpoint === 'plan') {
             const attachments = body.payload?.attachments === true;
-            sendRpc(res, rpcId, { ok: true, value: planForPanel(buildPlan({ attachments })) });
+            // 把 CLI 的真实路径回给面板：面板以前硬编码 `~/dsh/playground/themes/...`，
+            // 装成 pack 的机器上那个路径根本不存在，用户照抄命令会 MODULE_NOT_FOUND。
+            sendRpc(res, rpcId, { ok: true, value: { ...planForPanel(buildPlan({ attachments })), cli } });
             return;
           }
 
@@ -160,6 +165,8 @@ async function apply(ctx) {
                 count: plan.entries.length,
                 trashRoot: result.trashRoot,
                 releasedBytes: plan.totals.bytes + (attachments ? plan.totals.attachmentBytes : 0),
+                // 产出清单写失败以前只在 results 里，面板看不到 —— 面板要把这个显示出来。
+                manifestFailures: result.manifestFailures,
               },
             });
             return;
@@ -170,7 +177,7 @@ async function apply(ctx) {
           sendRpc(res, rpcId, { ok: false, error: { code: 'gateway/internal', message: String(error?.message ?? error) } });
         }
       },
-    });
+    }), 'session-purge route');
   });
 }
 

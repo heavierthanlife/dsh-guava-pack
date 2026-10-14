@@ -1,6 +1,8 @@
 # 放到 /etc/wsl.conf（需要 sudo；每台机器各做一次）
+# `default=` 是占位值：bootstrap-machine.sh 写入前会把它替换成本机 $USER。
+# 直接用本文件覆盖 /etc/wsl.conf 而不替换，会把默认 WSL 用户设成一个不存在的账号。
 [boot]
 systemd=true
 
 [user]
-default=guava5tar_
+default=CHANGE_ME

@@ -405,7 +405,9 @@ window.__ModuleLoader__.load({
 		function onKeydown(e) {
 			const el = e.target;
 			if (el === null || el.tagName !== "TEXTAREA") return;
-			if (e.metaKey || e.ctrlKey || e.altKey) return;
+			// Shift+Enter is a newline in DSH, not a send (dsh-mobile-ui relies on
+			// it), so it must not play the send SFX / flash the chip.
+			if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
 			if (e.key === "Enter") {
 				onSendSound();
 				const word = (el.value ?? "").trim().toLowerCase();
@@ -646,7 +648,8 @@ window.__ModuleLoader__.load({
 			const handler = (e) => {
 				const el = e.target;
 				if (el === null || el.tagName !== "TEXTAREA") return;
-				if (e.key !== "Enter" || e.metaKey || e.ctrlKey || e.altKey) return;
+				// The egg only fires on a bare Enter: Shift+Enter is a newline.
+				if (e.key !== "Enter" || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
 				const egg = EGGS[(el.value ?? "").trim().toLowerCase()];
 				if (egg === undefined || document.getElementById(egg.id) !== null) return;
 				if (egg.id === "cp2077-johnny" && reduced()) return;
@@ -1253,8 +1256,13 @@ window.__ModuleLoader__.load({
 
 				// 1) Register. Tolerate a duplicate id: this module is re-executed
 				//    on reload/HMR, and a throw here must never skip activation.
+				//    `register` returns the disposer that removes us from the
+				//    registry; dropping it left the OLD TOKENS object registered
+				//    across HMR (and the theme listed after the plugin unloaded).
+				//    A throw means "already registered", i.e. nothing to store.
+				let offRegister = null;
 				try {
-					ctx.theme.register({
+					offRegister = ctx.theme.register({
 						id: THEME_ID,
 						colorScheme: "dark",
 						tokens: TOKENS
@@ -1287,21 +1295,37 @@ window.__ModuleLoader__.load({
 				function startVisuals() {
 					if (started) return;
 					started = true;
-					loadCfg();
-					applyCfgToBody();
-					injectCyberpunkStyles();
-					playBootTransition();
-					ensureSndChip();
-					ensureDeckPanel();
-					document.addEventListener("keydown", onKeydown, true);
-					stop = [
-						startPendingPoll(),
-						startNoticeObserver(),
-						startRelicLoop(),
-						startTriggerWatcher(),
-						applyTabIdentity(),
-						startHudFooter()
-					];
+					try {
+						loadCfg();
+						applyCfgToBody();
+						injectCyberpunkStyles();
+						playBootTransition();
+						ensureSndChip();
+						ensureDeckPanel();
+						document.addEventListener("keydown", onKeydown, true);
+						// Built one by one: an array literal evaluates left to
+						// right, so a creator that throws would strand the
+						// intervals / observers / listeners started before it.
+						stop.push(startPendingPoll());
+						stop.push(startNoticeObserver());
+						stop.push(startRelicLoop());
+						stop.push(startTriggerWatcher());
+						stop.push(applyTabIdentity());
+						stop.push(startHudFooter());
+					} catch (e) {
+						// stopVisuals() undoes whatever did start and resets
+						// `started`, so the next activation retries from scratch.
+						stopVisuals();
+						throw e;
+					}
+				}
+				/** startVisuals() may rethrow after undoing itself; wiring must survive. */
+				function startVisualsSafely() {
+					try {
+						startVisuals();
+					} catch (e) {
+						console.error("dsh-theme-cyberpunk2077 visuals start failed", e);
+					}
 				}
 				function stopVisuals() {
 					if (!started) return;
@@ -1317,7 +1341,7 @@ window.__ModuleLoader__.load({
 				}
 
 				// Apply now if we are the active theme, then track later switches.
-				if (isActive()) startVisuals();
+				if (isActive()) startVisualsSafely();
 
 				const offThemeChange = ctx.on("theme/change", () => {
 					if (!wantUs()) {
@@ -1339,12 +1363,22 @@ window.__ModuleLoader__.load({
 						} catch (e) {}
 					}
 					writeStoredPref(THEME_ID);
-					startVisuals();
+					startVisualsSafely();
 				});
 
 				return () => {
 					if (typeof offThemeChange === "function") offThemeChange();
 					stopVisuals();
+					// Unregister last, after we stop listening: the disposer resets
+					// the preference when we were the active theme, and that emit
+					// must not reach a handler of ours that would re-assert us.
+					if (typeof offRegister === "function") {
+						try {
+							offRegister();
+						} catch (e) {
+							console.error("dsh-theme-cyberpunk2077 theme unregister failed", e);
+						}
+					}
 				};
 			}, "dsh-theme-cyberpunk2077: register");
 		}

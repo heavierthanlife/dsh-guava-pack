@@ -51,7 +51,7 @@
  */
 
 import { z } from 'zod';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
 /** Cordis 插件名。 */
@@ -72,12 +72,13 @@ const inject = ['sessionProjections'];
  */
 function normalizeConfig(rawConfig) {
   return {
-    thresholdRatio: num(rawConfig?.thresholdRatio) ?? 0.6,
-    handoffAfterCompactions: num(rawConfig?.handoffAfterCompactions) ?? 2,
+    // 和面板同一条夹取路径：patch 里写 0.05 会让几乎每一轮都压缩。
+    thresholdRatio: clampThresholdRatio(rawConfig?.thresholdRatio) ?? 0.6,
+    handoffAfterCompactions: clampHandoffCount(rawConfig?.handoffAfterCompactions) ?? 2,
     writeHandoff: rawConfig?.writeHandoff !== false,
     triggerOn: Array.isArray(rawConfig?.triggerOn) && rawConfig.triggerOn.length > 0 ? rawConfig.triggerOn : ['completed'],
     handoffPrefix: typeof rawConfig?.handoffPrefix === 'string' && rawConfig.handoffPrefix !== '' ? rawConfig.handoffPrefix : 'HANDOFF-context-guard',
-    maxRecentUserMessages: num(rawConfig?.maxRecentUserMessages) ?? 8,
+    maxRecentUserMessages: clampRecentMessages(rawConfig?.maxRecentUserMessages) ?? 8,
   };
 }
 
@@ -133,6 +134,13 @@ function clampHandoffCount(value) {
   const n = num(value);
   if (n === undefined) return undefined;
   return Math.min(5, Math.max(1, Math.round(n)));
+}
+
+/** handoff 里保留的最近用户消息条数：1–50 的整数（默认 8，仅作上限兜底）。 */
+function clampRecentMessages(value) {
+  const n = num(value);
+  if (n === undefined) return undefined;
+  return Math.min(50, Math.max(1, Math.round(n)));
 }
 
 /** 读一个小请求体（有上限，坏客户端不能拖住内存）。 */
@@ -433,13 +441,33 @@ function apply(ctx, rawConfig) {
     }
   }
 
-  /** 达到配置的压缩次数后写一次 handoff（文件名按次数确定，重复写是幂等的）。 */
+  /**
+   * 这个会话是否已经写过 handoff。
+   *
+   * 用文件系统当权威：文件名前缀 = handoffPrefix + 会话 id 前 8 位，扫一次目录
+   * 就能回答，且进程重启后依然记得。投影状态是纯 fold（加字段还要动
+   * stateVersion 并兼容老 checkpoint），内存集合则活不过重启，都不合适。
+   */
+  async function handoffExists(cwd, session) {
+    const prefix = `${cfg.handoffPrefix}-${String(session.id).slice(0, 8)}-`;
+    try {
+      const entries = await readdir(cwd);
+      return entries.some((entry) => entry.startsWith(prefix));
+    } catch {
+      // 目录读不到（权限/已删除）时按"没写过"处理，保持旧行为。
+      return false;
+    }
+  }
+
+  /** 达到配置的压缩次数后写一次 handoff —— 每个会话最多一份。 */
   async function maybeHandoff(session) {
     const state = ctx.sessionProjections.stateOf(session, 'contextGuard');
     if (state === undefined || state.compactions < settings.handoffAfterCompactions) return;
     if (!cfg.writeHandoff) return;
     const cwd = session.header?.cwd;
     if (typeof cwd !== 'string' || cwd === '') return;
+    // 越过阈值后的每一次压缩都会走到这里，所以必须自己判重。
+    if (await handoffExists(cwd, session)) return;
     const file = join(
       cwd,
       `${cfg.handoffPrefix}-${String(session.id).slice(0, 8)}-c${state.compactions}-${stamp(Date.now())}.md`,
@@ -505,6 +533,20 @@ function apply(ctx, rawConfig) {
     });
     // 之后新出现的 agent。
     yield ctx.on('agent/created', ({ agent }) => attach(agent));
+    // agent 销毁：连它作用域上的 disposer 一起从表里删掉。少了这一步，
+    // 每个创建过的 agent 对象和它的闭包都会被永久保留（长跑进程无界增长）。
+    // agent 的 fiber 销毁时这个 effect 已经跑过一遍；cordis 的 disposer 幂等，
+    // 所以这里再调一次是安全的。
+    yield ctx.on('agent/disposed', ({ agent }) => {
+      const dispose = perAgent.get(agent);
+      if (dispose === undefined) return;
+      perAgent.delete(agent);
+      try {
+        dispose();
+      } catch {
+        /* 已经随 agent 的 fiber 一起销毁：忽略 */
+      }
+    });
   }, 'context-guard lifecycle');
 
   // ── 3. 面板上的两个可调参数：客户端 → host ────────────────────────────
@@ -532,7 +574,11 @@ function apply(ctx, rawConfig) {
       }
     })();
 
-    cctx.webServer.register({
+    // 挂在 effect 上：`webServer.register()` 返回 disposer，不登记的话插件重挂
+    // （Plugin Manager 禁用再启用、配置变更 re-apply）会留下旧路由 —— 再注册直接抛
+    // `duplicate prefix route`，而真正生效的是旧 handler 的闭包（旧的 settings/cctx），
+    // 表现为"面板保存了但行为没变"。
+    cctx.effect(() => cctx.webServer.register({
       kind: 'prefix',
       path: ROUTE_PATH,
       handler: async (req, res) => {
@@ -582,7 +628,7 @@ function apply(ctx, rawConfig) {
           sendRpc(res, rpcId, { ok: false, error: { code: 'gateway/internal', message: String(error?.message ?? error) } });
         }
       },
-    });
+    }), 'context-guard: route');
 
     /** 面板读的权威值（含 armed，便于自检）。 */
     function publicSettings() {

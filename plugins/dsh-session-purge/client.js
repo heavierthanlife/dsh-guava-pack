@@ -37,9 +37,10 @@ window.__ModuleLoader__.load({
         running: '执行中…',
         done: '完成：{count} 个会话 → {where}',
         doneHard: '完成：{count} 个会话已删除',
-        rosterNote: '花名册条目需停服后用 CLI --clean-roster 清理',
+        rosterNote: '花名册残留需停服后用 CLI --roster-only 清理（只改 workspace.json，不删会话）',
         refresh: '刷新',
         failed: '失败：{message}',
+        manifestFailed: '⚠️ 有 {count} 个会话的产出清单没写出来 —— 会话本身已按上面的模式处理，但清单缺失',
         staleTitle: '花名册残留 {count} 条',
         staleHint: '记录已删除，但 workspace.json 里还留着 id —— 所以侧栏照旧显示、点不进去。停服后跑这三条即可清掉：',
         copyCmds: '复制命令',
@@ -64,9 +65,10 @@ window.__ModuleLoader__.load({
         running: 'running…',
         done: 'Done: {count} sessions → {where}',
         doneHard: 'Done: {count} sessions deleted',
-        rosterNote: 'roster entries need the CLI --clean-roster while DSH is stopped',
+        rosterNote: 'stale roster ids need the CLI --roster-only while DSH is stopped (touches workspace.json only)',
         refresh: 'Refresh',
         failed: 'failed: {message}',
+        manifestFailed: '⚠️ {count} sessions had no output manifest written — the sessions themselves were handled, but the manifest is missing',
         staleTitle: '{count} stale roster entries',
         staleHint: 'Records are deleted but their ids remain in workspace.json, so the sidebar still lists them without data. Run these three commands while DSH is stopped:',
         copyCmds: 'Copy commands',
@@ -167,21 +169,33 @@ window.__ModuleLoader__.load({
     }
 
     /** 刷新残留集合（只读，不删任何东西）。 */
+    /** host 回传的 CLI 真实路径 —— 装成 pack 之后，playground 那个路径并不存在。 */
+    let hostCliPath = '';
+
     async function refreshStale() {
       try {
         const value = await call('plan', { attachments: false });
+        if (typeof value?.cli === 'string' && value.cli) hostCliPath = value.cli;
         setStale(value?.missing ?? []);
       } catch {
         /* 静默：面板打开时会再报错 */
       }
     }
 
-    /** 清残留的三条命令（必须停服：运行时改 workspace.json 会被内存态覆盖）。 */
-    const CLEAN_CMDS = [
-      'systemctl --user stop dsh.service',
-      'node ~/dsh/playground/themes/dsh-session-purge/lib/core.mjs --confirm --clean-roster',
-      'systemctl --user start dsh.service',
-    ].join('\n');
+    /**
+     * 清残留的三条命令（必须停服：运行时改 workspace.json 会被内存态覆盖）。
+     *
+     * `--roster-only` **不能省**：不带 `--id` 时 `--clean-roster` 等于"清理全部归档会话"，
+     * 会把这些命令本想保留的会话一起移走。这三条命令的定位只是摘掉花名册里的残留 id。
+     */
+    function cleanCmds() {
+      const cli = hostCliPath || '<dsh-session-purge 插件目录>/lib/core.mjs';
+      return [
+        'systemctl --user stop dsh.service',
+        `node ${cli} --confirm --roster-only`,
+        'systemctl --user start dsh.service',
+      ].join('\n');
+    }
 
     /** 归档盒图标。 */
     function Icon(props) {
@@ -227,6 +241,7 @@ window.__ModuleLoader__.load({
         setError(null);
         try {
           const value = await call('plan', { attachments: withAttachments === true });
+          if (typeof value?.cli === 'string' && value.cli) hostCliPath = value.cli;
           setPlan(value);
           setStale(value?.missing ?? []);
         } catch (e) {
@@ -263,6 +278,7 @@ window.__ModuleLoader__.load({
 
       const entries = plan?.entries ?? [];
       const totals = plan?.totals;
+      const cleanCommands = cleanCmds();
 
       return h(
         'div',
@@ -297,7 +313,7 @@ window.__ModuleLoader__.load({
               ? h('div', { key: 'stale', className: 'spurge_stale' }, [
                   h('div', { key: 't', className: 'spurge_warn' }, tr('staleTitle', { count: stale.size })),
                   h('div', { key: 'h', className: 'spurge_hint' }, tr('staleHint')),
-                  h('pre', { key: 'c', className: 'spurge_cmds' }, CLEAN_CMDS),
+                  h('pre', { key: 'c', className: 'spurge_cmds' }, cleanCommands),
                   h(
                     'div',
                     { key: 'a', className: 'spurge_actions' },
@@ -313,7 +329,7 @@ window.__ModuleLoader__.load({
                             setTimeout(() => setCopied(false), 1600);
                           };
                           const clip = navigator.clipboard;
-                          if (clip?.writeText) void clip.writeText(CLEAN_CMDS).then(done, () => {});
+                          if (clip?.writeText) void clip.writeText(cleanCommands).then(done, () => {});
                         },
                       },
                       copied ? tr('copied') : tr('copyCmds'),
@@ -401,6 +417,16 @@ window.__ModuleLoader__.load({
                   done.mode === 'hard'
                     ? tr('doneHard', { count: done.count })
                     : tr('done', { count: done.count, where: done.trashRoot ?? '—' }),
+                )
+              : null,
+
+            // 产出清单写失败以前被静默吞掉（host 不回传），面板必须看得见 ——
+            // README 把"删前写一份清单"当安全承诺，无声落空比报错更糟。
+            done !== null && Array.isArray(done.manifestFailures) && done.manifestFailures.length > 0
+              ? h(
+                  'div',
+                  { key: 'mf', className: 'spurge_err' },
+                  tr('manifestFailed', { count: done.manifestFailures.length }),
                 )
               : null,
 

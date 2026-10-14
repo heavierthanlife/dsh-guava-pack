@@ -33,11 +33,54 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { readFileSync, readdirSync, statSync, existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  existsSync,
+  fsyncSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { zstdDecompressSync } from 'node:zlib';
 import { basename, dirname, join } from 'node:path';
 
 const ZSTD_MAGIC = [0x28, 0xb5, 0x2f, 0xfd];
+
+/**
+ * 原子写：同目录临时文件 → fsync → rename。
+ *
+ * 为什么不能用 `writeFileSync(target, …)`：那是就地 truncate 再写，进程被杀/断电
+ * 会留下空文件或半截 JSON。而 `workspace.json` 是"会话属于哪个工作区"的唯一记录，
+ * 坏了没别处可查。rename 在同一文件系统上是原子的，读者只会看到旧版或新版。
+ */
+function writeFileAtomicSync(target, data) {
+  const dir = dirname(target);
+  const tmp = join(dir, `.${basename(target)}.tmp-${process.pid}-${Date.now()}`);
+  const fd = openSync(tmp, 'w');
+  try {
+    writeFileSync(fd, data);
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+  renameSync(tmp, target);
+  try {
+    // 目录项也 fsync，否则 rename 本身可能没落盘。
+    const dfd = openSync(dir, 'r');
+    try {
+      fsyncSync(dfd);
+    } finally {
+      closeSync(dfd);
+    }
+  } catch {
+    /* 某些文件系统不支持目录 fsync —— 不致命 */
+  }
+}
 
 export function dshHome() {
   return process.env.DSH_HOME ?? join(process.env.HOME ?? '', 'dsh');
@@ -78,29 +121,98 @@ export function dirBytes(dir) {
 }
 
 /**
- * 解一份会话日志。
+ * 算出一个 zstd 帧的结束偏移（RFC 8878 的帧结构），不做解压。
  *
- * 格式是**多个 zstd 帧顺序拼接**（实测 887 帧），`zstdDecompressSync` 只吃第一帧、
- * 流式解码器会在第二帧报 `Unknown frame descriptor`。按魔数切片逐帧解是可行解。
+ * 为什么必须**按结构走帧**而不是"扫魔数切片"：实测发现
+ * `zstdDecompressSync` 对**被截断的帧是静默容忍的** —— 把日志尾部砍掉 4 字节，
+ * 解出来的文本长度与完整文件**一模一样**（2316260 字节），砍 64 字节也只是一个
+ * 不报错的短结果。也就是说"失败帧计数"永远抓不到截断，而截断正是这里最危险的
+ * 损坏形式（会静默漏掉尾部帧里的附件引用 → 删掉别的会话还在用的图）。
+ * 按结构走帧就能精确判断"文件是否正好由完整帧拼成"。
+ *
+ * @returns {number} 结束偏移；结构不合法时返回 -1。
  */
-export function decodeSessionLog(file) {
+function zstdFrameEnd(buf, start) {
+  if (start + 4 > buf.length) return -1;
+  let p = start + 4; // magic 已由调用方校验
+  if (p >= buf.length) return -1;
+  const fhd = buf[p++];
+  if ((fhd & 0x08) !== 0) return -1; // reserved 位必须为 0
+  const fcsFlag = fhd >> 6;
+  const singleSegment = (fhd & 0x20) !== 0;
+  const hasChecksum = (fhd & 0x04) !== 0;
+  const dictFlag = fhd & 0x03;
+  if (!singleSegment) p += 1; // Window_Descriptor
+  p += dictFlag === 0 ? 0 : dictFlag === 1 ? 1 : dictFlag === 2 ? 2 : 4; // Dictionary_ID
+  p += fcsFlag === 0 ? (singleSegment ? 1 : 0) : fcsFlag === 1 ? 2 : fcsFlag === 2 ? 4 : 8; // Frame_Content_Size
+  if (p > buf.length) return -1;
+  for (;;) {
+    if (p + 3 > buf.length) return -1;
+    const h = buf[p] | (buf[p + 1] << 8) | (buf[p + 2] << 16);
+    p += 3;
+    const last = (h & 1) === 1;
+    const type = (h >> 1) & 0x03;
+    const size = h >> 3;
+    if (type === 3) return -1; // Reserved 块类型
+    p += type === 1 ? 1 : size; // RLE 块的 Block_Size 是解压后大小，内容只有 1 字节
+    if (p > buf.length) return -1;
+    if (last) break;
+  }
+  if (hasChecksum) p += 4;
+  return p <= buf.length ? p : -1;
+}
+
+/**
+ * 解一份会话日志（详细版）。
+ *
+ * 格式是**多个 zstd 帧顺序拼接**（实测一份 343 帧 / 710KB）。
+ *
+ * 返回 `{ text, frames, decodedFrames, failedFrames, complete }`：
+ *   `complete === false` 表示文件**不是**由完整帧首尾相接拼成的（截断 / 损坏 / 格式变了）。
+ *   调用方必须把它当成"这份日志不可信"，而不是"它没引用任何东西"。
+ */
+export function decodeSessionLogDetailed(file) {
   const buf = readFileSync(file);
-  const offsets = [];
-  for (let i = 0; i <= buf.length - 4; i++) {
-    if (buf[i] === ZSTD_MAGIC[0] && buf[i + 1] === ZSTD_MAGIC[1] && buf[i + 2] === ZSTD_MAGIC[2] && buf[i + 3] === ZSTD_MAGIC[3]) {
-      offsets.push(i);
+  const slices = [];
+  let p = 0;
+  let complete = true;
+  while (p < buf.length) {
+    if (
+      buf[p] !== ZSTD_MAGIC[0] ||
+      buf[p + 1] !== ZSTD_MAGIC[1] ||
+      buf[p + 2] !== ZSTD_MAGIC[2] ||
+      buf[p + 3] !== ZSTD_MAGIC[3]
+    ) {
+      complete = false; // 不在帧边界上
+      break;
     }
+    const end = zstdFrameEnd(buf, p);
+    if (end < 0) {
+      complete = false; // 帧结构不合法（多半是被截断）
+      break;
+    }
+    slices.push([p, end]);
+    p = end;
   }
+  if (p !== buf.length) complete = false;
+
   let text = '';
-  for (let k = 0; k < offsets.length; k++) {
-    const slice = buf.subarray(offsets[k], k + 1 < offsets.length ? offsets[k + 1] : buf.length);
+  let decodedFrames = 0;
+  let failedFrames = 0;
+  for (const [start, end] of slices) {
     try {
-      text += zstdDecompressSync(slice).toString('utf8');
+      text += zstdDecompressSync(buf.subarray(start, end)).toString('utf8');
+      decodedFrames += 1;
     } catch {
-      /* 非帧边界（魔数偶然出现在帧数据里）时跳过 */
+      failedFrames += 1;
     }
   }
-  return text;
+  return { text, frames: slices.length, decodedFrames, failedFrames, complete };
+}
+
+/** 解一份会话日志，只要文本（兼容只关心内容的调用方）。 */
+export function decodeSessionLog(file) {
+  return decodeSessionLogDetailed(file).text;
 }
 
 /** workspace.json 里的 global 状态（只读）。 */
@@ -174,19 +286,32 @@ export function extractSessionFacts(text) {
   return { files: [...files].sort(), attachments, cwd };
 }
 
-/** 除 `skip` 之外的会话仍在引用的附件 id 集合。 */
+/**
+ * 除 `skip` 之外的会话仍在引用的附件 id 集合。
+ *
+ * 关键安全属性：**只要有任一日志解不完整，就放弃删任何附件**（`referenced: null`）。
+ * 少删只是浪费空间，多删会删掉别的会话还在用的图。
+ */
 export function referencedAttachments(home, stored, skip) {
   const referenced = new Set();
   for (const [id, entry] of stored) {
     if (skip.has(id)) continue;
     const log = join(entry.dir, 'session.v4.jsonl.zstd');
     if (!existsSync(log)) continue;
+    let decoded;
     try {
-      for (const m of decodeSessionLog(log).matchAll(/sha256:[a-f0-9]{64}/g)) referenced.add(m[0]);
+      decoded = decodeSessionLogDetailed(log);
     } catch {
-      /* 解不开就当它引用了所有东西：宁可少删 */
+      // 读不了 / 整个解不开
       return { referenced: null, skipped: id };
     }
+    // 文件必须正好由完整帧拼成，且每帧都解得开；否则按"不可信"处理。
+    // 截断是这里最危险的损坏形式（会静默漏掉尾部帧里的引用），而它只能靠
+    // `complete`（结构走帧）发现 —— 详见 decodeSessionLogDetailed 的注释。
+    if (!decoded.complete || decoded.failedFrames > 0 || (decoded.frames > 0 && decoded.decodedFrames === 0)) {
+      return { referenced: null, skipped: id };
+    }
+    for (const m of decoded.text.matchAll(/sha256:[a-f0-9]{64}/g)) referenced.add(m[0]);
   }
   return { referenced, skipped: null };
 }
@@ -289,76 +414,154 @@ export function renderManifest(entry, plan) {
  * @param options.attachments - 是否真删附件。
  * @param options.cleanRoster - 是否同时从 workspace.json 花名册摘除（**只在 DSH 停止时**做）。
  */
-export function executePlan(plan, { mode = 'trash', attachments = false, cleanRoster = false } = {}) {
+export function executePlan(
+  plan,
+  { mode = 'trash', attachments = false, cleanRoster = false, rosterOnly = false } = {},
+) {
   const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
   const trashRoot = join(plan.home, '.purge-trash', stamp);
   const results = [];
 
-  for (const entry of plan.entries) {
-    const moved = [];
-    const manifestTarget = entry.cwd
-      ? join(entry.cwd, `PURGED-${entry.id.replace(/^session-/, '').slice(0, 8)}.md`)
-      : join(plan.home, '.purge-trash', `${entry.id}.md`);
-    let manifestWritten = false;
-    try {
-      writeFileSync(manifestTarget, renderManifest(entry, plan), 'utf8');
-      manifestWritten = true;
-      moved.push(manifestTarget);
-    } catch {
-      /* 清单写不进去不阻止清理，但会上报 */
-    }
-    if (mode === 'trash') mkdirSync(trashRoot, { recursive: true });
-
-    const discard = (path, to) => {
-      if (!existsSync(path)) return;
-      if (mode === 'trash') {
-        mkdirSync(dirname(to), { recursive: true });
-        renameSync(path, to);
-      } else {
-        rmSync(path, { recursive: true, force: true });
+  // ── 花名册预处理：所有**可能失败**的步骤都提前到删除之前 ──────────────
+  // 读原文 → 解析 → 算出新内容 → 写备份，任一步抛错就 abort，此时磁盘上的会话
+  // 一个都还没动。最后只剩一次原子写。
+  //
+  // 注意**不要**把顺序倒过来（先写花名册再删数据）：那样一旦中途失败，磁盘上还在的
+  // 会话会失去工作区归属，而且再跑 `--roster-only` 也找不回来了（id 已不在花名册里）。
+  // 保持"先删数据、后清花名册"——失败模式只是花名册偏旧，重跑一次即可收敛。
+  let rosterPlan = null;
+  if (cleanRoster) {
+    // 只清花名册时，要摘的是"请求了但磁盘上已不存在"的 id；
+    // 真删模式下还要加上本次删掉的。
+    const goneIds = rosterOnly
+      ? new Set(plan.missing)
+      : new Set([...plan.entries.map((e) => e.id), ...plan.missing]);
+    if (goneIds.size > 0) {
+      // 改之前先留原文：roster 是唯一记录"会话属于哪个工作区"的地方，坏了没别处可查。
+      const raw = readFileSync(plan.workspaceFile, 'utf8');
+      writeFileSync(`${plan.workspaceFile}.bak-cleanroster-${Date.now()}`, raw, 'utf8');
+      const doc = JSON.parse(raw);
+      // 只在原本就有 global 时才动它，避免凭空造出一个键。
+      if (doc.global !== undefined && doc.global !== null) {
+        doc.global.archivedSessionIds = (doc.global.archivedSessionIds ?? []).filter((id) => !goneIds.has(id));
+        doc.global.pinnedSessionIds = (doc.global.pinnedSessionIds ?? []).filter((id) => !goneIds.has(id));
       }
-      moved.push(path);
-    };
-
-    discard(entry.dir, join(trashRoot, basename(entry.dir)));
-    discard(entry.projCache, join(trashRoot, 'projcache', basename(entry.projCache)));
-
-    if (attachments) {
-      for (const id of entry.deletableAttachments) {
-        const p = attachmentPath(plan.home, id);
-        discard(p, join(trashRoot, 'attachments', basename(p)));
+      for (const ws of Object.values(doc.tables?.workspaces ?? {})) {
+        ws.sessionIds = (ws.sessionIds ?? []).filter((id) => !goneIds.has(id));
       }
+      rosterPlan = { text: `${JSON.stringify(doc, null, 2)}\n`, removed: goneIds.size };
     }
-    results.push({ id: entry.id, manifest: manifestWritten ? manifestTarget : null, removed: moved.length });
   }
 
-  // 花名册清理要覆盖两类 id：本次真删掉的，以及"请求了但磁盘上已不存在"的
-  // （典型场景：先用 trash 移走，之后停服务再跑一次只清花名册）。
-  const goneIds = new Set([...plan.entries.map((e) => e.id), ...plan.missing]);
-  if (cleanRoster && goneIds.size > 0) {
-    // 改之前先留原文：roster 是唯一记录"会话属于哪个工作区"的地方，坏了没别处可查。
-    const raw = readFileSync(plan.workspaceFile, 'utf8');
-    writeFileSync(`${plan.workspaceFile}.bak-cleanroster-${Date.now()}`, raw, 'utf8');
-    const doc = JSON.parse(raw);
-    doc.global.archivedSessionIds = (doc.global.archivedSessionIds ?? []).filter((id) => !goneIds.has(id));
-    doc.global.pinnedSessionIds = (doc.global.pinnedSessionIds ?? []).filter((id) => !goneIds.has(id));
-    for (const ws of Object.values(doc.tables?.workspaces ?? {})) {
-      ws.sessionIds = (ws.sessionIds ?? []).filter((id) => !goneIds.has(id));
+  // ── 只清花名册：不碰任何会话数据 ────────────────────────────────────
+  // 这正是面板/脚本那三条命令该走的模式：它们宣称"只改 workspace.json，
+  // 不删任何会话数据"，以前却因为没传 --id 而把**全部**归档会话一起删了。
+  if (!rosterOnly) {
+    for (const entry of plan.entries) {
+      const moved = [];
+      const manifestTarget = entry.cwd
+        ? join(entry.cwd, `PURGED-${entry.id.replace(/^session-/, '').slice(0, 8)}.md`)
+        : join(plan.home, '.purge-trash', `${entry.id}.md`);
+      let manifestWritten = false;
+      let manifestError = null;
+      try {
+        writeFileSync(manifestTarget, renderManifest(entry, plan), 'utf8');
+        manifestWritten = true;
+        moved.push(manifestTarget);
+      } catch (error) {
+        // 清单写不进去不阻止清理，但要让调用方看得见 —— 以前只落在 results 里，
+        // 而 host 路由不回传它，面板永远看不到，"删前写清单"的承诺会无声落空。
+        manifestError = String(error?.message ?? error);
+      }
+      if (mode === 'trash') mkdirSync(trashRoot, { recursive: true });
+
+      const discard = (path, to) => {
+        if (!existsSync(path)) return;
+        if (mode === 'trash') {
+          mkdirSync(dirname(to), { recursive: true });
+          renameSync(path, to);
+        } else {
+          rmSync(path, { recursive: true, force: true });
+        }
+        moved.push(path);
+      };
+
+      discard(entry.dir, join(trashRoot, basename(entry.dir)));
+      discard(entry.projCache, join(trashRoot, 'projcache', basename(entry.projCache)));
+
+      if (attachments) {
+        for (const id of entry.deletableAttachments) {
+          const p = attachmentPath(plan.home, id);
+          discard(p, join(trashRoot, 'attachments', basename(p)));
+        }
+      }
+      results.push({
+        id: entry.id,
+        manifest: manifestWritten ? manifestTarget : null,
+        manifestError,
+        removed: moved.length,
+      });
     }
-    writeFileSync(plan.workspaceFile, `${JSON.stringify(doc, null, 2)}\n`, 'utf8');
   }
 
-  return { mode, trashRoot: mode === 'trash' ? trashRoot : null, results, cleanRoster };
+  if (rosterPlan !== null) {
+    // 删除已经发生；这一步是原子的，不会留下半截 JSON。
+    writeFileAtomicSync(plan.workspaceFile, rosterPlan.text);
+  }
+
+  return {
+    mode: rosterOnly ? 'roster-only' : mode,
+    trashRoot: !rosterOnly && mode === 'trash' ? trashRoot : null,
+    results,
+    cleanRoster,
+    rosterOnly,
+    rosterRemoved: rosterPlan === null ? 0 : rosterPlan.removed,
+    manifestFailures: results
+      .filter((r) => r.manifestError !== null)
+      .map((r) => ({ id: r.id, error: r.manifestError })),
+  };
 }
 
-/** DSH 是否在跑（决定能不能安全清理花名册）。 */
-export function dshLooksRunning(port = 3080) {
+/**
+ * DSH 是否在跑 —— 三态：`'running' | 'stopped' | 'unknown'`。
+ *
+ * 为什么不是布尔：改 `workspace.json` 必须停服（运行时内存态会把它覆盖回去），
+ * 所以**探测不出来的时候必须当成"在跑"**。旧实现在 curl 缺失 / 超时 / 端口不是 3080
+ * 时一律 `return false`（fail-open）—— "没探测到"被当成"没在跑"，于是清理会直接
+ * 去改运行中的花名册，而调用方还自以为安全。
+ */
+export function dshRunningState(port = 3080) {
+  // ① curl 最准：能连上就说明有东西在监听并应答（401 也算 —— 不带 -f，curl 仍返回 0）。
   try {
     execFileSync('curl', ['-s', '-o', '/dev/null', '-m', '2', `http://127.0.0.1:${port}/`], { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
+    return 'running';
+  } catch (error) {
+    // ENOENT = 本机根本没有 curl → 换别的探针，而不是判定"没在跑"。
+    // 其余情况（含 curl 自己的超时退出码 28）= curl 跑了但连不上 → 确实没在跑。
+    if (error?.code !== 'ENOENT') return 'stopped';
   }
+  // ② 退回看端口监听表。
+  for (const argv of [['-ltnH'], ['-ltn']]) {
+    try {
+      const out = execFileSync('ss', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+      return new RegExp(`[:.]${port}\\b`).test(out) ? 'running' : 'stopped';
+    } catch {
+      /* 没有 ss，试下一个 */
+    }
+  }
+  try {
+    const out = execFileSync('netstat', ['-ltn'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    return new RegExp(`[:.]${port}\\b`).test(out) ? 'running' : 'stopped';
+  } catch {
+    /* 也没有 netstat */
+  }
+  // ③ 一个可用探针都没有 → 不猜，交给调用方按"在跑"处理。
+  return 'unknown';
+}
+
+/** 布尔包装：只有**确定**没在跑才是 false（'unknown' 归入"可能在跑"）。 */
+export function dshLooksRunning(port = 3080) {
+  return dshRunningState(port) !== 'stopped';
 }
 
 /** 计划的可读输出。 */
@@ -400,34 +603,58 @@ function main(argv) {
   };
   const ids = value('--id') ? [value('--id')] : undefined;
   const attachments = flag('--attachments');
+  const rosterOnly = flag('--roster-only');
   const plan = buildPlan({ ids, attachments });
 
   console.log(renderPlan(plan, { attachments }));
+
+  if (rosterOnly) {
+    console.log('');
+    console.log(`--roster-only：只摘掉花名册里磁盘上已不存在的 ${plan.missing.length} 个 id，**不动任何会话数据**。`);
+  }
 
   if (!flag('--confirm')) {
     console.log('');
     console.log('这是 dry-run（没有改任何东西）。执行：');
     console.log(`  node ${process.argv[1]} --confirm${attachments ? ' --attachments' : ''}${flag('--hard') ? ' --hard' : ''}`);
     console.log('  缺省是移到 ~/dsh/.purge-trash/<时间戳>/（可回滚）；加 --hard 才真删。');
+    console.log(`  node ${process.argv[1]} --confirm --roster-only   # 只清花名册，不删任何会话`);
     return 0;
   }
 
-  const running = dshLooksRunning();
-  if (running && !flag('--force')) {
+  const running = dshRunningState();
+  if (running !== 'stopped' && !flag('--force')) {
     console.error('');
-    console.error('❌ DSH 似乎正在运行。安全起见：停止 dsh.service 后再执行（或加 --force 自行承担）。');
-    console.error('   理由：清理花名册要改 storages/workspace.json，运行时会被内存态覆盖。');
+    if (running === 'unknown') {
+      console.error('❌ 探测不出 DSH 是否在跑（本机没有 curl / ss / netstat）。');
+      console.error('   清理花名册要改 storages/workspace.json，运行时会被内存态覆盖，所以按"在跑"处理。');
+      console.error('   确认它已经停了，再加 --force。');
+    } else {
+      console.error('❌ DSH 似乎正在运行。安全起见：停止 dsh.service 后再执行（或加 --force 自行承担）。');
+      console.error('   理由：清理花名册要改 storages/workspace.json，运行时会被内存态覆盖。');
+    }
     return 2;
   }
 
   const result = executePlan(plan, {
     mode: flag('--hard') ? 'hard' : 'trash',
     attachments,
-    cleanRoster: flag('--clean-roster') || !running,
+    cleanRoster: rosterOnly || flag('--clean-roster') || running === 'stopped',
+    rosterOnly,
   });
   console.log('');
-  console.log(`✅ 完成：${plan.entries.length} 个会话，模式 ${result.mode}${result.cleanRoster ? ' + 已清理花名册' : ''}`);
-  if (result.trashRoot) console.log(`   回滚点：${result.trashRoot}（确认无误后自行删除）`);
+  if (result.rosterOnly) {
+    console.log(`✅ 完成：只清花名册，摘掉 ${result.rosterRemoved} 个 id；会话数据一个都没动。`);
+  } else {
+    console.log(
+      `✅ 完成：${plan.entries.length} 个会话，模式 ${result.mode}${result.cleanRoster ? ` + 已清理花名册（${result.rosterRemoved} 个 id）` : ''}`,
+    );
+    if (result.trashRoot) console.log(`   回滚点：${result.trashRoot}（确认无误后自行删除）`);
+  }
+  if (result.manifestFailures.length > 0) {
+    console.warn(`⚠️  有 ${result.manifestFailures.length} 个会话的产出清单没写出来（会话本身已按上面的模式处理）：`);
+    for (const f of result.manifestFailures) console.warn(`   ${f.id}：${f.error}`);
+  }
   return 0;
 }
 

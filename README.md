@@ -22,6 +22,12 @@
 
 第三方组件的授权与出处见 [`LICENSES/`](LICENSES/)。**两个第三方包都保持 MIT 原样分发**，
 包内保留了各自的 LICENSE / 仓库地址；改装部分（赛博主题）在原作者 MIT 授权范围内。
+`plugins/dsh-opencode-session-header` 是 vendored 的第三方副本（版本 0.1.0），其 `npm test` /
+`prepublishOnly` 无法运行，因为 `tests/` 未随包 vendored；请勿改动 vendored 内容。
+
+> `ops/bootstrap-machine.sh` 是 **DSH 主仓库根目录**那份 bootstrap 的副本：它 clone DSH 仓库、
+> 对仓库根与 `profiles/web` 各跑一次 `pnpm install`，并假定在 DSH 仓库根目录下执行。
+> 本包保留它只作参考 / 迁移材料，**不是本包自己的安装路径**（本包是把 bundle 加进已有 profile）。
 
 ## 安装
 
@@ -80,8 +86,8 @@ curl -s http://127.0.0.1:8318/health
 ```
 
 ⚠️ **抓包开关**：`DSH_ROUTER_CAPTURE=1` 会把 agentrouter 的**完整请求体**（含你的提示词和
-整段对话）明文写入 `capture-last-request.json`。默认关闭；只在排障时临时打开，用完立刻删除文件，
-**不要把抓到的内容随包分发**。
+整段对话）明文写入 `plugins/provider-router/captures/req-<时间戳>.json`（只保留最近 8 份）。默认关闭；
+只在排障时临时打开，用完立刻删除文件，**不要把抓到的内容随包分发**。
 
 ### ⚠️ node_modules 补丁 —— 不打就用不了 agentrouter
 
@@ -165,8 +171,7 @@ export BRIDGE_PORT=8317               # 可选
 services/commandcode-bridge/start.sh
 ```
 
-它按 `mode.json` 决定出口（`direct`/`ssr`），并会自动在源码布局与打包布局之间找到该文件；
-也可用 `DSH_PROVIDER_MODES` 指定。
+它按 `mode.json` 决定出口（`direct`/`ssr`），并会自动在源码布局与打包布局之间找到该文件。
 
 ## 云端部署清单
 
@@ -174,7 +179,7 @@ services/commandcode-bridge/start.sh
 2. 设 `DSH_SSR_PROXY` 指向那台机器的翻墙代理（没有就留默认/不管，直连照样工作）
 3. 按需写 `providers.json`
 4. 需要 CommandCode 就设 `COMMANDCODE_API_KEY` 并起桥接
-5. `restart-dsh.sh` 不是本包内容（属本机运维脚本）
+5. 重启脚本：本包在 `ops/restart-dsh.sh` 提供一份副本；本机实际在运行的是 `~/dsh/restart-dsh.sh`
 
 **不装也行的部分是安全的**：`provider-router` 没启动时，只有那些把 baseURL 指向它的供应商会失败；
 其余供应商不受影响。所以云端可以先只装不启用。

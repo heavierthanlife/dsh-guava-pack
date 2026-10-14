@@ -31,13 +31,31 @@ const MODELS = `${UPSTREAM}/provider/v1/models`;
 // 出口模式由 provider-router 插件的 mode.json 决定（热读，无需重启）：
 //   direct → 直连上游（实测 0.81s，当前最优）
 //   ssr    → 经 ShadowsocksR(127.0.0.1:2080) 出去（上游变慢/被墙时可切）
-const MODE_FILE = join(HERE, "..", "provider-router", "mode.json");
+//
+// 路径按布局自动找：源码布局是 themes/{commandcode-bridge,provider-router} 平级；
+// pack 布局是 services/commandcode-bridge + plugins/provider-router。
+// README 一直承诺"会自动在源码布局与打包布局之间找到该文件"，而以前代码里没有任何
+// fallback —— pack 布局下 MODE_FILE 不存在，异常被 catch 吞掉后**静默永远直连**，
+// 于是 direct/ssr 开关对桥接完全失效。
+const MODE_FILE_CANDIDATES = [
+  process.env.DSH_ROUTER_MODE_FILE,
+  join(HERE, "..", "provider-router", "mode.json"),
+  join(HERE, "..", "plugins", "provider-router", "mode.json"),
+].filter((p) => typeof p === "string" && p !== "");
 const SSR_PROXY = process.env.DSH_SSR_PROXY || process.env.SSR_PROXY || "http://127.0.0.1:2080";
 let ssrDispatcher = null;
 
+/** 第一个真实存在的候选路径；都不存在时返回第一个（读取失败仍走 direct 兜底）。 */
+function modeFile() {
+  for (const candidate of MODE_FILE_CANDIDATES) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return MODE_FILE_CANDIDATES[0] ?? join(HERE, "..", "provider-router", "mode.json");
+}
+
 async function commandcodeMode() {
   try {
-    const parsed = JSON.parse(await readFileSync(MODE_FILE, "utf8"));
+    const parsed = JSON.parse(readFileSync(modeFile(), "utf8"));
     if (parsed && typeof parsed.commandcode === "string") return parsed.commandcode;
   } catch {}
   return "direct";
