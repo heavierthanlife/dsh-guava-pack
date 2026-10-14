@@ -111,14 +111,20 @@ function checkCss() {
         const close = (css.match(/\}/g) ?? []).length;
         if (open !== close) problems.push(`花括号不平衡 ${open}/${close}`);
         for (const block of css.match(/\{[^}]*\}/g) ?? []) {
-          if (!block.includes('color:')) problems.push('有声明块缺少 color');
+          // 语义规则：凡声明了 --shiki-* 的块都必须同时给容器 color。
+          // 全局字体变量块（--dsw-font-mono）不在此列。
+          if (block.includes('--shiki-') && !block.includes('color:')) {
+            problems.push('有 token 声明块缺少 color');
+          }
         }
         for (const token of TOKENS) {
           if (!css.includes(`--shiki-token-${token}:`)) problems.push(`缺 --shiki-token-${token}`);
         }
         if (!css.includes('--shiki-background:')) problems.push('缺 --shiki-background');
         if (font && !css.includes('--ds-font-family-code')) problems.push('开了字体却没写 --ds-font-family-code');
+        if (font && !css.includes('--dsw-font-mono')) problems.push('开了字体却没写 --dsw-font-mono（文件查看器/日志/JSON 面板会漏）');
         if (!font && css.includes('--ds-font-family-code')) problems.push('关了字体却仍写 --ds-font-family-code');
+        if (!font && css.includes('--dsw-font-mono')) problems.push('关了字体却仍写 --dsw-font-mono');
         if (scheme !== 'auto' && !css.includes(`.dct-force-${scheme}`)) problems.push(`强制 ${scheme} 没有对应规则`);
         if (scheme === 'auto' && css.includes('.dct-force-')) problems.push('auto 模式不该出现强制规则');
         if (problems.length > 0) {

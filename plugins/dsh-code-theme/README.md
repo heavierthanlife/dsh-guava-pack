@@ -52,6 +52,8 @@ body[data-ds-dark-theme] { --shiki-token-keyword:#faa2c1; … }   /* 深色 */
 
 直接在元素上设变量即可压过主题在 `:root` 上的设定（就近声明优先，与特异性无关）。字体栈带完整回退，没装该字体也不会变丑；手机上没有这个字体时会落到系统等宽字体。
 
+**侧栏的文件查看器、日志、JSON 面板走的是另一条路**：它们用的是 `--dsw-font-mono`，而宿主里**没有任何地方定义它** —— 所以它们的 `var(--dsw-font-mono, ui-monospace…)` 永远取回退值。开启字体时插件会额外写一条 `:root:root{--dsw-font-mono:…}`（双写 `:root` 提权），一次性覆盖这些等宽区域。`--dsw-font-mono` 的消费方只有 4 个包（文件查看器 / 日志 / 插件管理 / agent preset），全是等宽技术区域，所以设成全局是安全的。
+
 ## 加一套调色板
 
 1. 在 `client.js` 的 `PALETTES` 里加一项（必须同时给 `light` 与 `dark`，宿主要求成对）

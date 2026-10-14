@@ -409,6 +409,11 @@ window.__ModuleLoader__.load({
 
       const lines = [
         `/* ${PKG_ID} · ${palette.label} · ${scheme}${codeFont ? ' · Maple Mono CN' : ''} */`,
+        // 侧栏的文件查看器、日志、JSON 面板用的是 `--dsw-font-mono` —— 而宿主里
+        // **没有任何地方定义它**，所以它们的 `var(--dsw-font-mono, ui-monospace…)`
+        // 永远走回退值。定义它就一次性统一了这些等宽区域。
+        // `:root:root` 双写提权，压过基础样式表可能存在的同名定义。
+        ...(codeFont ? [`:root:root{--dsw-font-mono:${CODE_FONT}}`] : []),
         `${scope(':root', CODE_SEL)}{${decls(palette.light)}}`,
         `${scope(':root body[data-ds-dark-theme]', CODE_SEL)}{${decls(palette.dark)}}`,
         `:root :not(pre) > code{color:${palette.light.foreground};background:${palette.light.inline}}`,
