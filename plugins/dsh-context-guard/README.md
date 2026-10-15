@@ -89,7 +89,8 @@ standing key, so the mount is **not under the agent's fiber**"，被 `isolate` �
 
 **后果二**：preset 自带的「步间」自动压缩（默认 `thresholdRatio: 0.8`）**仍然存在**，
 而且**没法从这里关掉** —— 对禁用行做 config 覆盖是空操作，而 preset 里的
-`compaction-basic` 行在四个 preset 里各有一份、id 相同，按 id 覆盖只会命中其中一个。
+`compaction-basic` 行在**多个 preset 里各有一份、id 相同**（实测 **3** 个：
+`cordis` / `ptc` / `standard`；`minimal` 里没有），按 id 覆盖只会命中其中一个。
 本插件的缓解办法是每轮结束就主动压到 60% 以下，所以步间压缩在实践中很少介入。
 **要彻底禁止步间压缩，需要改 agent preset**（另一件事，建议单独做）。
 

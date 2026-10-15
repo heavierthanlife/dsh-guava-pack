@@ -9,6 +9,9 @@
     "description": "只清理已归档会话的记录，保留工作区产出品；删除前先写 PURGED-<id>.md 清单。"
   },
   "exports": { ".": "./index.js", "./client": "./client.js" },
+  "scripts": {
+    "test": "node tests/sync-async.mjs"
+  },
   "dsh": {
     "bundle": { "patch": "./cordis.patch.yml" },
     "client": {

@@ -60,6 +60,8 @@ const REQUIRED = [
   'plugins/dsh-session-purge/cordis.patch.yml',
   'plugins/dsh-session-purge/lib/core.mjs',
   'plugins/dsh-session-purge/clean-roster.sh',
+  // 同步/异步等价性自检（`npm test` 跑的就是它）。会删数据的插件，这条测试不能少。
+  'plugins/dsh-session-purge/tests/sync-async.mjs',
   'plugins/dsh-code-theme/package.json',
   'plugins/dsh-code-theme/cordis.patch.yml',
   'plugins/dsh-code-theme/client.js',
@@ -90,6 +92,7 @@ const MIN_BYTES = {
   'plugins/provider-router/providers.example.json': 100,
   'plugins/dsh-session-purge/lib/core.mjs': 2000,
   'plugins/dsh-session-purge/clean-roster.sh': 100,
+  'plugins/dsh-session-purge/tests/sync-async.mjs': 1500,
   'plugins/dsh-opencode-session-header/tests/smoke.mjs': 3000,
   'plugins/dsh-code-theme/client.js': 2000,
   'plugins/dsh-code-theme/tools/check-contrast.mjs': 500,

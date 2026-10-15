@@ -20,8 +20,9 @@
 | `ops/` | 运维脚本：`bootstrap-machine.sh`（新机装 dsh.service + linger）、`restart-dsh.sh`、`tailnet-url.sh`（打印带 token 的手机访问地址）、`dsh.service`、`bashrc.dsh.example`、`wsl.conf.example`；`NETWORK-NOTES.md` 手机连不上/流式卡/Tailscale 绕代理的排查手册 | 自研 |
 | `services/commandcode-bridge` | 把 OpenAI 格式转成 Command Code 内部端点 | 自研 |
 
-第三方组件的授权与出处见 [`LICENSES/`](LICENSES/)。**两个第三方包都保持 MIT 原样分发**，
-包内保留了各自的 LICENSE / 仓库地址；改装部分（赛博主题）在原作者 MIT 授权范围内。
+第三方组件的授权与出处见 [`LICENSES/`](LICENSES/)。**两个第三方包都在原作者 MIT 授权范围内**：
+`dsh-theme-cyberpunk2077` 是**改装衍生版**（改动逐条记在 LICENSES §1）；`dsh-opencode-session-header`
+是**原样分发**（未改一个字节）。两者都保留了各自的 LICENSE / 仓库地址。
 `plugins/dsh-opencode-session-header` 是 vendored 的第三方副本（版本 0.1.0）：它的 `tests/smoke.mjs`
 已从上游 v0.1.0 **原样收录**，所以 `npm test` 可以跑（13 passed / 0 failed）。
 `package.json` 未改动。上游出新的话，`tests/` 也要一起更新。
@@ -57,8 +58,11 @@ systemctl --user restart dsh.service      # 或你原来的启动方式
 >
 > ⚠️ **改客户端插件（`client.js`）后刷新页面即可，不必重启 DSH。**
 > 客户端 bundle 由 `/plugins/??<ids>&rev=<hash>` 提供，响应头是
-> `public, max-age=31536000, immutable`；但 `rev` 由各文件的 **mtime + size** 算出、
-> **每次请求重算**（实测：改完文件不重启，页面里引用的 rev 立刻变了）。
+> `public, max-age=31536000, immutable`，所以必须靠 `rev` 变化来失效。
+> `rev` = `framedHash("plugin-artifact",[mtimeMs, ctimeMs, size])`，取的是**激活时的快照**，
+> **不是每次请求重算**；刷新靠 `dsh-client-hmr` 每 **500ms** `stat` 轮询，变了才重建并通知浏览器。
+> （原文写"每次请求重算 mtime+size"是错的 —— 结论"刷新即生效"仍然成立，但机制不同：
+> 靠的是 HMR 轮询，不是请求时重算。）
 > 刷新后仍是旧行为的话，那是浏览器端缓存 —— 用带查询参数的地址打开（如 `?v=2`）
 > 或清一次该站点存储。**host 侧（`index.js`）改动才需要重启。**
 
@@ -192,8 +196,8 @@ dsh --profile web --dump-config | grep -nE "dsh-guava-pack|mobile-ui|provider-ro
 node install.mjs --check
 ```
 
-浏览器里应看到设置页多出「移动端显示 / 主题管理 / 供应商路由 / 连接信息」，
-主题列表里多出「Cyberpunk 2077」。
+浏览器里应看到设置页多出 **5 项**：「移动端显示 / 主题管理 / 供应商路由 / 连接信息 / **代码配色**」，
+主题列表里多出「Cyberpunk 2077」；侧栏还会多一行「清理归档会话」（在「设置」之上）。
 
 ## 已知边界
 
