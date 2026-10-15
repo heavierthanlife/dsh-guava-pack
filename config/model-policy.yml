@@ -1,0 +1,138 @@
+# model-policy.yml — 我对各家供应商"要哪些模型"的固定意图
+#
+# ── 这是什么 ────────────────────────────────────────────────────────────────
+#
+# `tools/sync-model-policy.mjs` 读这份文件 + 各端点现状，算出**目标模型清单**，
+# 与 profile 里现有的对比后按需增删。这样"我的模型列表"是可复现的：
+# 换台机器、或者端点换了茬，跑一次就回到这个意图，不用凭记忆手工挑。
+#
+# 与 `sync-models.mjs` 的分工：
+#   · `sync-models.mjs`      —— 只"补新的"，**默认一个都不删**（保守）
+#   · `sync-model-policy.mjs` —— 按**策略**增删到目标清单（激进，但意图明确）
+#
+# ── 重要前提：端点给不出"谁更好" ─────────────────────────────────────────────
+#
+# 实测 6 家 `/models` 只回 `id` / `name` / `created` / `context`，
+# **没有任何能力字段**（无视觉、无思考强度、无"旗舰"标记）。
+# 而且 `created` 是**假时间戳** —— agentrouter 全是 1626777600（2021-07-20），
+# 其余三家各自也全是同一个数 → **不能用来排"最新"**。
+#
+# 所以规则只能基于：**id 里的版本号 + 关键词 + 你的人工指定**。
+# 下面每条 `intent` 是给你看的（人话），`pick` 是给程序执行的（可判定）。
+#
+# ── 硬保护（写死在脚本里，不在这里配）──────────────────────────────────────
+#
+# 任何被别的条目引用的模型 **一律不删**，即使策略说不要：
+#   · `agent-default-model.config` 的 provider/model（**本机现在指着一个免费模型**）
+#   · `subagent-model-selection-settings.allowedModels` 的每条路由
+# 理由：删了会让主 agent 没有默认模型 / 子代理路由报 "is not allowed for this Session"。
+# 脚本每次都会打印这些"被引用因此保留"的条目。
+#
+# ── 用法 ────────────────────────────────────────────────────────────────────
+#
+#   node tools/sync-model-policy.mjs                 # 预览 diff（默认，不写盘）
+#   node tools/sync-model-policy.mjs --write         # 落盘（自动备份）
+#   node tools/sync-model-policy.mjs --only xiaomi-token-plan-cn
+#   node tools/sync-model-policy.mjs --check-refs    # 只做引用完整性检查，不改任何东西
+
+version: 1
+
+# 全局开关
+defaults:
+  # 端点查不到任何模型时怎么办：`keep` 保留现有（安全）/ `clear` 清空
+  on_probe_failure: keep
+  # 新增模型是否自动配 reasoningEfforts（按 tools/lib/model-config.mjs 的家族表）
+  auto_reasoning_efforts: true
+  # 非对话模型一律排除（tts/asr/embed/image-gen 这类，选模型时是噪音）
+  exclude: '(tts|asr|voiceclone|voicedesign|embed|rerank|moderation)'
+  # 大小写不敏感（JS 的 RegExp 不支持 Python 那种内联 (?i)）
+  exclude_flags: 'i'
+
+providers:
+
+  # ── 小米 token plan ───────────────────────────────────────────────────────
+  # 意图：mimo 系列里一直用**可用范围内最新的旗舰**；
+  #       旗舰有视觉就只要旗舰；旗舰没有视觉就额外保留一个视觉型号。
+  xiaomi-token-plan-cn:
+    intent: mimo 最新旗舰（有视觉就只要它；没视觉再补一个视觉型号）
+    pick:
+      family: '^mimo-'
+      # **关键**：取最新的一个，不是 family 全部匹配。
+      # 少了这行会把 mimo-v2.5 / v2.5-pro 这些旧旗舰一起留下（踩过）。
+      take: latest
+      # 旗舰关键词的优先级（从高到低）
+      flagship: ['pro']
+      # 排除非对话
+      exclude: ['-asr', '-tts', '-voiceclone', '-voicedesign']
+      # true = 只留最新的旗舰；若它不带视觉，再额外留一个最新的视觉型号
+      flagship_only_if_vision: true
+      # 视觉判断：**先读现有条目里人工写的 input:**（真数据），
+      # 只有 profile 里还没有的新模型才用这些 id 关键词兜底。
+      vision_hints: ['vl', 'vision', 'omni', 'image']
+
+  # ── antigravity（反代）─────────────────────────────────────────────────────
+  # 意图：反代能提供的、我认定的最好的五个 —— **人工点名，不用启发式**。
+  #       这五个是 2026-10-15 定的；反代换茬时脚本会报告"点名的某个不见了"，
+  #       由你决定换成哪个（脚本不会自己乱选）。
+  antigravity:
+    intent: 人工点名的五个（思考旗舰 / 通用 / 高推理 gemini / tiered / 图像）
+    pick:
+      explicit:
+        - claude-opus-4-6-thinking
+        - claude-sonnet-4-6
+        - gemini-3.8-flash-high
+        - gemini-3.8-flash-tiered
+        - gemini-3.1-flash-image
+      # 端点没列出点名的型号时：keep = 保留（可能被服务端别名）/ drop = 删掉
+      on_missing: keep
+
+  # ── agentrouter ───────────────────────────────────────────────────────────
+  # 意图：要**最新的可用 ds**。
+  agentrouter:
+    intent: 最新的可用 deepseek
+    pick:
+      family: '^deepseek'
+      exclude: []          # 该家只有 4 个模型，没有非对话噪音
+      # take: latest = 取版本号最高的一个
+      take: latest
+
+  # ── opencode-go / opencode / commandcode ──────────────────────────────────
+  # 意图：除了 ds，只要**最新的可用的免费模型**。
+  #       这三家都同时提供付费与免费；免费的量足够日常用，付费的不用列出来占位。
+  opencode-go:
+    intent: 最新的 ds + 最新的免费模型
+    pick:
+      family: '^deepseek'
+      take: latest
+      plus_free: latest      # 除 family 外，再取最新的免费模型
+
+  opencode:
+    intent: 最新的 ds + 最新的免费模型
+    pick:
+      family: '^deepseek'
+      take: latest
+      plus_free: latest
+
+  commandcode:
+    intent: 最新的 ds + 最新的免费模型
+    pick:
+      family: '^deepseek'
+      take: latest
+      plus_free: latest
+      # commandcode 的 id 常带 `vendor/` 前缀；family 匹配会自动去前缀
+      exclude: []
+
+# ── 视觉推断表 ──────────────────────────────────────────────────────────────
+# 端点上**没有**视觉字段（实测 6 家都没有），所以只能按 id 关键词推断。
+# 这直接影响"旗舰没视觉时要补一个视觉型号"这条规则。
+# 判断错的代价：某个模型被标成非视觉 → 会在有个"看图"需求时选不到它。
+# 宁可多标几个（下面的 hint 都是明确表示多模态的词）。
+vision_hints: ['vl', 'vision', 'omni', 'image', 'multimodal']
+
+# ── 版本号抽取 ──────────────────────────────────────────────────────────────
+# 用来判"最新"。从 id 里抓版本数字段：`gemini-3.8-flash-high` → [3,8]
+# `deepseek-v4.1-flash` → [4,1]；`claude-opus-4-6` → [4,6]。
+# 注意：这是**启发式**，端点不给真实发布时间（created 是假的）。
+version_patterns:
+  - 'v(\d+(?:\.\d+)*)'          # v4 / v4.1
+  - '(\d+(?:\.\d+)*)'           # 3.8 / 4-6（连字符数字由 normalize 处理）

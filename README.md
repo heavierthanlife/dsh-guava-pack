@@ -17,6 +17,7 @@
 | `plugins/dsh-session-purge` | 清理已归档会话记录（保留产出并写清单），侧栏入口在设置上方一行 | 自研 |
 | `plugins/dsh-code-theme` | 只给代码上色（Monokai Pro / Material / One Dark / GitHub / **OpenCode 官方色值**，共 5 套），自动跟随明暗 + 可强制代码区明暗；附 WCAG 对比度自检 | 自研 |
 | `config/cordis.patch.example.yml` | provider / 模型目录示例（6 家、24 个模型，全走本机路由） | 自研 |
+| `config/model-policy.yml` | **模型选型意图表** —— 每家要哪些模型（`sync-model-policy` 读它） | 自研 |
 | `ops/` | 运维脚本：`bootstrap-machine.sh`（新机装 dsh.service + linger）、`restart-dsh.sh`、`tailnet-url.sh`（打印带 token 的手机访问地址）、`dsh.service`、`bashrc.dsh.example`、`wsl.conf.example`；`NETWORK-NOTES.md` 手机连不上/流式卡/Tailscale 绕代理的排查手册 | 自研 |
 | `services/commandcode-bridge` | 把 OpenAI 格式转成 Command Code 内部端点 | 自研 |
 
@@ -180,6 +181,63 @@ node tools/sync-models.mjs --prune --write   # 顺手删掉端点已无的（慎
 ⚠️ 另一个实测结论值得记下来：**「官方说会自动升级到新模型」未必属实**。
 antigravity 的 `gemini-3.5-flash` 调用后直接返回文字
 "Gemini 3.5 Flash is no longer…"，**并没有**自动连到 3.8。
+
+### 按自己的意图固定模型列表（sync-model-policy）
+
+`sync-models` 是"**只补不删**"的保守同步。如果你想**主动收敛**成一份明确的清单
+（"xiaomi 只要最新旗舰"、"这几家除了 ds 只留最新免费"），用：
+
+```sh
+node tools/sync-model-policy.mjs                 # 预览 diff（默认，不写盘）
+node tools/sync-model-policy.mjs --write         # 落盘（自动备份）
+node tools/sync-model-policy.mjs --only xiaomi-token-plan-cn
+node tools/sync-model-policy.mjs --check-refs    # 只查引用完整性，exit 2 = 有悬空
+```
+
+意图写在 **`config/model-policy.yml`**（人话 + 可判定规则），改它就能改行为。
+
+**每天自动跑一次**（09:30），加一行 crontab 即可：
+
+```sh
+crontab -e
+# 每天 09:30 按策略收敛；日志留一份好回看
+30 9 * * * cd $HOME/dsh/playground/themes/dsh-guava-pack && /usr/bin/node tools/sync-model-policy.mjs --write >> $HOME/dsh/logs/model-policy.log 2>&1
+```
+
+用 cron 而不是插件内置定时器，是因为**不依赖 DSH 是否开着**，也更好调试。
+手动触发就再跑一次同样的命令。
+
+#### ⚠️ 三条必须先知道的事实（实测）
+
+1. **端点给不出"谁更好"。** 实测 6 家 `/models` 只回 `id`/`name`/`created`/`context`，
+   **没有任何能力字段**（没视觉标记、没思考强度、没"旗舰"标记）。
+2. **`created` 是假时间戳。** agentrouter 全是 `1626777600`（2021-07-20），其余三家
+   各自也全是同一个数 → **不能用来排"最新"**。所以"最新"只能按 **id 里的版本号**
+   启发式判断。
+3. **"最好的五个"无法自动判断。** 所以 antigravity 那份是**人工点名**的
+   （写在 `pick.explicit`），脚本只负责忠实执行 + 在点名的型号消失时提醒你。
+
+#### 🔒 硬保护：被引用的模型永不删
+
+凡是**被别的条目引用**的模型，即使策略说不要也一律保留：
+
+- `agent-default-model` 的 `provider`/`model` —— **本机它就指着一个免费模型**
+  （`commandcode::stealth/glyph-cluster:free`）。扫描器很容易把它当"不要的"删掉，
+  然后主 agent 就没有默认模型了。
+- `subagent-model-selection-settings.allowedModels` 的每条路由 —— 删了那些路由会报
+  `LLM provider "…" is not allowed for this Session`。
+
+脚本每次都会打印"🔒 保留 …（被 … 引用）"。这条是拿构造场景实测过的，不是宣称。
+
+#### 思考强度
+
+端点上**完全拿不到** reasoning effort（要发真实请求才知道），所以按 **id 家族**套用，
+规律是从现有手工配置里归纳的（见 `tools/lib/model-config.mjs` 的 `EFFORT_FAMILIES`）：
+deepseek 血统 → `low/medium/high`（opencode 系实测支持 `max`）；antigravity 的 claude →
+`low/medium/high`；**gemini 与免费模型不给**（手工条目也没给，给错档位会导致请求 400）。
+**你手工写在 profile 里的值永远优先**，脚本不会覆盖已存在条目的元数据。
+
+自检：`node tools/tests/model-policy.mjs`（23 项，含缩进往返、引用识别、efforts 家族）。
 
 ### 让 DSH 真的走路由代理
 
