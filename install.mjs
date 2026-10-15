@@ -71,6 +71,10 @@ const REQUIRED = [
   'services/commandcode-bridge/stop.sh',
   'tools/sync-plugins.mjs',
   'tools/sync-models.mjs',
+  'tools/sync-model-policy.mjs',
+  'tools/lib/model-config.mjs',
+  'tools/tests/model-policy.mjs',
+  'config/model-policy.yml',
   'patches/apply-required-array.sh',
   'patches/apply-anthropic-tool-fixes.sh',
 ];
@@ -100,7 +104,11 @@ const MIN_BYTES = {
   'services/commandcode-bridge/start.sh': 300,
   'services/commandcode-bridge/stop.sh': 100,
   'tools/sync-plugins.mjs': 1000,
-  'tools/sync-models.mjs': 2000,
+  'tools/sync-models.mjs': 1000,
+  'tools/sync-model-policy.mjs': 3000,
+  'tools/lib/model-config.mjs': 3000,
+  'tools/tests/model-policy.mjs': 2000,
+  'config/model-policy.yml': 1000,
   'patches/apply-required-array.sh': 300,
   'patches/apply-anthropic-tool-fixes.sh': 500,
 };
