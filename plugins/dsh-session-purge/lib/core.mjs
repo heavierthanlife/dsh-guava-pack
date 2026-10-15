@@ -33,6 +33,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   closeSync,
   existsSync,
@@ -317,6 +318,56 @@ export function referencedAttachments(home, stored, skip) {
   return { referenced, skipped: null };
 }
 
+/**
+ * 会话目录的写锁现在有没有被别人持有。
+ *
+ * 机制：DSH 的持久化层用内核 `flock(2)` 锁住会话目录里的 `session.lock`
+ * （`@deepseek-ai/dsh-session-persistence-jsonl` 的 lease 模块）。框架自己的原话是：
+ * "Removing a live session's lock file therefore forfeits exclusion on POSIX
+ *  (nothing in the harness does so)" —— 也就是**本插件是全框架唯一会删掉活跃会话锁
+ * 文件的地方**。删掉它，两个写者就可能同时往同一份日志追加，把日志写坏。
+ *
+ * 我们不改设计，只是**动手之前先问内核一句**：能拿到独占锁就说明没有活写者。
+ *
+ * @returns {'free'|'held'|'unknown'}
+ *   free    —— 没人持有（或压根没有锁文件 = 该会话还没落盘）
+ *   held    —— 有活写者持有，必须跳过
+ *   unknown —— 本机没有 flock(util-linux)，判断不了
+ */
+export function sessionLockState(dir) {
+  const lockPath = join(dir, 'session.lock');
+  // 先看文件在不在：`flock` 默认带 O_CREAT，**会凭空造出一个锁文件** ——
+  // 而 plan 阶段必须严格只读。文件不存在 = 没有落盘足迹 = 没人持有。
+  if (!existsSync(lockPath)) return 'free';
+  try {
+    // -n = 非阻塞：拿不到就立刻失败，不排队。
+    execFileSync('flock', ['-n', lockPath, '-c', 'true'], { stdio: 'ignore' });
+    return 'free'; // 拿到了独占锁 → 没有活写者
+  } catch (error) {
+    if (error?.code === 'ENOENT') return 'unknown'; // 本机没有 flock
+    // util-linux 的退出码 1 = 未能获取锁（EAGAIN/EWOULDBLOCK）= 有人持有。
+    // 其它非零（用法错、打不开文件）也按"拿不准"处理 —— 方向一致：不删。
+    return error?.status === 1 ? 'held' : 'unknown';
+  }
+}
+
+/**
+ * 计划的指纹：**要删的会话 id 集合** + 附件开关 + 模式。
+ *
+ * 用于把"确认令牌"绑到用户实际看过的那一套上 —— 这样即使有人在同源页面里
+ * 直接发 `execute`，也不能去删用户没确认过的另一批会话。
+ * 只用 id（不用体积/时间），因为体积会随写者追加而变化，用它会让指纹无谓地失效。
+ */
+export function planDigest(plan, { attachments = false, mode = 'trash' } = {}) {
+  const ids = plan.entries.map((e) => e.id).sort();
+  const payload = JSON.stringify({
+    ids,
+    attachments: attachments === true,
+    mode: mode === 'hard' ? 'hard' : 'trash',
+  });
+  return createHash('sha256').update(payload).digest('hex');
+}
+
 /** 附件对象路径。 */
 export function attachmentPath(home, id) {
   const sha = id.slice('sha256:'.length);
@@ -450,14 +501,43 @@ export function renderManifest(entry, plan) {
  * @param options.mode - `trash`（移到 DSH_HOME/.purge-trash，可回滚）或 `hard`。
  * @param options.attachments - 是否真删附件。
  * @param options.cleanRoster - 是否同时从 workspace.json 花名册摘除（**只在 DSH 停止时**做）。
+ * @param options.rosterOnly - 只清花名册，**一个会话都不碰**。
+ * @param options.ignoreLocks - 跳过写锁预检（默认不跳；见下方说明）。
  */
 export function executePlan(
   plan,
-  { mode = 'trash', attachments = false, cleanRoster = false, rosterOnly = false } = {},
+  { mode = 'trash', attachments = false, cleanRoster = false, rosterOnly = false, ignoreLocks = false } = {},
 ) {
   const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
-  const trashRoot = join(plan.home, '.purge-trash', stamp);
   const results = [];
+  // 回滚点目录名带秒级时间戳，而 `renameSync` 到**已存在**的目录会 ENOTEMPTY。
+  // 同一秒内重跑（脚本连续跑两次、或上一轮留下的同名目录）就会让整个清理中途失败，
+  // 而且是在已经搬走一部分会话之后。加后缀保证目标一定不存在。
+  let trashRoot = join(plan.home, '.purge-trash', stamp);
+  if (!rosterOnly && mode === 'trash') {
+    for (let n = 2; existsSync(trashRoot); n += 1) {
+      trashRoot = join(plan.home, '.purge-trash', `${stamp}-${n}`);
+    }
+  }
+
+  // ── 0) 写锁预检：动手之前先问内核"这些会话有没有活写者" ────────────────
+  // 必须在最前面：因为"到底哪些会被真删"要同时喂给下面的花名册预处理
+  // （而花名册的备份也必须在任何删除之前完成）。
+  //
+  // 被活写者持有的会话一律**跳过**，而不是硬删 —— 删掉它的 `session.lock`
+  // 会让两个写者同时往同一份日志追加（框架里只有这里会干这种事）。
+  const skippedLocked = [];
+  const removable = [];
+  if (rosterOnly || ignoreLocks) {
+    // 只清花名册本来就不碰会话数据；ignoreLocks 是用户显式要求跳过预检。
+    removable.push(...plan.entries);
+  } else {
+    for (const entry of plan.entries) {
+      const state = sessionLockState(entry.dir);
+      if (state === 'free') removable.push(entry);
+      else skippedLocked.push({ id: entry.id, state });
+    }
+  }
 
   // ── 花名册预处理：所有**可能失败**的步骤都提前到删除之前 ──────────────
   // 读原文 → 解析 → 算出新内容 → 写备份，任一步抛错就 abort，此时磁盘上的会话
@@ -469,10 +549,10 @@ export function executePlan(
   let rosterPlan = null;
   if (cleanRoster) {
     // 只清花名册时，要摘的是"请求了但磁盘上已不存在"的 id；
-    // 真删模式下还要加上本次删掉的。
+    // 真删模式下还要加上**本次真的会删掉的**（不含因写锁被跳过的）。
     const goneIds = rosterOnly
       ? new Set(plan.missing)
-      : new Set([...plan.entries.map((e) => e.id), ...plan.missing]);
+      : new Set([...removable.map((e) => e.id), ...plan.missing]);
     if (goneIds.size > 0) {
       // 改之前先留原文：roster 是唯一记录"会话属于哪个工作区"的地方，坏了没别处可查。
       const raw = readFileSync(plan.workspaceFile, 'utf8');
@@ -494,7 +574,7 @@ export function executePlan(
   // 这正是面板/脚本那三条命令该走的模式：它们宣称"只改 workspace.json，
   // 不删任何会话数据"，以前却因为没传 --id 而把**全部**归档会话一起删了。
   if (!rosterOnly) {
-    for (const entry of plan.entries) {
+    for (const entry of removable) {
       const moved = [];
       // 与 renderPlan 共用同一个解析函数，预览与实做不会跑偏。
       const manifestTarget = manifestPathFor(entry, plan.home).path;
@@ -527,19 +607,27 @@ export function executePlan(
         moved.push(path);
       };
 
-      discard(entry.dir, join(trashRoot, basename(entry.dir)));
-      discard(entry.projCache, join(trashRoot, 'projcache', basename(entry.projCache)));
+      // 单个会话删不动（权限、目录非空、设备忙…）**不能让整轮清理中断** ——
+      // 以前一个 ENOTEMPTY 就抛到最外层，前面已经搬走的会话连报告都没有。
+      let removeError = null;
+      try {
+        discard(entry.dir, join(trashRoot, basename(entry.dir)));
+        discard(entry.projCache, join(trashRoot, 'projcache', basename(entry.projCache)));
 
-      if (attachments) {
-        for (const id of entry.deletableAttachments) {
-          const p = attachmentPath(plan.home, id);
-          discard(p, join(trashRoot, 'attachments', basename(p)));
+        if (attachments) {
+          for (const id of entry.deletableAttachments) {
+            const p = attachmentPath(plan.home, id);
+            discard(p, join(trashRoot, 'attachments', basename(p)));
+          }
         }
+      } catch (error) {
+        removeError = String(error?.message ?? error);
       }
       results.push({
         id: entry.id,
         manifest: manifestWritten ? manifestTarget : null,
         manifestError,
+        removeError,
         removed: moved.length,
       });
     }
@@ -557,9 +645,15 @@ export function executePlan(
     cleanRoster,
     rosterOnly,
     rosterRemoved: rosterPlan === null ? 0 : rosterPlan.removed,
+    // 因写锁被跳过的会话（state: 'held' 有活写者 / 'unknown' 本机没有 flock）。
+    skippedLocked,
     manifestFailures: results
       .filter((r) => r.manifestError !== null)
       .map((r) => ({ id: r.id, error: r.manifestError })),
+    // 单个会话没删掉的原因（不影响其它会话）。
+    removeFailures: results
+      .filter((r) => r.removeError !== null)
+      .map((r) => ({ id: r.id, error: r.removeError })),
   };
 }
 
@@ -683,15 +777,32 @@ function main(argv) {
     attachments,
     cleanRoster: rosterOnly || flag('--clean-roster') || running === 'stopped',
     rosterOnly,
+    ignoreLocks: flag('--ignore-locks'),
   });
   console.log('');
   if (result.rosterOnly) {
     console.log(`✅ 完成：只清花名册，摘掉 ${result.rosterRemoved} 个 id；会话数据一个都没动。`);
   } else {
     console.log(
-      `✅ 完成：${plan.entries.length} 个会话，模式 ${result.mode}${result.cleanRoster ? ` + 已清理花名册（${result.rosterRemoved} 个 id）` : ''}`,
+      `✅ 完成：${result.results.length} 个会话，模式 ${result.mode}${result.cleanRoster ? ` + 已清理花名册（${result.rosterRemoved} 个 id）` : ''}`,
     );
     if (result.trashRoot) console.log(`   回滚点：${result.trashRoot}（确认无误后自行删除）`);
+  }
+  if (result.skippedLocked.length > 0) {
+    // 这是**保护**而不是失败：被跳过的会话还在原地，随时可以停服后再来一次。
+    console.warn(`⚠️  有 ${result.skippedLocked.length} 个会话正在被写入（写锁被持有），已跳过、未删除：`);
+    for (const s of result.skippedLocked) {
+      console.warn(
+        s.state === 'held'
+          ? `   ${s.id}：session.lock 被活写者持有 —— 删掉它会让两个写者同时写同一份日志`
+          : `   ${s.id}：本机没有 flock(util-linux)，无法确认有没有写者`,
+      );
+    }
+    console.warn('   等它们写完（或停掉 DSH）再重跑即可；确实要跳过这项检查，加 --ignore-locks。');
+  }
+  if (result.removeFailures.length > 0) {
+    console.warn(`⚠️  有 ${result.removeFailures.length} 个会话没能删掉（其余已按上面的模式处理）：`);
+    for (const f of result.removeFailures) console.warn(`   ${f.id}：${f.error}`);
   }
   if (result.manifestFailures.length > 0) {
     console.warn(`⚠️  有 ${result.manifestFailures.length} 个会话的产出清单没写出来（会话本身已按上面的模式处理）：`);

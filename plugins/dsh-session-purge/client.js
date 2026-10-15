@@ -41,6 +41,10 @@ window.__ModuleLoader__.load({
         refresh: '刷新',
         failed: '失败：{message}',
         manifestFailed: '⚠️ 有 {count} 个会话的产出清单没写出来 —— 会话本身已按上面的模式处理，但清单缺失',
+        skippedLocked: '⚠️ 有 {count} 个会话正在被写入（写锁被持有），已跳过、未删除 —— 等它们写完再试',
+        removeFailed: '⚠️ 有 {count} 个会话没能删掉（其余已处理）—— 详见 CLI 输出',
+        errConfirmRequired: '确认已失效（令牌过期或页面未刷新）：请刷新页面后重新点「执行」并确认。',
+        errPlanChanged: '计划已变化（会话集合／模式／附件开关与确认时不同）：请重新确认。',
         staleTitle: '花名册残留 {count} 条',
         staleHint: '记录已删除，但 workspace.json 里还留着 id —— 所以侧栏照旧显示、点不进去。停服后跑这三条即可清掉：',
         copyCmds: '复制命令',
@@ -69,6 +73,10 @@ window.__ModuleLoader__.load({
         refresh: 'Refresh',
         failed: 'failed: {message}',
         manifestFailed: '⚠️ {count} sessions had no output manifest written — the sessions themselves were handled, but the manifest is missing',
+        skippedLocked: '⚠️ {count} sessions are being written to right now (write lock held) — skipped, not deleted; try again once they finish',
+        removeFailed: '⚠️ {count} sessions could not be removed (the rest were handled) — see the CLI output for details',
+        errConfirmRequired: 'Confirmation expired (stale token or page not refreshed): refresh the page, then click Run and confirm again.',
+        errPlanChanged: 'The plan changed (session set / mode / attachments differ from what you confirmed): please confirm again.',
         staleTitle: '{count} stale roster entries',
         staleHint: 'Records are deleted but their ids remain in workspace.json, so the sidebar still lists them without data. Run these three commands while DSH is stopped:',
         copyCmds: 'Copy commands',
@@ -141,7 +149,12 @@ window.__ModuleLoader__.load({
       });
       const json = await response.json();
       const result = json?.result;
-      if (result?.ok !== true) throw new Error(result?.error?.message ?? `HTTP ${response.status}`);
+      if (result?.ok !== true) {
+        const failure = new Error(result?.error?.message ?? `HTTP ${response.status}`);
+        // 带上错误码：面板才能把已知失败翻成当前语言（英文界面下不至于冒出中文）。
+        failure.code = result?.error?.code ?? '';
+        throw failure;
+      }
       return result.value;
     }
 
@@ -219,6 +232,7 @@ window.__ModuleLoader__.load({
       const [mode, setMode] = React.useState('trash');
       const [attachments, setAttachments] = React.useState(false);
       const [confirming, setConfirming] = React.useState(false);
+      const [confirmToken, setConfirmToken] = React.useState('');
       const [copied, setCopied] = React.useState(false);
       const stale = useStale();
 
@@ -255,25 +269,66 @@ window.__ModuleLoader__.load({
         if (open) void load(attachments);
       }, [open, load]); // 打开时读一次
 
+      /**
+       * 执行按钮：第一次点只做「取确认令牌 + 变成确认态」，第二次才真发 execute。
+       *
+       * 令牌绑的是「当前这批会话 + 当前模式 + 当前附件开关」，所以模式或附件开关
+       * 一变就要重新取 —— 否则 host 会因为指纹不符而拒绝（这是有意的：
+       * 不能让"用户看过 trash 计划"变成"实际执行 hard 删除"）。
+       */
       const execute = async () => {
         if (!confirming) {
-          setConfirming(true);
+          setBusy(true);
+          setError(null);
+          try {
+            const fresh = await call('plan', { attachments, mode });
+            setConfirmToken(typeof fresh?.confirmToken === 'string' ? fresh.confirmToken : '');
+            setConfirming(true);
+          } catch (e) {
+            setError(String(e?.message ?? e));
+          } finally {
+            setBusy(false);
+          }
           return;
         }
         setBusy(true);
         setError(null);
         setDone(null);
         try {
-          const value = await call('execute', { mode, attachments });
+          const value = await call('execute', { mode, attachments, confirmToken });
           setDone(value);
           setConfirming(false);
+          setConfirmToken('');
           setPlan(null);
           void refreshStale();
         } catch (e) {
-          setError(String(e?.message ?? e));
+          // 已知失败翻成当前语言；其余照原样显示。
+          const code = e?.code ?? '';
+          const known =
+            code === 'session-purge/confirm-required'
+              ? 'errConfirmRequired'
+              : code === 'session-purge/plan-changed'
+                ? 'errPlanChanged'
+                : null;
+          setError(known === null ? String(e?.message ?? e) : tr(known));
+          // 令牌是一次性的：无论失败原因，都要回到未确认态重新取。
+          setConfirming(false);
+          setConfirmToken('');
         } finally {
           setBusy(false);
         }
+      };
+
+      // 模式 / 附件开关一变，之前那份确认就作废了（令牌指纹会不符）。
+      const changeMode = (next) => {
+        setMode(next);
+        setConfirming(false);
+        setConfirmToken('');
+      };
+      const changeAttachments = (next) => {
+        setAttachments(next);
+        setConfirming(false);
+        setConfirmToken('');
       };
 
       const entries = plan?.entries ?? [];
@@ -365,7 +420,7 @@ window.__ModuleLoader__.load({
                     checked: attachments,
                     onChange: (event) => {
                       const next = event.target.checked;
-                      setAttachments(next);
+                      changeAttachments(next);
                       void load(next);
                     },
                   }),
@@ -383,12 +438,12 @@ window.__ModuleLoader__.load({
                     { key: 'seg', className: 'spurge_seg' },
                     h(
                       'button',
-                      { type: 'button', 'data-on': mode === 'trash' ? 'true' : 'false', onClick: () => setMode('trash') },
+                      { type: 'button', 'data-on': mode === 'trash' ? 'true' : 'false', onClick: () => changeMode('trash') },
                       tr('modeTrash'),
                     ),
                     h(
                       'button',
-                      { type: 'button', 'data-on': mode === 'hard' ? 'true' : 'false', onClick: () => setMode('hard') },
+                      { type: 'button', 'data-on': mode === 'hard' ? 'true' : 'false', onClick: () => changeMode('hard') },
                       tr('modeHard'),
                     ),
                   ),
@@ -427,6 +482,25 @@ window.__ModuleLoader__.load({
                   'div',
                   { key: 'mf', className: 'spurge_err' },
                   tr('manifestFailed', { count: done.manifestFailures.length }),
+                )
+              : null,
+
+            // 因写锁被跳过的会话：这是**保护**（它们还在原地），必须让用户看见，
+            // 否则用户会以为"清干净了"。
+            done !== null && Array.isArray(done.skippedLocked) && done.skippedLocked.length > 0
+              ? h(
+                  'div',
+                  { key: 'sl', className: 'spurge_err' },
+                  tr('skippedLocked', { count: done.skippedLocked.length }),
+                )
+              : null,
+
+            // 单个会话没删掉（不影响其它会话），同样必须让用户看见。
+            done !== null && Array.isArray(done.removeFailures) && done.removeFailures.length > 0
+              ? h(
+                  'div',
+                  { key: 'rf', className: 'spurge_err' },
+                  tr('removeFailed', { count: done.removeFailures.length }),
                 )
               : null,
 
