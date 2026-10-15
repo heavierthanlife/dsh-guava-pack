@@ -1,15 +1,21 @@
-// dsh-mobile-ui — Client half: phone-only typography.
+// dsh-mobile-ui — Client half: phone-only typography + a phone-only drawer toggle.
 //
-// SCOPE (deliberately narrow, after a layout-layer rollback):
-//   This plugin changes FONT SIZE ONLY. It does not touch the frame, the grid,
-//   the sidebar, the right panel, or any element it does not own. An earlier
-//   revision also forced a single-column frame and an overlay drawer; that
-//   black-screened the phone UI, so the whole layout layer is gone.
+// SCOPE（**这行注释以前写的是"只改字号"，那是错的 —— 已按代码更正**）：
+//   这个插件**不再自己搭布局层**，但它确实**碰了两处不属于"字号"的东西**：
+//     1. 侧栏抽屉开关：注册进官方槽 `conversation.header.leading`（**只在手机模式占座**，
+//        桌面/平板会让出该座位 —— 它是 single 槽，占着会挡住别的插件）；
+//     2. 一个全透明点击捕获层（`shell.overlay`，点抽屉外面关闭）。
+//   另外 CSS 里**有定位/布局规则**（`position:fixed`、`flex-direction` 等 8 处），
+//   主要集中在设置面板与 dock 的手机适配，不是"只改字号"。
+//
+//   历史：更早的版本还**强制单列 frame + 覆盖式抽屉**，那把手机 UI 弄黑屏了，
+//   所以那层布局被整体回滚 —— 上面说的"不再自己搭布局层"指的是**这件事**。
 //
 // What it does:
 //   * Phone-scoped type scale + a user-tunable conversation font size.
 //   * Touch ergonomics (tap highlight, 300ms double-tap delay, :active feedback).
 //   * Overflow / safe-area guards.
+//   * 手机模式下的侧栏抽屉开关 + 点外部关闭（见上）。
 //
 // Why the overrides are `!important` and declared on `body` as well as `:root`:
 //   the theme presenter writes `--dsh-content-font-size` as an INLINE variable

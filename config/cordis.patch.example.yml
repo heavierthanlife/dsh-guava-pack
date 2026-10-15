@@ -318,15 +318,23 @@
 
 # ── Subagent 模型授权（等价于 设置 → 子代理 → 模型选择）─────────────
 # 注意：策略在会话启动时固化，仅对新会话生效。
+#
+# ⚠️ provider 必须写**运行时真实的 provider id**，不是包名、也不是你习惯的叫法。
+#    `allowedModels` 是**强校验**的（dsh-tool-subagent 的 assertAllowedModelRoutes +
+#    `provider === request.provider` 精确比较），写错不会报错、只会让该条**静默失效**：
+#    子代理请求该路由时抛 `LLM provider "xxx" is not allowed for this Session`。
+#    官方 DeepSeek 供应商的 id 硬编码在 @deepseek-ai/dsh-llm-deepseek-api-key 里
+#    （`const PROVIDER = "deepseek-official"`），**不是** `deepseek`。
+#    拿不准就用 list_subagent_models 看运行时到底有哪些 provider。
 - id: subagent-model-selection-settings
   config:
     enabled: true
     allowedModels:
       - provider: xiaomi-token-plan-cn
         model: mimo-v2.6-pro
-      - provider: deepseek
+      - provider: deepseek-official
         model: deepseek-flash
-      - provider: deepseek
+      - provider: deepseek-official
         model: deepseek-v4-pro
       - provider: agentrouter
         model: deepseek-v4-flash
