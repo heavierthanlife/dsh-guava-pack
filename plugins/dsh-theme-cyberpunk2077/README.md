@@ -34,7 +34,7 @@ dsh plugin --profile web add dsh-theme-cyberpunk2077
 
 > 💡 **装不上 / 启动崩溃？** 确认装的是 **≥ 0.1.4**（`npm view dsh-theme-cyberpunk2077 version`）。0.1.3 及更早版本发布时漏打了 `cordis.patch.yml`，安装后会因找不到补丁文件启动失败——升级到 0.1.4 即可。
 
-> 想微调？右下角 `DECK` 按钮打开控制面板，每个特效独立开关；`SND` 一键静音全部。
+> 想微调？右下角 `DECK` 按钮打开控制面板，5 个特效各自独立开关；`SND` 一键静音全部。
 
 ## 🌆 视觉：夜之城的皮
 
@@ -72,9 +72,11 @@ dsh plugin --profile web add dsh-theme-cyberpunk2077
 
 ## 🛡️ 性能护栏
 
-- 小屏（≤768px）：自动关闭扫描线、数据流和重动画
-- `prefers-reduced-motion`：停掉全部循环动画
-- 所有特效都能在 `DECK` 面板独立关闭，偏好存 localStorage
+- 小屏（≤768px）：隐藏 `#root::after`、`#cp2077-hud`、`#cp2077-chip`，并停掉主按钮/新会话按钮与
+  会话行 hover 的动画
+- `prefers-reduced-motion`：停掉全部循环动画（含 boot 转场）
+- `DECK` 面板提供 **5 个开关**（`scan` 扫描线 / `relic` 干扰 / `boot` 开机转场 / `type` 打字音效 /
+  `sfx` 提示音），偏好存 localStorage
 
 ## 📁 项目结构
 

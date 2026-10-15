@@ -16,14 +16,15 @@
 | `plugins/dsh-context-guard` | 轮次结束后按阈值自动压缩、统计压缩次数、达上限写 handoff | 自研 |
 | `plugins/dsh-session-purge` | 清理已归档会话记录（保留产出并写清单），侧栏入口在设置上方一行 | 自研 |
 | `plugins/dsh-code-theme` | 只给代码上色（Monokai Pro / Material / One Dark / GitHub / **OpenCode 官方色值**，共 5 套），自动跟随明暗 + 可强制代码区明暗；附 WCAG 对比度自检 | 自研 |
-| `config/cordis.patch.example.yml` | provider / 模型目录示例（6 家、184 个模型，全走本机路由） | 自研 |
+| `config/cordis.patch.example.yml` | provider / 模型目录示例（6 家、24 个模型，全走本机路由） | 自研 |
 | `ops/` | 运维脚本：`bootstrap-machine.sh`（新机装 dsh.service + linger）、`restart-dsh.sh`、`tailnet-url.sh`（打印带 token 的手机访问地址）、`dsh.service`、`bashrc.dsh.example`、`wsl.conf.example`；`NETWORK-NOTES.md` 手机连不上/流式卡/Tailscale 绕代理的排查手册 | 自研 |
 | `services/commandcode-bridge` | 把 OpenAI 格式转成 Command Code 内部端点 | 自研 |
 
 第三方组件的授权与出处见 [`LICENSES/`](LICENSES/)。**两个第三方包都保持 MIT 原样分发**，
 包内保留了各自的 LICENSE / 仓库地址；改装部分（赛博主题）在原作者 MIT 授权范围内。
-`plugins/dsh-opencode-session-header` 是 vendored 的第三方副本（版本 0.1.0），其 `npm test` /
-`prepublishOnly` 无法运行，因为 `tests/` 未随包 vendored；请勿改动 vendored 内容。
+`plugins/dsh-opencode-session-header` 是 vendored 的第三方副本（版本 0.1.0）：它的 `tests/smoke.mjs`
+已从上游 v0.1.0 **原样收录**，所以 `npm test` 可以跑（13 passed / 0 failed）。
+`package.json` 未改动。上游出新的话，`tests/` 也要一起更新。
 
 > `ops/bootstrap-machine.sh` 是 **DSH 主仓库根目录**那份 bootstrap 的副本：它 clone DSH 仓库、
 > 对仓库根与 `profiles/web` 各跑一次 `pnpm install`，并假定在 DSH 仓库根目录下执行。
