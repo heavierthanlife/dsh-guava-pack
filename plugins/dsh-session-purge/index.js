@@ -14,7 +14,8 @@
  * @module dsh-session-purge
  */
 
-import { buildPlan, executePlan, renderPlan } from './lib/core.mjs';
+import { randomBytes } from 'node:crypto';
+import { buildPlan, executePlan, planDigest, renderPlan } from './lib/core.mjs';
 
 /** Cordis 插件名。 */
 const name = 'session-purge';
@@ -24,6 +25,27 @@ const inject = ['commands'];
 
 /** 面板 → host 的通道路径。 */
 const ROUTE_PATH = '/session-purge';
+
+/** 确认令牌的有效期：够用户看完计划再点确认，又不至于长期挂着。 */
+const CONFIRM_TTL_MS = 5 * 60 * 1000;
+
+/**
+ * 待确认的 `execute` 令牌：token → { digest, expiresAt }。
+ *
+ * 一次性 + 有期限 + 绑指纹（见 index 里的校验）。顺手清掉过期的，
+ * 免得长时间开着的页面把这张表撑大。
+ */
+const confirmTokens = new Map();
+
+function issueConfirmToken(digest) {
+  const now = Date.now();
+  for (const [key, value] of confirmTokens) {
+    if (value.expiresAt < now) confirmTokens.delete(key);
+  }
+  const token = randomBytes(24).toString('base64url');
+  confirmTokens.set(token, { digest, expiresAt: now + CONFIRM_TTL_MS });
+  return token;
+}
 
 /** 读一个小请求体。 */
 async function readJsonBody(req, limit = 64 * 1024) {
@@ -142,9 +164,20 @@ async function apply(ctx) {
 
           if (endpoint === 'plan') {
             const attachments = body.payload?.attachments === true;
+            const mode = body.payload?.mode === 'hard' ? 'hard' : 'trash';
+            const plan = buildPlan({ attachments });
             // 把 CLI 的真实路径回给面板：面板以前硬编码 `~/dsh/playground/themes/...`，
             // 装成 pack 的机器上那个路径根本不存在，用户照抄命令会 MODULE_NOT_FOUND。
-            sendRpc(res, rpcId, { ok: true, value: { ...planForPanel(buildPlan({ attachments })), cli } });
+            sendRpc(res, rpcId, {
+              ok: true,
+              value: {
+                ...planForPanel(plan),
+                cli,
+                // 确认令牌：绑到"这批会话 + 这个模式 + 这个附件开关"上。
+                // `execute` 必须原样带回，且只能用一次、5 分钟内有效。
+                confirmToken: issueConfirmToken(planDigest(plan, { attachments, mode })),
+              },
+            });
             return;
           }
 
@@ -152,6 +185,42 @@ async function apply(ctx) {
             const attachments = body.payload?.attachments === true;
             const mode = body.payload?.mode === 'hard' ? 'hard' : 'trash';
             const plan = buildPlan({ attachments });
+            // ── 确认令牌校验（在动手之前）──────────────────────────────
+            // 为什么需要：这个接口只要有登录 cookie 就能调。同源页面里的任何脚本
+            // （包括其它客户端插件）以前可以**一步**直接发 mode:'hard' 把会话不可逆删掉。
+            // 现在必须先在 `plan` 里拿到令牌，且令牌绑定"用户实际看过的那一批"。
+            // 诚实说明边界：它挡的是"盲目/重放/删用户没看过的那批"，挡不住"能自己
+            // 调 plan 的同源脚本"—— 客户端插件本来就有整个页面的权限，这是信任边界，
+            // 不是这个令牌能解决的。
+            const token = typeof body.payload?.confirmToken === 'string' ? body.payload.confirmToken : '';
+            const pending = token === '' ? undefined : confirmTokens.get(token);
+            if (pending === undefined || pending.expiresAt < Date.now()) {
+              if (pending !== undefined) confirmTokens.delete(token);
+              sendRpc(res, rpcId, {
+                ok: false,
+                error: {
+                  code: 'session-purge/confirm-required',
+                  message: '缺少或已过期的确认令牌：请刷新页面后，重新点「执行」并确认。',
+                },
+              });
+              return;
+            }
+            const digest = planDigest(plan, { attachments, mode });
+            if (digest !== pending.digest) {
+              // 令牌是给另一批会话/另一个模式发的 —— 用户看到的和将要执行的不是一回事。
+              confirmTokens.delete(token);
+              sendRpc(res, rpcId, {
+                ok: false,
+                error: {
+                  code: 'session-purge/plan-changed',
+                  message: '计划已变化（会话集合、模式或附件开关与确认时不同）：请重新确认。',
+                },
+              });
+              return;
+            }
+            // 一次性：用掉即作废，重放会被上面的分支拒绝。
+            confirmTokens.delete(token);
+
             if (plan.entries.length === 0) {
               sendRpc(res, rpcId, { ok: true, value: { mode, count: 0, trashRoot: null, releasedBytes: 0, note: '没有可清理的归档会话' } });
               return;
@@ -162,11 +231,16 @@ async function apply(ctx) {
               ok: true,
               value: {
                 mode: result.mode,
-                count: plan.entries.length,
+                // 用**实际删掉的**数量：被写锁跳过的、删失败的都不算。
+                count: result.results.filter((r) => r.removeError === null).length,
                 trashRoot: result.trashRoot,
                 releasedBytes: plan.totals.bytes + (attachments ? plan.totals.attachmentBytes : 0),
                 // 产出清单写失败以前只在 results 里，面板看不到 —— 面板要把这个显示出来。
                 manifestFailures: result.manifestFailures,
+                // 单个会话删不动的原因（不影响其它会话）。
+                removeFailures: result.removeFailures,
+                // 因写锁被跳过的会话（保护，不是失败）。
+                skippedLocked: result.skippedLocked,
               },
             });
             return;
