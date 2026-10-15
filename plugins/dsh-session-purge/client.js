@@ -187,7 +187,11 @@ window.__ModuleLoader__.load({
 
     async function refreshStale() {
       try {
-        const value = await call('plan', { attachments: false });
+        // 走便宜的 `stale` 通道：这里只要"花名册记着、磁盘上没有"的 id。
+        // 以前它调完整 `plan`，于是**每次页面加载**都要解压归档会话日志
+        // （本机实测 208ms，而那份 4.5MB 日志解压 99ms + 解析 109ms），
+        // 结果却只用到 missing 一个字段 —— 那才是真正每次都发生的阻塞。
+        const value = await call('stale', {});
         if (typeof value?.cli === 'string' && value.cli) hostCliPath = value.cli;
         setStale(value?.missing ?? []);
       } catch {

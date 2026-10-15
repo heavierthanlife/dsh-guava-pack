@@ -51,6 +51,9 @@ const REQUIRED = [
   'plugins/provider-router/providers.example.json',
   'plugins/dsh-opencode-session-header/package.json',
   'plugins/dsh-opencode-session-header/cordis.patch.yml',
+  // 上游自带的 smoke 测试（原样收录）。存在的意义是 `npm test` 真的能跑 ——
+  // 以前 package.json 指着 tests/ 而目录不存在，`npm test` 直接 ENOENT。
+  'plugins/dsh-opencode-session-header/tests/smoke.mjs',
   'plugins/dsh-context-guard/package.json',
   'plugins/dsh-context-guard/cordis.patch.yml',
   'plugins/dsh-session-purge/package.json',
@@ -87,6 +90,7 @@ const MIN_BYTES = {
   'plugins/provider-router/providers.example.json': 100,
   'plugins/dsh-session-purge/lib/core.mjs': 2000,
   'plugins/dsh-session-purge/clean-roster.sh': 100,
+  'plugins/dsh-opencode-session-header/tests/smoke.mjs': 3000,
   'plugins/dsh-code-theme/client.js': 2000,
   'plugins/dsh-code-theme/tools/check-contrast.mjs': 500,
   'services/commandcode-bridge/server.mjs': 2000,

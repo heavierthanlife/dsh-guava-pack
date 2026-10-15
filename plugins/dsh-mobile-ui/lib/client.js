@@ -118,6 +118,16 @@ window.__ModuleLoader__.load({
     var liveSettings = { fontPx: DEFAULTS.fontPx, press: DEFAULTS.press, force: DEFAULTS.force, enterNewline: DEFAULTS.enterNewline };
 
     /**
+     * 手机态变化时的回调，由 `apply` 装上。
+     *
+     * 为什么需要它：`conversation.header.leading` 是 **single** 槽，桌面/平板下侧栏开关
+     * 本来就被 CSS 隐藏，占着座位没意义却会挡住别的插件 —— 所以只在手机模式下占座。
+     * 而手机态是 `applyToRoot` 算出来的，它在模块作用域、拿不到 `ctx`，于是用这个回调
+     * 把状态递进去（只有设置里的 force 开关会改变它；屏幕短边不会变）。
+     */
+    var onPhoneStateChange = null;
+
+    /**
      * 手机上把「回车」变成换行。
      *
      * 依据（读自 dsh-client-ui-conversation 源码）：输入框通过 shortcuts 服务注册了
@@ -358,6 +368,10 @@ window.__ModuleLoader__.load({
       root.classList.toggle(NOPRESS_CLASS, !settings.press);
       root.style.setProperty('--dsh-mobile-content-font-size', settings.fontPx + 'px');
       root.style.setProperty('--mui-scale', String(uiScaleFor(settings.fontPx).toFixed(4)));
+      // 手机态一变，侧栏开关就要相应地占座/让座（见 onPhoneStateChange 的注释）。
+      if (typeof onPhoneStateChange === 'function') {
+        try { onPhoneStateChange(phone); } catch (e) {}
+      }
       return { active: phone, reason: reason || 'none', scale: uiScaleFor(settings.fontPx) };
     }
 
@@ -936,20 +950,63 @@ window.__ModuleLoader__.load({
           });
 
           // STEP 1/8：侧栏开关。注册进 conversation.header.leading —— 官方定义是
-          // "Global navigation before the Session title"，single 槽且当前空置，
-          // 于是它直接排在标题前面，不会再压住标题。
+          // "Global navigation before the Session title"。
+          //
+          // 但它是 **single** 槽：同一优先级上第二个注册者会直接抛
+          // `single slot "..." already has a registration`（见 dsh-client-ui-slots 的
+          // register）。而桌面/平板下这个按钮本来就被 CSS 隐藏（display:none），
+          // **占着座位没有任何意义**，却会让将来任何想用这个座位的插件在加载期炸掉。
+          // 而且这张表里 conversation.header.leading 是**唯一 scope:'root' 的头部槽**
+          // （其它列表型槽都是 scope:'session'，没会话时不渲染），所以没有"换个列表槽"
+          // 这个选项 —— 正解是**只在手机模式下占座，其余时候把座位让出来**。
+          //
+          // 屏幕短边不会变（detectPhone 只看 screen，不看窗口大小），只有设置里的
+          // force 开关会改状态，所以跟着 applyToRoot 同步就够了。
           var toggleSidebar = function () {
             try {
               var layout = ctx.get && ctx.get('layout');
               if (layout && typeof layout.toggleSidebar === 'function') layout.toggleSidebar();
             } catch (e) {}
           };
+          var disposeToggle = null;
+          var slotReady = false;
+          var wantToggle = false;
+          function syncDrawerToggle() {
+            if (!slotReady) return;
+            if (wantToggle && disposeToggle === null) {
+              try {
+                disposeToggle = ctx.slots.register({
+                  name: 'conversation.header.leading',
+                  inject: function () { return { toggleSidebar: toggleSidebar }; },
+                }, DrawerToggle) || null;
+              } catch (e) {
+                // 座位已被别人占了：降级成"没有侧栏开关"，而不是把页面弄崩。
+                disposeToggle = null;
+                console.warn('[dsh-mobile-ui] conversation.header.leading 已被占用，跳过侧栏开关', e);
+              }
+            } else if (!wantToggle && disposeToggle !== null) {
+              try { disposeToggle(); } catch (e) {}
+              disposeToggle = null;
+            }
+          }
+          onPhoneStateChange = function (phone) {
+            wantToggle = phone === true;
+            syncDrawerToggle();
+          };
 
           ctx.slots.inject('conversation.header.leading', function () {
-            return ctx.slots.register({
-              name: 'conversation.header.leading',
-              inject: function () { return { toggleSidebar: toggleSidebar }; },
-            }, DrawerToggle);
+            slotReady = true;
+            // 初始态直接读 <html> 上的 class：applyToRoot 在本函数更早处已经写好它，
+            // 这样不必依赖两个调用点的先后顺序。
+            wantToggle = root.classList.contains(PHONE_CLASS);
+            syncDrawerToggle();
+            return function () {
+              slotReady = false;
+              if (disposeToggle !== null) {
+                try { disposeToggle(); } catch (e) {}
+                disposeToggle = null;
+              }
+            };
           });
 
           // STEP 4：点抽屉外面关闭（全透明点击捕获层，留在 shell.overlay 里）
@@ -969,6 +1026,13 @@ window.__ModuleLoader__.load({
                 root.style.removeProperty('--dsh-mobile-content-font-size');
                 root.style.removeProperty('--mui-scale');
                 delete window.__dshMobileUI;
+                onPhoneStateChange = null;
+                // 显式让座：不依赖 slots 服务是否会在上下文销毁时回收注册，
+                // 自己把座位交出去（single 槽，占着就是占着）。
+                if (disposeToggle !== null) {
+                  try { disposeToggle(); } catch (e) {}
+                  disposeToggle = null;
+                }
               } catch (e) {}
             };
           }, 'dsh-mobile-ui: phone font layer');
