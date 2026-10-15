@@ -22,7 +22,8 @@ Cyberpunk 2077（夜之城）风格的 DSH Web UI 主题。纯浏览器客户端
 dsh plugin --profile web add dsh-theme-cyberpunk2077
 ```
 
-然后把主题行挂进 profile 补丁层（`~/.dsh/profiles/web/cordis.patch.yml`）：
+然后把主题行挂进 profile 补丁层（`$DSH_HOME/profiles/web/cordis.patch.yml`，本机是
+`/home/guava5tar_/dsh/profiles/web/cordis.patch.yml` —— **不是** `~/.dsh`，本机没有那个目录）：
 
 ```yaml
 - insert:
@@ -32,7 +33,12 @@ dsh plugin --profile web add dsh-theme-cyberpunk2077
 
 重启 `dsh web`，NIGHT CITY 开机转场之后，欢迎来到 2077。
 
-> 💡 **装不上 / 启动崩溃？** 确认装的是 **≥ 0.1.4**（`npm view dsh-theme-cyberpunk2077 version`）。0.1.3 及更早版本发布时漏打了 `cordis.patch.yml`，安装后会因找不到补丁文件启动失败——升级到 0.1.4 即可。
+> 💡 **装不上 / 启动崩溃？** 0.1.3 及更早版本发布时漏打了 `cordis.patch.yml`，安装后会因找不到补丁文件启动失败，需要 **0.1.4**。
+>
+> ⚠️ **但 npm 上并没有 0.1.4**（2026-10-15 实测：`dist-tags.latest = 0.1.3`，已发布版本只有 0.1.0–0.1.3）。
+> 0.1.4 只存在于**上游 git `main`**（其 `package.json` 版本号是 0.1.4）。所以：
+> 从 npm 装最高只能拿到 0.1.3（有崩溃问题）；要 0.1.4 得从上游仓库装。
+> 本包内收的就是**上游 main 的那份 0.1.4**，所以直接用本包的副本即可，不必去 npm。
 
 > 想微调？右下角 `DECK` 按钮打开控制面板，5 个特效各自独立开关；`SND` 一键静音全部。
 
@@ -92,7 +98,7 @@ assets/          # README 截图
 
 把 `cordis.patch.yml` 里的 `ui-theme-cyberpunk` 行删掉，再移除依赖并重启 `dsh web` 即可。夜之城随时欢迎你回来。
 
-> ⚠️ **`dsh plugin rm` 的已知坑**：它不会自动清掉 `cordis.patch.yml` 里已插入的主题行。卸载后如果重启 `dsh web` 报找不到包，手动删掉 profile 补丁里的 `ui-theme-cyberpunk` 行（见上），再重启一次就好。另注意 `0.1.3` 及更早版本存在安装即崩溃的问题，卸载请认准 `0.1.4+`。
+> ⚠️ **`dsh plugin rm` 的已知坑**：它不会自动清掉 `cordis.patch.yml` 里已插入的主题行。卸载后如果重启 `dsh web` 报找不到包，手动删掉 profile 补丁里的 `ui-theme-cyberpunk` 行（见上），再重启一次就好。另注意 `0.1.3` 及更早版本存在安装即崩溃的问题（`0.1.4` 只在 git main，npm 上没有，见上）。
 
 ## 📜 许可证
 

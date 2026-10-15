@@ -134,5 +134,8 @@ node tools/check-contrast.mjs
 - **CSS-module 类名是哈希的**（`o3BgMG_codeBody`）：所以用 `[class*="_codeBody"]` 匹配后缀。宿主改命名后缀时这几条失效，但 `pre`/`code` 两条仍在。
 - **Shiki 支持哪些语言与本插件无关** —— 这里只改颜色，不碰分词。
 - **OpenCode 那套已是官方原值**（2026-10 起，见上一节），不再是近似配色。
-- 少数颜色相对原版做了亮度调整（One Dark 浅色版的 string 原色只有 3.07:1；OpenCode 浅色有 4 项）。调整项由 `check-contrast.mjs` 逐条报出，并在上一节列成表。
+- 少数颜色相对原版做了亮度调整。**调整清单是人工维护的，脚本不会替你说**：`check-contrast.mjs`
+  只做"≥4.5:1 通过 / 不过"的判定并**打印当前取值**，它并不知道原色是什么、也不报"这一项被调过"。
+  要知道调了哪些，看上一节的表（OpenCode 4 项）与各调色板定义里的注释。
+  例：One Dark 浅色版的 `string` 原色 `#50a14f` 在白底上是 **3.21:1**（不是早期笔记里的 3.07:1）。
 - 偏好存在 `localStorage`（`dsh-code-theme.preference`），换设备不跟随 —— 和 `dsh-theme-manager` 的做法一致。

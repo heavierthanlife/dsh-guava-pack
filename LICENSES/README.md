@@ -81,4 +81,6 @@
   `plugins/dsh-opencode-session-header/LICENSE`，不要删。
 - 若你进一步修改赛博主题，建议在 `LICENSE` 的改动说明里补一句你改了什么，
   方便自己日后分辨与上游的差异。
-- 包内**不应包含**任何抓包产物（`capture-last-request.json`）—— 那里面可能有你的提示词。
+- 包内**不应包含**任何抓包产物（`plugins/provider-router/captures/req-<时间戳>.json`）——
+  那里面可能有你的提示词。`captures/` 与旧的 `capture-last-request.json` 都已被
+  `.gitignore` / `.npmignore` 排除，但**手工 `cp`/打包时仍要自己确认**。

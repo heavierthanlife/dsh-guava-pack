@@ -30,10 +30,14 @@
 
 ## 启用路由
 
-5 家开关均**真生效**（2026-10-04，PLAN §9.2）：`xiaomi-token-plan-cn` / `opencode-go` /
+**4 家可切、1 家禁用**（2026-10-04 实测，PLAN §9.2）：`xiaomi-token-plan-cn` / `opencode-go` /
 `agentrouter` 的 `baseURL` 已指向 `http://127.0.0.1:8318/<provider>`；
 `commandcode`(8317) 的桥接**热读 `mode.json`**，开关同样生效；
-`antigravity`(8045) 是第三方工具（`antigravity-tools`）持有，开关不可用、面板已标注「由外部工具控制」。
+`antigravity`(8045) 是第三方工具（`antigravity-tools`）持有，**开关不可用**、面板已标注「由外部工具控制」
+（`lib/client.js` 里该条 `control:'external'`，不受开关影响）。
+
+> 原文写"5 家开关均真生效"，紧接着自己又说 antigravity 不可用 —— 已按代码更正为
+> "4 家可切 + 1 家禁用"。
 
 ## 风险
 
