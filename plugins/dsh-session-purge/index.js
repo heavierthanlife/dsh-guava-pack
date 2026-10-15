@@ -15,7 +15,7 @@
  */
 
 import { randomBytes } from 'node:crypto';
-import { buildPlan, executePlan, planDigest, renderPlan } from './lib/core.mjs';
+import { buildPlan, buildPlanAsync, executePlan, planDigest, readStaleIds, renderPlan } from './lib/core.mjs';
 
 /** Cordis 插件名。 */
 const name = 'session-purge';
@@ -45,6 +45,36 @@ function issueConfirmToken(digest) {
   const token = randomBytes(24).toString('base64url');
   confirmTokens.set(token, { digest, expiresAt: now + CONFIRM_TTL_MS });
   return token;
+}
+
+/**
+ * 完整计划的短时效缓存。
+ *
+ * 为什么需要：生成计划要解压归档会话的日志（本机实测：一份 4.5MB 日志 ≈ 200ms，
+ * 解压 99ms + 解析 109ms）。面板每次打开、每次取确认令牌都要一份，缓存 30 秒能把
+ * 重复开销降到 0。
+ *
+ * 为什么 30 秒是安全的：计划只用于"给用户看"和"算确认指纹"，真正的删除在
+ * `executePlan` 里还会重新校验写锁与文件是否存在。而且缓存让"用户看到的计划"和
+ * "指纹绑定的计划"是**同一份**，反而更一致。
+ */
+const PLAN_TTL_MS = 30 * 1000;
+const planCache = new Map();
+
+async function planCached(attachments) {
+  const key = attachments === true ? 'attachments' : 'plain';
+  const hit = planCache.get(key);
+  const now = Date.now();
+  if (hit !== undefined && now - hit.at < PLAN_TTL_MS) return hit.plan;
+  // 异步版：在解压每一帧、解析每一行时让出事件循环，不冻住 DSH。
+  const plan = await buildPlanAsync({ attachments: attachments === true });
+  planCache.set(key, { at: now, plan });
+  return plan;
+}
+
+/** 执行完立刻作废缓存：下一次计划必须是新的。 */
+function invalidatePlanCache() {
+  planCache.clear();
 }
 
 /** 读一个小请求体。 */
@@ -162,10 +192,18 @@ async function apply(ctx) {
             return;
           }
 
+          // 便宜的残留列表：面板**每次页面加载**都要刷新它，而它只需要两个 id 集合
+          // 相减（实测 0ms）。以前它走的是完整 plan（本机实测 208ms，全花在解压那份
+          // 4.5MB 归档日志上）—— 那才是真正每次页面加载都会发生的阻塞。
+          if (endpoint === 'stale') {
+            sendRpc(res, rpcId, { ok: true, value: { ...readStaleIds(), cli } });
+            return;
+          }
+
           if (endpoint === 'plan') {
             const attachments = body.payload?.attachments === true;
             const mode = body.payload?.mode === 'hard' ? 'hard' : 'trash';
-            const plan = buildPlan({ attachments });
+            const plan = await planCached(attachments);
             // 把 CLI 的真实路径回给面板：面板以前硬编码 `~/dsh/playground/themes/...`，
             // 装成 pack 的机器上那个路径根本不存在，用户照抄命令会 MODULE_NOT_FOUND。
             sendRpc(res, rpcId, {
@@ -184,7 +222,7 @@ async function apply(ctx) {
           if (endpoint === 'execute') {
             const attachments = body.payload?.attachments === true;
             const mode = body.payload?.mode === 'hard' ? 'hard' : 'trash';
-            const plan = buildPlan({ attachments });
+            const plan = await planCached(attachments);
             // ── 确认令牌校验（在动手之前）──────────────────────────────
             // 为什么需要：这个接口只要有登录 cookie 就能调。同源页面里的任何脚本
             // （包括其它客户端插件）以前可以**一步**直接发 mode:'hard' 把会话不可逆删掉。
@@ -227,6 +265,8 @@ async function apply(ctx) {
             }
             // cleanRoster 保持 false：运行时改 workspace.json 会被内存态覆盖。
             const result = executePlan(plan, { mode, attachments, cleanRoster: false });
+            // 删过之后缓存必须作废，下一次计划得重新算。
+            invalidatePlanCache();
             sendRpc(res, rpcId, {
               ok: true,
               value: {

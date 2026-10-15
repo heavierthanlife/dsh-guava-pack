@@ -54,6 +54,33 @@ import { basename, dirname, join } from 'node:path';
 const ZSTD_MAGIC = [0x28, 0xb5, 0x2f, 0xfd];
 
 /**
+ * 「同一份逻辑，两种驱动方式」的两个小驱动器。
+ *
+ * 为什么要这样：`buildPlan` 要同时服务两个场景 ——
+ *   · CLI（独立进程）要**同步**，简单直接；
+ *   · host 路由跑在 DSH 的**唯一事件循环**上，必须能**让出**，否则大日志会把
+ *     整个服务（含正在流式输出的对话）冻住几百毫秒到几秒。
+ *
+ * 所以把逻辑写成 generator（在昂贵的步骤之间 `yield`），再用两个驱动器跑：
+ * `driveSync` 一路到底，`driveAsync` 每个 yield 点 await 一次让事件循环喘口气。
+ * 关键是 generator 之间用 `yield*` 委托，于是**只有一份实现**，两条路径不会漂移。
+ */
+function driveSync(iterator) {
+  let step = iterator.next();
+  while (step.done !== true) step = iterator.next();
+  return step.value;
+}
+
+async function driveAsync(iterator) {
+  let step = iterator.next();
+  while (step.done !== true) {
+    await new Promise((resolve) => setImmediate(resolve));
+    step = iterator.next();
+  }
+  return step.value;
+}
+
+/**
  * 原子写：同目录临时文件 → fsync → rename。
  *
  * 为什么不能用 `writeFileSync(target, …)`：那是就地 truncate 再写，进程被杀/断电
@@ -165,15 +192,15 @@ function zstdFrameEnd(buf, start) {
 }
 
 /**
- * 解一份会话日志（详细版）。
+ * 解一份会话日志（详细版）—— generator 版，每帧 `yield` 一次。
  *
- * 格式是**多个 zstd 帧顺序拼接**（实测一份 343 帧 / 710KB）。
+ * 格式是**多个 zstd 帧顺序拼接**（实测一份 343 帧 / 710KB，大的 4.5MB）。
  *
  * 返回 `{ text, frames, decodedFrames, failedFrames, complete }`：
  *   `complete === false` 表示文件**不是**由完整帧首尾相接拼成的（截断 / 损坏 / 格式变了）。
  *   调用方必须把它当成"这份日志不可信"，而不是"它没引用任何东西"。
  */
-export function decodeSessionLogDetailed(file) {
+function* decodeSessionLogSteps(file) {
   const buf = readFileSync(file);
   const slices = [];
   let p = 0;
@@ -208,8 +235,20 @@ export function decodeSessionLogDetailed(file) {
     } catch {
       failedFrames += 1;
     }
+    // 每帧让出一次：一帧约 0.3ms，几千帧也不会把事件循环占满。
+    yield;
   }
   return { text, frames: slices.length, decodedFrames, failedFrames, complete };
+}
+
+/** 解一份会话日志（详细版，同步）。 */
+export function decodeSessionLogDetailed(file) {
+  return driveSync(decodeSessionLogSteps(file));
+}
+
+/** 解一份会话日志（详细版，每帧让出事件循环；host 用）。 */
+export async function decodeSessionLogDetailedAsync(file) {
+  return await driveAsync(decodeSessionLogSteps(file));
 }
 
 /** 解一份会话日志，只要文本（兼容只关心内容的调用方）。 */
@@ -235,6 +274,26 @@ export function readWorkspaceState(home = dshHome()) {
   };
 }
 
+/**
+ * 磁盘上所有已存储会话的 id —— **只枚举目录名，不递归算体积**。
+ *
+ * `listStoredSessions` 会对**每个**会话跑一遍 `dirBytes`（递归 stat）。判断"哪些
+ * 花名册 id 在磁盘上已不存在"根本不需要体积，所以单独留一条便宜的路给面板的
+ * 残留列表用（它每次页面加载都要跑）。
+ */
+export function listStoredSessionIds(home = dshHome()) {
+  const root = join(home, 'sessions');
+  const ids = [];
+  if (!existsSync(root)) return ids;
+  for (const slug of readdirSync(root, { withFileTypes: true })) {
+    if (!slug.isDirectory()) continue;
+    for (const entry of readdirSync(join(root, slug.name), { withFileTypes: true })) {
+      if (entry.isDirectory()) ids.push(entry.name);
+    }
+  }
+  return ids;
+}
+
 /** 磁盘上所有已存储会话：id → {dir, bytes}。 */
 export function listStoredSessions(home = dshHome()) {
   const root = join(home, 'sessions');
@@ -252,16 +311,31 @@ export function listStoredSessions(home = dshHome()) {
   return found;
 }
 
-/** 从日志文本里提取会被删掉的会话自己的产出与附件引用。 */
-export function extractSessionFacts(text) {
+/** 从日志文本里提取会被删掉的会话自己的产出与附件引用（generator 版，逐行让出）。 */
+function* extractSessionFactsSteps(text) {
   const files = new Set();
   const attachments = new Set();
   let cwd = '';
 
   const cwdMatch = text.match(/"cwd"\s*:\s*"([^"]+)"/);
   if (cwdMatch) cwd = cwdMatch[1];
-  for (const raw of text.split('\n')) {
+  const lines = text.split('\n');
+  for (let i = 0; i < lines.length; i += 1) {
+    const raw = lines[i];
     if (raw === '') continue;
+    // 便宜的预筛：整段日志里绝大多数行与"产出"无关，先 includes 再 JSON.parse。
+    // 实测（15.7M 字符 / 3590 行）：全量 parse 82ms，预筛后 19ms —— 只有 673 行需要解析。
+    // 多留几个标记是为了不误杀：某些序列化器会把 `/` 转义成 `\/`。
+    if (
+      !raw.includes('tool/call') &&
+      !raw.includes('tool\\/call') &&
+      !raw.includes('deliverables') &&
+      !raw.includes('file_path') &&
+      !raw.includes('filePath')
+    ) {
+      if ((i & 1023) === 0) yield;
+      continue;
+    }
     let event;
     try {
       event = JSON.parse(raw);
@@ -282,10 +356,21 @@ export function extractSessionFacts(text) {
     if (event?.type === 'deliverables/presented' && Array.isArray(data?.files)) {
       for (const f of data.files) if (typeof f?.path === 'string') files.add(f.path);
     }
+    yield;
   }
   for (const m of text.matchAll(/sha256:[a-f0-9]{64}/g)) attachments.add(m[0]);
   for (const m of text.matchAll(/HANDOFF-[A-Za-z0-9._-]+\.md/g)) files.add(m[0]);
   return { files: [...files].sort(), attachments, cwd };
+}
+
+/** 从日志文本里提取产出与附件引用（同步）。 */
+export function extractSessionFacts(text) {
+  return driveSync(extractSessionFactsSteps(text));
+}
+
+/** 从日志文本里提取产出与附件引用（逐行让出事件循环；host 用）。 */
+export async function extractSessionFactsAsync(text) {
+  return await driveAsync(extractSessionFactsSteps(text));
 }
 
 /**
@@ -294,7 +379,7 @@ export function extractSessionFacts(text) {
  * 关键安全属性：**只要有任一日志解不完整，就放弃删任何附件**（`referenced: null`）。
  * 少删只是浪费空间，多删会删掉别的会话还在用的图。
  */
-export function referencedAttachments(home, stored, skip) {
+function* referencedAttachmentsSteps(home, stored, skip) {
   const referenced = new Set();
   for (const [id, entry] of stored) {
     if (skip.has(id)) continue;
@@ -302,20 +387,30 @@ export function referencedAttachments(home, stored, skip) {
     if (!existsSync(log)) continue;
     let decoded;
     try {
-      decoded = decodeSessionLogDetailed(log);
+      decoded = yield* decodeSessionLogSteps(log);
     } catch {
       // 读不了 / 整个解不开
       return { referenced: null, skipped: id };
     }
     // 文件必须正好由完整帧拼成，且每帧都解得开；否则按"不可信"处理。
     // 截断是这里最危险的损坏形式（会静默漏掉尾部帧里的引用），而它只能靠
-    // `complete`（结构走帧）发现 —— 详见 decodeSessionLogDetailed 的注释。
+    // `complete`（结构走帧）发现 —— 详见 decodeSessionLogSteps 的注释。
     if (!decoded.complete || decoded.failedFrames > 0 || (decoded.frames > 0 && decoded.decodedFrames === 0)) {
       return { referenced: null, skipped: id };
     }
     for (const m of decoded.text.matchAll(/sha256:[a-f0-9]{64}/g)) referenced.add(m[0]);
   }
   return { referenced, skipped: null };
+}
+
+/** 除 `skip` 之外的会话仍在引用的附件 id 集合（同步）。 */
+export function referencedAttachments(home, stored, skip) {
+  return driveSync(referencedAttachmentsSteps(home, stored, skip));
+}
+
+/** 除 `skip` 之外的会话仍在引用的附件 id 集合（让出事件循环；host 用）。 */
+export async function referencedAttachmentsAsync(home, stored, skip) {
+  return await driveAsync(referencedAttachmentsSteps(home, stored, skip));
 }
 
 /**
@@ -416,7 +511,7 @@ export function manifestPathFor(entry, home = dshHome()) {
  * @param options.ids - 明确要清的会话 id；缺省用已归档的那些。
  * @param options.attachments - 是否把无人引用的附件也算进计划。
  */
-export function buildPlan({ home = dshHome(), ids, attachments = false } = {}) {
+function* buildPlanSteps({ home = dshHome(), ids, attachments = false } = {}) {
   const state = readWorkspaceState(home);
   const stored = listStoredSessions(home);
   const requested = ids && ids.length > 0 ? ids : state.archivedSessionIds;
@@ -425,14 +520,19 @@ export function buildPlan({ home = dshHome(), ids, attachments = false } = {}) {
 
   const entries = [];
   const skip = new Set(targets);
-  const refs = attachments ? referencedAttachments(home, stored, skip) : { referenced: new Set(), skipped: null };
+  // `yield*` 把内层 generator 的 yield 一并转给外层驱动器 —— 所以同步/异步两条路径
+  // 共用同一份实现，异步驱动在解压每一帧、解析每一行时都能让出事件循环。
+  const refs = attachments
+    ? yield* referencedAttachmentsSteps(home, stored, skip)
+    : { referenced: new Set(), skipped: null };
 
   for (const id of targets) {
     const entry = stored.get(id);
     const log = join(entry.dir, 'session.v4.jsonl.zstd');
     let facts = { files: [], attachments: new Set(), cwd: '' };
     try {
-      facts = extractSessionFacts(decodeSessionLog(log));
+      const decoded = yield* decodeSessionLogSteps(log);
+      facts = yield* extractSessionFactsSteps(decoded.text);
     } catch {
       /* 解不开也要能删，只是清单为空 */
     }
@@ -457,6 +557,7 @@ export function buildPlan({ home = dshHome(), ids, attachments = false } = {}) {
       attachmentBytes,
       onDisk: true,
     });
+    yield;
   }
 
   return {
@@ -472,6 +573,39 @@ export function buildPlan({ home = dshHome(), ids, attachments = false } = {}) {
       attachmentBytes: entries.reduce((s, e) => s + e.attachmentBytes, 0),
       deletableAttachments: entries.reduce((s, e) => s + e.deletableAttachments.length, 0),
     },
+  };
+}
+
+/** 生成计划（只读、同步；CLI 用）。 */
+export function buildPlan(options) {
+  return driveSync(buildPlanSteps(options));
+}
+
+/**
+ * 生成计划（只读、**在昂贵的步骤之间让出事件循环**；host 路由用）。
+ *
+ * 为什么 host 必须用这个：host 跑在 DSH 唯一的那个事件循环上，而解一份 4.5MB 的
+ * 会话日志要 ~200ms（实测：解压 99ms + 解析 109ms）。同步跑就会把整个服务
+ * ——包括正在流式输出的对话——冻住那么久。
+ */
+export async function buildPlanAsync(options) {
+  return await driveAsync(buildPlanSteps(options));
+}
+
+/**
+ * 只要"花名册里记着、磁盘上却没有"的那些 id —— **不解压、不 stat**。
+ *
+ * 为什么单独做一条路：面板在**每次页面加载**时都要刷新这个残留列表，而它原来走的是
+ * 完整 `buildPlan`（本机实测 208ms，全花在解那份 4.5MB 归档日志上）。而这个列表
+ * 只需要两个 id 集合相减，实测 0ms。
+ */
+export function readStaleIds(home = dshHome()) {
+  const state = readWorkspaceState(home);
+  const present = new Set(listStoredSessionIds(home));
+  return {
+    missing: state.archivedSessionIds.filter((id) => !present.has(id)),
+    archived: state.archivedSessionIds.length,
+    stored: present.size,
   };
 }
 
