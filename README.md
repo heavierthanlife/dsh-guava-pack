@@ -102,11 +102,13 @@ curl -s http://127.0.0.1:8318/health
 | 补丁 | 改的文件 | 修什么 |
 |---|---|---|
 | `patches/apply-required-array.sh` | `@deepseek-ai/dsh-tools/lib/index.js` | 工具 schema 恒输出 `required`（含空数组）。AgentRouter 的 deepseek-v4-flash 通道把「缺失的 required」判成 null → `400 null is not of type "array"` |
-| `patches/apply-anthropic-tool-fixes.sh` | `@earendil-works/pi-ai/dist/api/anthropic-messages.js` | ① 每个 `tool_use` 补上缺失的 `tool_result`（上下文裁剪会删掉大结果）② `tool_use` 稳定重排到 assistant 消息末尾。修 `400 tool_use ids were found without tool_result blocks immediately after` |
+| `patches/apply-anthropic-tool-fixes.sh` | `@earendil-works/pi-ai/dist/api/anthropic-messages.js` | ① 每个 `tool_use` 补上缺失的 `tool_result`（上下文裁剪会删掉大结果）② `tool_use` 稳定重排到 assistant 消息末尾。修 `400 tool_use ids were found without tool_result blocks immediately after`。<br>*(注：针对 DSH 0.2.1+ 已适配 `assistantLevels` 索引重映射与 `cache_control` 新锚点)* |
 
 ```sh
 node install.mjs --patch          # 幂等，已打过就跳过
-# 或直接：bash patches/apply-required-array.sh
+# 或直接分别执行：
+# bash patches/apply-required-array.sh
+# bash patches/apply-anthropic-tool-fixes.sh
 ```
 
 **作用域**（都已核实，不会误伤其他模型）：
@@ -116,8 +118,36 @@ node install.mjs --patch          # 幂等，已打过就跳过
 - 补丁②只作用于 `api: anthropic-messages` 的 provider（即 antigravity、agentrouter）；
   openai 系走另一个文件，完全没动。
 
-**这两个补丁会在 dsh 依赖升级后丢失** —— 升级完重跑 `node install.mjs --patch` 即可。
+**这两个补丁会在 dsh 依赖升级后被 npm/pnpm 覆盖** —— 升级完必须重跑补丁脚本。
 脚本自带幂等标记和锚点断言：锚点找不到会**直接报错**而不是静默改坏代码。
+
+### 🔄 DSH 升级与排障标准流程（必读防坑指南）
+
+#### 1. 核心陷阱：`systemctl --user start` 对活跃服务是空操作
+- **现象**：执行 `pnpm update` 升级到新版本后，再执行 `systemctl --user start dsh.service`，看似成功，但 Web 界面打开后 **21 个 UI 插件全部处于 pending 挂起状态**，控制台报错 `remoteAccess` 连接失败或服务依赖图解析卡死。
+- **根因**：`systemctl start` 针对**已经在运行中的服务是静默空操作**！此时磁盘上的 `node_modules` 已经换成了新版代码，但内存中仍在运行老版本进程。DSH 的前端 dev-server 是按需从磁盘读文件的，导致**前端拿到新代码、后端跑着旧代码**，进程与文件版本错配，通信握手协议断裂。
+- **铁律**：升级后**必须执行 `restart`**，切勿使用 `start`。
+
+#### 2. 标准升级四步走
+
+```bash
+# 1. 升级 DSH 依赖
+pnpm update @deepseek-ai/dsh@<版本号>
+
+# 2. 重新打上工具 schema 必选数组补丁
+bash ~/dsh/patches/apply-required-array.sh
+
+# 3. 重新打上 Anthropic 工具调用协议补丁（含 assistantLevels 索引同步）
+bash ~/dsh/patches/apply-anthropic-tool-fixes.sh
+
+# 4. 干净重启服务（切记：restart，不是 start！）
+systemctl --user restart dsh.service
+```
+
+重启后重新获取会话凭证 URL（每次重启 token 刷新）：
+```bash
+bash ~/dsh/tailnet-url.sh
+```
 
 ### 让模型列表跟上服务商端（sync-models）
 

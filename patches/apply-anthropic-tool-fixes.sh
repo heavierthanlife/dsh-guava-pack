@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # pi-ai 的 Anthropic 转换层两处「协议兜底」：
-#   A. tool_use 必须是 assistant 消息的最后一个块（AgentRouter 后端强制；
+#   A. 每个 tool_use 必须有紧随其后的 tool_result（dsh 的上下文裁剪会删掉大结果）。
+#   B. tool_use 必须是 assistant 消息的最后一个块（AgentRouter 后端强制；
 #      dsh 会存下 tool 调用之后泄漏的文本碎片）。
-#   B. 每个 tool_use 必须有紧随其后的 tool_result（dsh 的上下文裁剪会删掉大结果）。
 # 症状：400 `tool_use ids were found without tool_result blocks immediately after`。
 # 重装/升级 pi-ai 后重跑：bash ~/dsh/patches/apply-anthropic-tool-fixes.sh
 set -euo pipefail
@@ -26,15 +26,20 @@ if "enforceToolResultAdjacency" not in s:
  * for it, which makes the provider reject the whole request with
  * `tool_use ids were found without tool_result blocks immediately after`.
  * Backfill a placeholder result so the transcript stays protocol-valid.
+ *
+ * Runs on the converted wire messages and keeps `assistantLevels` in sync,
+ * because inserting a message shifts every later assistant index.
  */
-function enforceToolResultAdjacency(messages) {
+function enforceToolResultAdjacency(messages, assistantLevels) {
     const out = [];
+    const remap = new Array(messages.length);
     for (let i = 0; i < messages.length; i++) {
-        const msg = messages[i];
-        out.push(msg);
-        if (msg.role !== "assistant" || !Array.isArray(msg.content))
+        const message = messages[i];
+        remap[i] = out.length;
+        out.push(message);
+        if (message.role !== "assistant" || !Array.isArray(message.content))
             continue;
-        const ids = msg.content.filter((block) => block.type === "tool_use").map((block) => block.id);
+        const ids = message.content.filter((block) => block.type === "tool_use").map((block) => block.id);
         if (ids.length === 0)
             continue;
         const next = messages[i + 1];
@@ -53,27 +58,31 @@ function enforceToolResultAdjacency(messages) {
             tool_use_id: id,
             content: "[tool result omitted by context pruning]",
         }));
-        if (next !== undefined && next.role === "user" && Array.isArray(next.content)) {
+        if (next !== undefined && next.role === "user" && Array.isArray(next.content))
             next.content = [...fillers, ...next.content];
-        }
-        else {
+        else
             out.push({ role: "user", content: fillers });
-        }
     }
-    return out;
+    messages.length = 0;
+    for (const message of out)
+        messages.push(message);
+    if (assistantLevels !== undefined) {
+        const remapped = new Map();
+        for (const [index, level] of assistantLevels)
+            remapped.set(remap[index], level);
+        assistantLevels.clear();
+        for (const [index, level] of remapped)
+            assistantLevels.set(index, level);
+    }
+    return messages;
 }
 function convertMessages('''
     a = "function convertMessages("
     assert s.count(a) == 1, "convertMessages 锚点不唯一"
     s = s.replace(a, helper, 1)
-    b = "    // Add cache_control to the last user message to cache conversation history"
+    b = "    // Add cache_control to the last user or system message to cache conversation history"
     assert b in s, "cache_control 锚点未找到"
-    inplace = ("    {\n"
-               "        const enforced = enforceToolResultAdjacency(params);\n"
-               "        params.length = 0;\n"
-               "        for (const message of enforced)\n"
-               "            params.push(message);\n"
-               "    }\n")
+    inplace = "    enforceToolResultAdjacency(params, assistantLevels);\n"
     s = s.replace(b, inplace + b, 1)
     print("Fix A applied")
 
