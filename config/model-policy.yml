@@ -161,3 +161,53 @@ vision_hints: ['vl', 'vision', 'omni', 'image', 'multimodal']
 version_patterns:
   - 'v(\d+(?:\.\d+)*)'          # v4 / v4.1
   - '(\d+(?:\.\d+)*)'           # 3.8 / 4-6（连字符数字由 normalize 处理）
+
+# ── 模型用途标注（显示在模型列表里）────────────────────────────────────────
+#
+# ## 为什么要标注
+#
+# 模型选择器**只显示 `name` 字段**（实测 dsh-client-ui-model-selection：只渲染
+# `model.name`，`title` 也是它；pi-ai 的 schema 里连 `description` 都没有）。
+# 所以"这是特殊用途模型"这件事**只能写进 name 的后缀**，形如：
+#
+#     Cat Jam（仅推理，不出正文）
+#
+# ## 为什么需要
+#
+# 有些模型**功能很独特但干不了常规对话/编程**。最典型的是推理型：
+# `stealth/glyph-cluster:free` 实测把 `max_tokens` 全花在内部推理上
+# （`reasoning_tokens: 45/50`），**正文 0 字符**，`finish_reason: length`。
+# 在 DSH 里跑就是 `The stealth model could not complete the request. PI_AI_ERROR`。
+# 光看名字"Glyph Cluster"完全看不出这一点，选它当默认模型会反复失败。
+#
+# ## 字段
+#
+#   match: 匹配 model.id 的正则（去 vendor 前缀后的裸 id 也试）
+#   tag:   括号里显示的文字
+#   why:   写给自己看的解释（不显示）
+#
+# 顺序敏感：第一条匹配的生效，所以把更具体的放前面。
+annotations:
+  - match: '^glyph-cluster'
+    tag: '仅推理，不出正文'
+    why: '实测 reasoning_tokens 吃光额度、content 为 0 字符 → DSH 会报 PI_AI_ERROR。不适合常规对话/编程。'
+
+  - match: '^cat-jam'
+    tag: '仅推理·正文极简'
+    why: '同样偏推理，但正文会出（实测 contentChars=2、finish=stop）。可当"想问题"用，常规编码别指望。'
+
+  - match: '^laguna-s-2.1'
+    tag: '免费但常满载'
+    why: '官方公告"while capacity lasts"；实测探到 capacity。留着备用，别当主力。'
+
+  - match: 'flash-image|image$'
+    tag: '图像生成'
+    why: '图像模型，不是对话模型。'
+
+  - match: '-(asr|tts|voiceclone|voicedesign)$'
+    tag: '语音'
+    why: '语音相关，非对话。'
+
+  - match: '-(high|low|medium|tiered)$'
+    tag: '固定推理档'
+    why: '档位已写死在模型里（id 后缀），UI 里不需要再选 effort。'

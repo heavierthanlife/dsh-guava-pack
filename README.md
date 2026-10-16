@@ -231,6 +231,16 @@ crontab -e
 
 脚本每次都会打印"🔒 保留 …（被 … 引用）"。这条是拿构造场景实测过的，不是宣称。
 
+#### ⚠️ HTTP 200 ≠ 能用
+
+探针必须看**正文产出**，不能只看状态码。两个真实教训：
+1. commandcode 的桥接**对失败也返回 200**，错误藏在 SSE body 里（`data: {"error":…}`）。
+2. 推理型模型 200 且无错误，但 `reasoning_tokens` 吃光额度、**正文 0 字符**
+   → 判为 `🧠 只出推理不出正文`（`reasoning-only`），不算可用。
+
+探针的 `max_tokens` 用 64（不能用 1）——给 1 的话**所有**推理模型都会"正文为空"，
+那是探测伪影。
+
 #### 免费额度：端点拿不到，只能人工记
 
 `/models` **完全没有额度字段**，探针也只能测"此刻调不调得通"，测不出"每天几次"。
@@ -247,6 +257,26 @@ commandcode 当前（2026-10-16 官方公告）：
 
 ⚠️ 公告都带 "while the stealth preview lasts" —— 是**限时**的，随时可能变。
 策略里的 `free_notices` 需要你偶尔对一下 UI。
+
+#### 模型用途标注（写进 name，因为 UI 只显示 name）
+
+有些模型**功能独特但干不了常规对话/编程**。最典型的是推理型：`stealth/glyph-cluster:free`
+实测把 `max_tokens` 全花在内部推理上（`reasoning_tokens: 45/50`），**正文 0 字符**，
+在 DSH 里跑就是 `The stealth model could not complete the request. PI_AI_ERROR`。
+光看名字"Glyph Cluster"完全看不出来。
+
+模型选择器**只渲染 `model.name`**（实测 `dsh-client-ui-model-selection` 只用
+`model.name` 做 label 与 title；pi-ai 的 schema 里**没有 `description`**），
+所以标注只能写进 name 后缀：
+
+```
+Glyph Cluster（仅推理，不出正文）
+Cat Jam（仅推理·正文极简）
+Laguna S 2.1（免费但常满载）
+```
+
+规则写在策略表的 `annotations`（正则 → 标签），**幂等**：反复跑不会叠加成两个括号，
+手工加的 `(Antigravity)` 这类括号会保留。
 
 #### 思考强度
 

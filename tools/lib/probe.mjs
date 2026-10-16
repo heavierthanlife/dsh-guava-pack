@@ -37,6 +37,7 @@ export const KIND = {
   CAPACITY: 'capacity',    // 上游满载（临时）
   NO_FUNDS: 'no-funds',    // 账户余额不足
   AUTH: 'auth',            // 401：key 无效
+  REASONING_ONLY: 'reasoning-only', // 200 但正文为空：推理吃光 token（**探针曾误判为可用**）
   UNKNOWN: 'unknown',
 };
 
@@ -48,6 +49,7 @@ const KIND_LABEL = {
   capacity: '⚠️ 上游满载',
   'no-funds': '💰 余额不足',
   auth: '🔑 key 无效',
+  'reasoning-only': '🧠 只出推理不出正文',
   unknown: '❓ 未分类',
 };
 
@@ -139,7 +141,10 @@ export async function probeModel({ baseURL, api, apiKey, model, provider, timeou
   if (provider && /opencode/.test(provider)) {
     headers['x-opencode-session'] = globalThis.crypto?.randomUUID?.() ?? String(Date.now());
   }
-  const body = { model, max_tokens: 1, messages: [{ role: 'user', content: 'hi' }] };
+  // max_tokens 不能是 1：推理型模型（glyph-cluster / cat-jam）会先把额度花在
+  // 内部推理上，给 1 个 token 的话**所有**这种模型都会"正文为空"，
+  // 那是探测伪影、不是模型的问题。给 64 足以让正常模型回一句话。
+  const body = { model, max_tokens: 64, messages: [{ role: 'user', content: 'Reply with the single word: ok' }] };
 
   const started = Date.now();
   let status = 0;
@@ -158,9 +163,63 @@ export async function probeModel({ baseURL, api, apiKey, model, provider, timeou
   }
 
   const { isError, message, type } = extractMessage(text);
-  if (!isError && status === 200) return { kind: KIND.USABLE, status, message: '', ms: Date.now() - started };
+  if (!isError && status === 200) {
+    // ⚠️ **HTTP 200 不等于它能干活。**
+    //
+    // 实测（2026-10-16）`stealth/glyph-cluster:free` 返回 200，但
+    // `completion_tokens_details.reasoning_tokens` 吃掉了全部额度、
+    // 正文 **0 字符**、`finish_reason: "length"`。DSH 里跑起来就是
+    // `The stealth model could not complete the request. PI_AI_ERROR`。
+    //
+    // 所以判"可用"必须看**有没有真的产出正文**，不能只看状态码。
+    // 用 `max_tokens` 稍大 + 检查 content/reasoning 的比例来区分。
+    const stats = analyzeBody(text);
+    if (stats.hasError) {
+      return { kind: classify(status, stats.message, stats.type), status, message: stats.message.slice(0, 160), ms: Date.now() - started };
+    }
+    if (stats.reasoningTokens > 0 && stats.contentChars === 0) {
+      return {
+        kind: KIND.REASONING_ONLY,
+        status,
+        message: `推理吃光 token（reasoning_tokens=${stats.reasoningTokens}，正文 0 字符）`,
+        ms: Date.now() - started,
+        reasoningTokens: stats.reasoningTokens,
+        contentChars: 0,
+      };
+    }
+    return { kind: KIND.USABLE, status, message: '', ms: Date.now() - started, contentChars: stats.contentChars };
+  }
   const kind = classify(status, message, type);
   return { kind, status, message: String(message).slice(0, 160), ms: Date.now() - started };
+}
+
+/**
+ * 分析响应体：有没有错误、正文产出多少、推理花掉多少 token。
+ *
+ * 之所以要这么细：commandcode 的桥接**恒返回 SSE**，而且 200 也可能是"空产出"。
+ */
+function analyzeBody(text) {
+  let contentChars = 0;
+  let reasoningTokens = 0;
+  let hasContent = false;
+  let finish = null;
+  for (const line of text.split('\n')) {
+    const raw = line.startsWith('data:') ? line.slice(5).trim() : line.trim();
+    if (!raw || raw === '[DONE]') continue;
+    let obj;
+    try { obj = JSON.parse(raw); } catch { continue; }
+    if (obj?.error) {
+      return { hasError: true, message: String(obj.error.message ?? obj.error.type ?? ''), type: obj.error.type, contentChars: 0, reasoningTokens: 0 };
+    }
+    for (const ch of obj?.choices ?? []) {
+      const d = ch?.delta ?? ch?.message;
+      if (typeof d?.content === 'string' && d.content.length > 0) { contentChars += d.content.length; hasContent = true; }
+      if (ch?.finish_reason) finish = ch.finish_reason;
+    }
+    const rt = obj?.usage?.completion_tokens_details?.reasoning_tokens;
+    if (typeof rt === 'number') reasoningTokens = Math.max(reasoningTokens, rt);
+  }
+  return { hasError: false, message: '', type: undefined, contentChars, hasContent, reasoningTokens, finish };
 }
 
 // ── 缓存 ────────────────────────────────────────────────────────────────────

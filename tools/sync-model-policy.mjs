@@ -156,6 +156,58 @@ function looksVision(id, hints, existingById) {
   return hints.some((h) => bare.includes(h.toLowerCase()));
 }
 
+/**
+ * 给已有模型的 `name:` 行套上用途后缀，形如 `Cat Jam（仅推理，不出正文）`。
+ *
+ * ## 为什么改 name 而不是加字段
+ *
+ * 模型选择器**只渲染 `model.name`**（实测 dsh-client-ui-model-selection：
+ * 只用 `model.name` 做 label 与 title），而 pi-ai 的 modelFields 里**没有
+ * description**。所以"这是特殊用途模型"只能写进 name。
+ *
+ * ## 幂等性
+ *
+ * 已有的 `（…）` / `(…)` 后缀会被**替换**而不是叠加，所以反复跑不会变成
+ * `Cat Jam（仅推理）（仅推理）`。手工加的其它括号（如 `(Antigravity)`、
+ * `(free)`）按 `stripOnly` 的规则决定保留还是替换 —— 默认只剥我们自己的标记。
+ *
+ * @param {string[]} lines - 该模型条目的原始 YAML 行
+ * @param {string|null} tag - 要加的后缀文字；null = 不加
+ * @param {RegExp} ownTagRe - 识别"我们自己加过的后缀"的正则
+ * @returns {{lines: string[], changed: boolean, before?: string, after?: string}}
+ */
+export function annotateName(lines, tag, ownTagRe) {
+  const idx = lines.findIndex((l) => /^\s*name:\s*/.test(l));
+  if (idx < 0) return { lines, changed: false };
+  const line = lines[idx];
+  const m = line.match(/^(\s*name:\s*)(.*?)\s*$/);
+  if (!m) return { lines, changed: false };
+  const [, prefix, rawName] = m;
+  if (!tag) return { lines, changed: false };
+  // 先剥掉**我们自己**加过的后缀（保证幂等），手工括号保留
+  const stripped = rawName.replace(/\s*（[^）]*）\s*$/, '').replace(/\s*\(([^)]*)\)\s*$/, (full, inner) =>
+    ownTagRe && ownTagRe.test(inner) ? '' : full);
+  const next = `${prefix}${stripped}（${tag}）`;
+  if (next === line) return { lines, changed: false, before: rawName, after: stripped };
+  const out = lines.slice();
+  out[idx] = next;
+  return { lines: out, changed: true, before: rawName, after: `${stripped}（${tag}）` };
+}
+
+/** 按 annotations 表找出适用于某 id 的 tag（第一条匹配生效）。 */
+export function tagFor(id, annotations, ownTagRe) {
+  if (!Array.isArray(annotations)) return null;
+  const bare = bareId(id);
+  for (const a of annotations) {
+    if (!a?.match) continue;
+    let re;
+    try { re = new RegExp(a.match); } catch { continue; }
+    if (re.test(id) || re.test(bare)) return a.tag ?? null;
+  }
+  void ownTagRe;
+  return null;
+}
+
 // ── 选型：把策略 + 端点候选算成目标 id 集合 ────────────────────────────────
 
 /**
@@ -300,16 +352,20 @@ export function solveProvider(providerName, rule, candidates, defaults, existing
       for (const m of allFree) {
         const kind = probeInfo ? cachedKind(probeInfo.cache, providerName, m.id) : undefined;
         const isExisting = existingById?.has(m.id) ?? false;
-        if (kind === undefined) { good.push(m); continue; }        // 没探过 → 放宽
         if (kind === 'usable') { good.push(m); continue; }
         if (isExisting) {
-          // 保守：只剔确凿坏的；"需订阅/地区/满载"留给用户自己判断
+          // 已配置的：**没探过也保留**（放宽），只有确凿坏了才剔。
+          if (kind === undefined) { good.push(m); continue; }
           if (DEFINITELY_BROKEN.has(kind)) dropped.push({ id: m.id, kind });
-          else good.push(m);
-        } else if (!endpointListed.has(m.id)) {
-          good.push(m);   // 探测不到 + 端点也没列 → 保守保留
+          else good.push(m);   // 需订阅/地区/满载 → 保守保留
         } else {
-          skippedNew.push({ id: m.id, kind });   // 新的不可用 → 不加
+          // **新**候选：必须证明自己能用才加。
+          // 没探过也**不加** —— 否则会往列表里塞一堆连不通的噪音。
+          // （踩过：`--probe` 之前没探到的新模型因"放宽"被加进来，
+          //   实测全是 403"需订阅"，加了等于白加。）
+          if (kind === undefined && !endpointListed.has(m.id)) { good.push(m); continue; } // 探测不到+端点没列 → 保守
+          if (kind === undefined) { skippedNew.push({ id: m.id, kind: 'unknown' }); continue; }
+          skippedNew.push({ id: m.id, kind });
         }
       }
       const ordered = byFreeRank(good).map((m) => m.id);
@@ -359,6 +415,11 @@ async function main() {
   const policy = yaml.load(readFileSync(POLICY_PATH, 'utf8')) ?? {};
   const defaults = { ...(policy.defaults ?? {}), vision_hints: policy.vision_hints ?? [] };
   const rules = policy.providers ?? {};
+  // 用途标注：把"这模型干不了常规对话"这类信息写进 name（UI 只显示 name）。
+  const annotations = policy.annotations ?? [];
+  // 识别"我们自己加过的后缀"，用于幂等替换
+  const ownTagRe = new RegExp(annotations.map((a) => a.tag).filter(Boolean).map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'));
+  let annotated = 0;
   if (Object.keys(rules).length === 0) { bad('策略表里没有 providers'); process.exit(1); }
 
   const original = readFileSync(PATCH, 'utf8');
@@ -543,21 +604,38 @@ async function main() {
     for (const id of toAdd) console.log(`     ＋ ${id}${isFree(id) ? '  🆓' : ''}`);
     for (const id of toRemove) console.log(`     － ${id}`);
 
-    if (toAdd.length === 0 && toRemove.length === 0) {
+    // ⚠️ 判定"要不要改"必须**把用途标注也算进去**。
+    // 只比对增删会漏掉"模型没变但 name 需要打标签"的情况 —— 那正是最常见的场景
+    // （给已配置的模型补一个"仅推理"标注）。踩过：标注写好了却因为
+    // `+0 -0` 直接 continue，一个标签都没打上。
+    const orderedIds = [...targetIds];
+    const annotateLog = [];
+    const newLines = orderedIds.flatMap((id) => {
+      const tag = tagFor(id, annotations, ownTagRe);
+      const prev = existingById.get(id);
+      if (prev) {
+        // 已存在：只改 `name:` 那一行（人工的 contextWindow/efforts/compat 一字不动）
+        const r = annotateName(prev.lines, tag, ownTagRe);
+        if (r.changed) { annotated++; annotateLog.push({ id, before: r.before, after: r.after }); }
+        return r.lines;
+      }
+      const meta = candidates.find((c) => c && c.id === id) ?? { id };
+      const efforts = defaults.auto_reasoning_efforts ? effortsFor(p.name, id) : null;
+      const base = renderModel(meta, { efforts });
+      if (tag) {
+        const r = annotateName(base, tag, ownTagRe);
+        if (r.changed) annotateLog.push({ id, before: r.before, after: r.after });
+        return r.lines;
+      }
+      return base;
+    });
+
+    if (toAdd.length === 0 && toRemove.length === 0 && annotateLog.length === 0) {
       console.log('     = 无需变更');
       console.log();
       continue;
     }
-
-    // 目标顺序 = 策略选出的顺序（旗舰在前），追加 protected；已存在的保留原始文本
-    const orderedIds = [...targetIds];
-    const newLines = orderedIds.flatMap((id) => {
-      const prev = existingById.get(id);
-      if (prev) return prev.lines; // 人工元数据一字不动
-      const meta = candidates.find((c) => c && c.id === id) ?? { id };
-      const efforts = defaults.auto_reasoning_efforts ? effortsFor(p.name, id) : null;
-      return renderModel(meta, { efforts });
-    });
+    for (const a of annotateLog) console.log(`     🏷️  ${a.before} → ${a.after}`);
     // 安全阀：渲染出的行必须能被重新解析成同样多的模型
     const reparse = parseModels([`${sp(IND.models)}models:`, ...newLines]);
     if (reparse.models.length !== orderedIds.length) {
@@ -603,4 +681,9 @@ async function main() {
   info('profile patch 热重载 —— 刷新页面即可；通常不用重启 DSH');
 }
 
-main().catch((err) => { bad(err.stack || String(err)); process.exit(1); });
+// 只在**作为脚本直接运行**时执行；被 import（如自检）时不要跑。
+// 踩过：没有这个守卫时，`import { annotateName } from '../sync-model-policy.mjs'`
+// 会把整个 main() 连带跑一遍 —— 自检输出里混进一次完整 dry-run，还会多打一次网络请求。
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((err) => { bad(err.stack || String(err)); process.exit(1); });
+}
