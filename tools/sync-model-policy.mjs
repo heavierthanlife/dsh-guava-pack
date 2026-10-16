@@ -245,24 +245,63 @@ export function solveProvider(providerName, rule, candidates, defaults, existing
   // `usable` 必须依赖真实探测结果，因为端点列表会撒谎（实测同一份列表里混着
   // "No endpoints found" / "已下线转付费" / "上游满载"）。
   if (pick.plus_free) {
-    const allFree = usable.filter((m) => isFree(m.id) && !chosen.includes(m.id));
+    // 候选池 = 端点列出的免费 ∪ **配置里已有的免费**。
+    //
+    // 为什么必须并上后者：`sync-models` 早就踩过这个坑 ——
+    // **「端点没列」≠「不能用」**（`gemini-2.5-flash` 被服务端静默别名到 3.1 而继续可用）。
+    // 只按端点算的话，一个配置里正在用、只是被端点摘掉的免费模型会被**静默删掉**。
+    // 用户明确要求"少删些"，所以已有的免费模型默认留着，除非探测确凿证明它坏了。
+    //
+    // （非免费的仍按 family 收敛 —— 那正是 "取最新的 ds" 的本意。）
+    const freePool = [
+      ...usable.filter((m) => isFree(m.id)),
+      ...(existingById ? [...existingById.values()].filter((m) => isFree(m.id)) : []),
+    ];
+    const seenFree = new Set();
+    const allFree = freePool.filter((m) => {
+      if (chosen.includes(m.id) || seenFree.has(m.id)) return false;
+      seenFree.add(m.id);
+      return true;
+    });
+    const endpointListed = new Set(usable.map((m) => m.id));
     if (pick.plus_free === 'usable') {
-      if (!probeInfo) {
-        // 没有探测数据 → **宁可放宽**：全都留着，也不静默丢掉可能能用的。
-        chosen.push(...byNewest(allFree).map((m) => m.id));
-        notes.push(`要"能用的免费模型"，但没有探测数据 → **放宽为保留全部 ${allFree.length} 个免费**（跑 --probe 可精确判断）`);
-      } else {
-        const good = [], bad = [];
-        for (const m of allFree) {
-          const kind = cachedKind(probeInfo.cache, providerName, m.id);
-          if (kind === 'usable') good.push(m);
-          else if (kind === undefined) good.push(m);   // 缓存里没这条 → 放宽
-          else bad.push({ id: m.id, kind });
+      // **非对称判定**（用户在 2026-10-16 定的口径："opencode 保守一点，少删些"）：
+      //
+      //   · 已在配置里的免费模型 → 只有"确凿坏了"才剔除
+      //     （死了 / 已下线 / 满载）。"需订阅""地区封锁"这类**保留** ——
+      //     订阅可能今天买、地区限制可能绕过，但删掉就是白白丢掉。
+      //   · **新**候选 → 必须探测为 `usable` 才加。否则只是往列表里塞噪音
+      //     （比如 opencode 那 10 个全都"需订阅"，加进来一个也用不了）。
+      //
+      // 没有探测数据时一律放宽（宁可多留，也不静默丢掉可能能用的）。
+      const DEFINITELY_BROKEN = new Set(['dead', 'no-funds']);
+      const good = [], dropped = [], skippedNew = [];
+      for (const m of allFree) {
+        const kind = probeInfo ? cachedKind(probeInfo.cache, providerName, m.id) : undefined;
+        const isExisting = existingById?.has(m.id) ?? false;
+        if (kind === undefined) { good.push(m); continue; }        // 没探过 → 放宽
+        if (kind === 'usable') { good.push(m); continue; }
+        if (isExisting) {
+          // 保守：只剔确凿坏的；"需订阅/地区/满载"留给用户自己判断
+          if (DEFINITELY_BROKEN.has(kind)) dropped.push({ id: m.id, kind });
+          else good.push(m);
+        } else if (!endpointListed.has(m.id)) {
+          good.push(m);   // 探测不到 + 端点也没列 → 保守保留
+        } else {
+          skippedNew.push({ id: m.id, kind });   // 新的不可用 → 不加
         }
-        chosen.push(...byNewest(good).map((m) => m.id));
-        notes.push(`探测后保留 ${good.length} 个可用免费模型：${byNewest(good).map((m) => m.id).join(', ') || '(无)'}`);
-        for (const b of bad) notes.push(`  ✗ 剔除 \`${b.id}\`（${kindLabel(b.kind)}）`);
       }
+      chosen.push(...byNewest(good).map((m) => m.id));
+      notes.push(`保留 ${good.length} 个免费模型（保守口径：已配置的只剔确凿坏的）：${byNewest(good).map((m) => m.id).join(', ') || '(无)'}`);
+      for (const b of dropped) notes.push(`  ✗ 剔除 \`${b.id}\`（${kindLabel(b.kind)}，确凿不可用）`);
+      for (const b of skippedNew) notes.push(`  ＋跳过 \`${b.id}\`（新候选但${kindLabel(b.kind)}，不加入）`);
+      const keptSoft = allFree.filter((m) => {
+        const k = probeInfo ? cachedKind(probeInfo.cache, providerName, m.id) : undefined;
+        return k !== undefined && k !== 'usable' && !DEFINITELY_BROKEN.has(k) && (existingById?.has(m.id) ?? false);
+      });
+      if (keptSoft.length) notes.push(`  ⚠️ 因保守口径保留了 ${keptSoft.length} 个"当前连不上但没确凿坏"的：${keptSoft.map((m) => m.id).join(', ')}`);
+      const absent = good.filter((m) => !endpointListed.has(m.id)).map((m) => m.id);
+      if (absent.length) notes.push(`  ⚠️ 端点已不再列出但**保留**（可能被服务端别名）：${absent.join(', ')}`);
     } else {
       const free = byNewest(allFree);
       if (free.length) {
