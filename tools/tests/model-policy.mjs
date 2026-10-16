@@ -194,5 +194,52 @@ check('priority: low 排最后', /n\.priority === 'low'\) return 3/.test(src2));
 check('免费模型用 byFreeRank 排序（不是纯 byNewest）',
   /const ordered = byFreeRank\(good\)/.test(src2));
 
+// ── 9. 用途标注：UI 只显示 name，所以标签必须写进 name 且幂等 ─────────────
+// 背景：`stealth/glyph-cluster:free` 功能独特（纯推理）但干不了常规对话 ——
+// 实测 reasoning_tokens 吃光 max_tokens、正文 0 字符 → DSH 报 PI_AI_ERROR。
+// 而模型选择器**只渲染 `model.name`**（pi-ai 的 schema 里连 description 都没有），
+// 所以"这模型有特殊用途"只能写进 name 后缀。
+console.log('\n用途标注');
+const ann = policy.annotations ?? [];
+check('策略表里有 annotations', ann.length >= 4, { n: ann.length });
+check('glyph-cluster 被标成"仅推理不出正文"',
+  ann.find((a) => a.match === '^glyph-cluster')?.tag?.includes('不出正文'));
+check('每条标注都有 tag 与 why', ann.every((a) => a.tag && a.why));
+check('所有 match 都能构造为正则', ann.every((a) => { try { new RegExp(a.match); return true; } catch { return false; } }));
+
+const { annotateName, tagFor } = await import('../sync-model-policy.mjs');
+const own = new RegExp(ann.map((a) => a.tag).join('|'));
+const L = (n) => [`          - id: x`, `            name: ${n}`, `            contextWindow: 1`];
+
+// 打标签
+let r = annotateName(L('Glyph Cluster'), '仅推理，不出正文', own);
+check('能打上后缀', r.changed && /（仅推理，不出正文）$/.test(r.lines[1]), r.lines[1]);
+// **幂等**：再跑一次不该叠加
+const r2 = annotateName(r.lines, '仅推理，不出正文', own);
+check('重复跑幂等（不叠加成两个括号）', !r2.changed, r2.lines[1]);
+// 换标签：替换而不是叠加
+const r3 = annotateName(r.lines, '免费但常满载', own);
+check('换标签是替换', r3.changed && /（免费但常满载）$/.test(r3.lines[1]) && !/仅推理/.test(r3.lines[1]), r3.lines[1]);
+// 手工括号要保留
+const r4 = annotateName(L('Gemini 3.8 Flash High (Antigravity)'), '固定推理档', own);
+check('手工括号 (Antigravity) 保留', /（Antigravity）?\(Antigravity\)/.test(r4.lines[1]) || r4.lines[1].includes('(Antigravity)'), r4.lines[1]);
+check('后缀加在手工括号之后', r4.lines[1].includes('（固定推理档）'), r4.lines[1]);
+// 其它行一字不动
+check('只改 name 行，其它行不动', r.lines[0] === L('Glyph Cluster')[0] && r.lines[2] === L('Glyph Cluster')[2]);
+// tagFor 匹配（含 vendor 前缀与裸 id）
+check('tagFor 能匹配裸 id', tagFor('stealth/glyph-cluster:free', ann, own)?.includes('不出正文'));
+check('tagFor 对无标注的返回 null', tagFor('deepseek-v4.1-flash', ann, own) === null);
+
+// probe 必须能识别"200 但正文为空"
+const probeSrc = readFileSync(join(PACK, 'tools', 'lib', 'probe.mjs'), 'utf8');
+check('KIND 有 reasoning-only', /REASONING_ONLY: 'reasoning-only'/.test(probeSrc));
+check('探针检查正文产出而不是只看状态码', /stats\.contentChars === 0/.test(probeSrc));
+check('探针 max_tokens 不是 1（否则推理模型全被误判）', /max_tokens: 64/.test(probeSrc));
+
+// 新候选：没探过也必须先跳过（不能靠"放宽"混进来）
+const src3 = readFileSync(join(PACK, 'tools', 'sync-model-policy.mjs'), 'utf8');
+check('新候选宽严有别：未探测的新候选不加入',
+  /if \(kind === undefined\) \{ skippedNew\.push\(\{ id: m\.id, kind: 'unknown' \}\); continue; \}/.test(src3));
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);
