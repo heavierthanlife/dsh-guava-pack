@@ -189,7 +189,9 @@ antigravity 的 `gemini-3.5-flash` 调用后直接返回文字
 
 ```sh
 node tools/sync-model-policy.mjs                 # 预览 diff（默认，不写盘）
+node tools/sync-model-policy.mjs --probe         # 预览 + **真调一遍**免费模型判断可用性
 node tools/sync-model-policy.mjs --write         # 落盘（自动备份）
+node tools/sync-model-policy.mjs --probe --write # 推荐的完整姿势：先验可用性再落盘
 node tools/sync-model-policy.mjs --only xiaomi-token-plan-cn
 node tools/sync-model-policy.mjs --check-refs    # 只查引用完整性，exit 2 = 有悬空
 ```
@@ -201,7 +203,7 @@ node tools/sync-model-policy.mjs --check-refs    # 只查引用完整性，exit 
 ```sh
 crontab -e
 # 每天 09:30 按策略收敛；日志留一份好回看
-30 9 * * * cd $HOME/dsh/playground/themes/dsh-guava-pack && /usr/bin/node tools/sync-model-policy.mjs --write >> $HOME/dsh/logs/model-policy.log 2>&1
+30 9 * * * cd $HOME/dsh/playground/themes/dsh-guava-pack && /usr/bin/node tools/sync-model-policy.mjs --probe --write >> $HOME/dsh/logs/model-policy.log 2>&1
 ```
 
 用 cron 而不是插件内置定时器，是因为**不依赖 DSH 是否开着**，也更好调试。

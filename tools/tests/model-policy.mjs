@@ -15,7 +15,7 @@
  * 用法：node tests/model-policy.mjs
  */
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, rmSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -127,6 +127,32 @@ const agRule = policy.providers.antigravity;
 check('antigravity 用 explicit（人工点名）而不是启发式', Array.isArray(agRule.pick.explicit));
 check('点名恰好 5 个', agRule.pick.explicit.length === 5, { n: agRule.pick.explicit.length });
 check('点名里没有任何重复', new Set(agRule.pick.explicit).size === agRule.pick.explicit.length);
+
+// ── 6. 免费模型策略必须依赖真探测（不能靠 id 猜）─────────────────────
+// 实测：端点列表里混着 "No endpoints found" / "已终止转付费" / "上游满载"，
+// 而 commandcode 的桥接对失败也返回 **HTTP 200**（错误在 body 里）。
+// 所以这三家必须用 `plus_free: usable`，而不是 latest/数字。
+console.log('\n免费模型策略');
+for (const p of ['opencode-go', 'opencode', 'commandcode']) {
+  check(`${p} 用 plus_free: usable（依赖真探测）`, policy.providers[p]?.pick?.plus_free === 'usable',
+    policy.providers[p]?.pick?.plus_free);
+}
+
+// probe 模块的基本契约（纯函数，不联网）
+const probeMod = await import('../lib/probe.mjs');
+check('probe 导出了 KIND.USABLE', probeMod.KIND?.USABLE === 'usable');
+check('kindLabel 对未知值安全回退', probeMod.kindLabel('nonexistent-kind') === 'nonexistent-kind');
+// ⚠️ 必须写到**临时目录**，不能写 config/ —— 那会覆盖真实的探测缓存，
+// 导致下一次策略运行以为"什么都没探过"从而放宽（开发时踩过）。
+const scratch = join(PACK, '.probe-test-scratch');
+probeMod.saveCache(scratch, { 'test-provider': { 'test-model': { kind: 'usable', status: 200 } } });
+const cache = probeMod.loadCache(scratch);
+check('探测缓存可写可读且判定为新鲜', cache?.fresh === true && cache.results?.['test-provider']?.['test-model']?.kind === 'usable');
+check('cachedKind 能取出记录', probeMod.cachedKind(cache, 'test-provider', 'test-model') === 'usable');
+check('cachedKind 对不存在的模型返回 undefined（→ 放宽而非剔除）',
+  probeMod.cachedKind(cache, 'test-provider', 'nope') === undefined);
+rmSync(scratch, { recursive: true, force: true });
+check('临时目录已清理（不污染仓库）', !existsSync(scratch));
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);

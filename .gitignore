@@ -22,3 +22,6 @@ node_modules/
 
 # 抓包产物（含提示词明文）：绝不入库、绝不入包
 plugins/provider-router/captures/
+
+# 模型可用性探测缓存（运行时状态，不入库）
+config/.model-probe.json

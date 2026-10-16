@@ -100,25 +100,27 @@ providers:
   # 意图：除了 ds，只要**最新的可用的免费模型**。
   #       这三家都同时提供付费与免费；免费的量足够日常用，付费的不用列出来占位。
   opencode-go:
-    intent: 最新的 ds + 最新的免费模型
+    intent: 最新的 ds + **所有探测过真能用的**免费模型
     pick:
       family: '^deepseek'
       take: latest
-      plus_free: latest      # 除 family 外，再取最新的免费模型
+      # usable = 留下所有"真调得通"的免费模型（靠 --probe 判断，见 probe.mjs）。
+      # 端点列表会撒谎：实测同列表里混着 No endpoints found / 已下线转付费 / 上游满载。
+      plus_free: usable
 
   opencode:
-    intent: 最新的 ds + 最新的免费模型
+    intent: 最新的 ds + **所有探测过真能用的**免费模型
     pick:
       family: '^deepseek'
       take: latest
-      plus_free: latest
+      plus_free: usable
 
   commandcode:
-    intent: 最新的 ds + 最新的免费模型
+    intent: 最新的 ds + **所有探测过真能用的**免费模型
     pick:
       family: '^deepseek'
       take: latest
-      plus_free: latest
+      plus_free: usable
       # commandcode 的 id 常带 `vendor/` 前缀；family 匹配会自动去前缀
       exclude: []
 

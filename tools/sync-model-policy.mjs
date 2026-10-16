@@ -47,6 +47,15 @@ import { fileURLToPath } from 'node:url';
 import yaml from '/home/guava5tar_/dsh/node_modules/js-yaml/dist/js-yaml.mjs';
 
 import {
+  probeMany,
+  loadCache,
+  saveCache,
+  cachedKind,
+  kindLabel,
+  KIND,
+} from './lib/probe.mjs';
+
+import {
   detectIndent,
   scanProviders,
   field,
@@ -74,6 +83,7 @@ const valueOf = (f) => {
 
 const WRITE = has('--write');
 const CHECK_REFS = has('--check-refs');
+const PROBE = has('--probe');
 const ONLY = valueOf('--only');
 const POLICY_PATH = resolve(valueOf('--policy') || join(PACK_DIR, 'config', 'model-policy.yml'));
 const DSH_HOME = process.env.DSH_HOME || join(process.env.HOME || '', 'dsh');
@@ -153,7 +163,7 @@ function looksVision(id, hints, existingById) {
  *
  * @returns {{ids: string[], notes: string[]}} 目标 id（保持"旗舰在前"的稳定顺序）+ 说明
  */
-export function solveProvider(providerName, rule, candidates, defaults, existingById) {
+export function solveProvider(providerName, rule, candidates, defaults, existingById, probeInfo) {
   const notes = [];
   const pick = rule.pick ?? {};
   const hints = rule.vision_hints ?? defaults.vision_hints ?? [];
@@ -225,15 +235,43 @@ export function solveProvider(providerName, rule, candidates, defaults, existing
     }
   }
 
-  // plus_free：额外保留最新的免费模型（"除了 ds 只要最新的免费"）
+  // plus_free：额外保留免费模型（"除了 ds 只要免费"）
+  //
+  // 三种取值：
+  //   'latest' → 只留最新的 1 个
+  //   数字     → 留最新的 N 个
+  //   'usable' → **留下所有探测过真能用的**（用户的"所有能连接能用的免费的"）
+  //
+  // `usable` 必须依赖真实探测结果，因为端点列表会撒谎（实测同一份列表里混着
+  // "No endpoints found" / "已下线转付费" / "上游满载"）。
   if (pick.plus_free) {
-    const free = byNewest(usable.filter((m) => isFree(m.id) && !chosen.includes(m.id)));
-    if (free.length) {
-      const n = pick.plus_free === 'latest' ? 1 : Number(pick.plus_free) || 1;
-      chosen.push(...free.slice(0, n).map((m) => m.id));
-      notes.push(`另取 ${Math.min(n, free.length)} 个最新免费模型：${free.slice(0, n).map((m) => m.id).join(', ')}`);
+    const allFree = usable.filter((m) => isFree(m.id) && !chosen.includes(m.id));
+    if (pick.plus_free === 'usable') {
+      if (!probeInfo) {
+        // 没有探测数据 → **宁可放宽**：全都留着，也不静默丢掉可能能用的。
+        chosen.push(...byNewest(allFree).map((m) => m.id));
+        notes.push(`要"能用的免费模型"，但没有探测数据 → **放宽为保留全部 ${allFree.length} 个免费**（跑 --probe 可精确判断）`);
+      } else {
+        const good = [], bad = [];
+        for (const m of allFree) {
+          const kind = cachedKind(probeInfo.cache, providerName, m.id);
+          if (kind === 'usable') good.push(m);
+          else if (kind === undefined) good.push(m);   // 缓存里没这条 → 放宽
+          else bad.push({ id: m.id, kind });
+        }
+        chosen.push(...byNewest(good).map((m) => m.id));
+        notes.push(`探测后保留 ${good.length} 个可用免费模型：${byNewest(good).map((m) => m.id).join(', ') || '(无)'}`);
+        for (const b of bad) notes.push(`  ✗ 剔除 \`${b.id}\`（${kindLabel(b.kind)}）`);
+      }
     } else {
-      notes.push(`要免费模型，但端点候选里没有免费 id`);
+      const free = byNewest(allFree);
+      if (free.length) {
+        const n = pick.plus_free === 'latest' ? 1 : Number(pick.plus_free) || 1;
+        chosen.push(...free.slice(0, n).map((m) => m.id));
+        notes.push(`另取 ${Math.min(n, free.length)} 个最新免费模型：${free.slice(0, n).map((m) => m.id).join(', ')}`);
+      } else {
+        notes.push(`要免费模型，但端点候选里没有免费 id`);
+      }
     }
   }
 
@@ -305,6 +343,62 @@ async function main() {
   if (providers.length === 0) { bad('没在 patch 里找到 providers 块'); process.exit(1); }
   info(`探测到缩进：providers=${IND.providers} 名称=${IND.name} 模型=${IND.model}`);
 
+  // ── 免费模型的"真能用"探测 ────────────────────────────────────────────────
+  // 需求是"所有能连接能用的免费模型"，而**端点列表会撒谎**（实测混着
+  // "No endpoints found" / "已下线转付费" / "上游满载"）。所以只能真调。
+  // `--probe` 刷新缓存；没给就用现有缓存（过期则退回"放宽"语义，见 solveProvider）。
+  let probeCache = loadCache(PACK_DIR);
+  if (PROBE) {
+    const targets = [];
+    for (const p of providers) {
+      const rule = rules[p.name];
+      if (!rule || (ONLY && p.name !== ONLY)) continue;
+      if (!rule.pick?.plus_free) continue;
+      const api = field(p.body, 'api');
+      const baseURL = field(p.body, 'baseURL');
+      const apiKeyEnv = field(p.body, 'apiKeyEnv');
+      if (!baseURL) continue;
+      const { models: existing } = parseModels(p.body);
+      // 探测对象 = 端点列出的免费模型 ∪ 现有免费模型（后者可能已被端点摘掉但仍在用）
+      let remote = [];
+      try {
+        remote = await fetchModels(modelsUrl(baseURL, api), apiKeyEnv ? envFromBashrc(apiKeyEnv) : undefined, api, TIMEOUT_MS);
+      } catch { /* 探测阶段拿不到列表就只测现有 */ }
+      const ids = new Set([
+        ...remote.filter((m) => isFree(m.id)).map((m) => m.id),
+        ...existing.filter((m) => isFree(m.id)).map((m) => m.id),
+      ]);
+      const apiKey = apiKeyEnv ? envFromBashrc(apiKeyEnv) : undefined;
+      for (const id of ids) targets.push({ provider: p.name, baseURL, api, apiKey, model: id });
+    }
+    if (targets.length === 0) {
+      info('没有需要探测的免费模型（策略里没写 plus_free: usable）');
+    } else {
+      console.log(`\n探测 ${targets.length} 个免费模型（真的发一次 max_tokens:1 请求）…`);
+      const results = {};
+      const t0 = Date.now();
+      const rows = await probeMany(targets, {
+        concurrency: 4,
+        onResult: (it, r) => {
+          (results[it.provider] ??= {})[it.model] = { kind: r.kind, status: r.status, message: r.message, ms: r.ms };
+          console.log(`  ${kindLabel(r.kind).padEnd(22)} ${it.provider.padEnd(22)} ${it.model}`);
+        },
+      });
+      void rows;
+      const file = saveCache(PACK_DIR, results);
+      const usable = Object.values(results).flatMap((m) => Object.values(m)).filter((r) => r.kind === KIND.USABLE).length;
+      ok(`探测完成：${usable}/${targets.length} 可用，用时 ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+      info(`缓存：${file}`);
+      probeCache = loadCache(PACK_DIR);
+    }
+  } else if (probeCache?.fresh) {
+    const n = Object.values(probeCache.results ?? {}).flatMap((m) => Object.values(m)).length;
+    info(`使用探测缓存（${new Date(probeCache.at).toLocaleString()}，${n} 条记录；加 --probe 可刷新）`);
+  } else if (probeCache) {
+    warn(`探测缓存已过期（${new Date(probeCache.at).toLocaleString()}）→ 免费模型按"放宽"处理；建议 --probe`);
+  }
+  info(`探测到缩进：providers=${IND.providers} 名称=${IND.name} 模型=${IND.model}`);
+
   const edits = [];
   const protectedRefs = [];
   let changed = 0;
@@ -355,7 +449,7 @@ async function main() {
     // 现有条目表：solveProvider 要用它读人工写的 `input:` 判视觉（比 id 猜准），
     // 后面算增删也要用。**必须在 solveProvider 之前建好**（踩过 TDZ）。
     const existingById = new Map(existing.map((m) => [m.id, m]));
-    const { ids: targetIds, notes } = solveProvider(p.name, rule, candidates, defaults, existingById);
+    const { ids: targetIds, notes } = solveProvider(p.name, rule, candidates, defaults, existingById, { cache: probeCache });
 
     // ── 硬保护：被引用的模型一律保留 ──
     const keptByRef = [];
