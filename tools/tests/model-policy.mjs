@@ -154,5 +154,22 @@ check('cachedKind 对不存在的模型返回 undefined（→ 放宽而非剔除
 rmSync(scratch, { recursive: true, force: true });
 check('临时目录已清理（不污染仓库）', !existsSync(scratch));
 
+// ── 7. 保守口径：只剔"确凿坏的"，端点缺失的免费模型必须保留 ─────────────
+// 用户的明确要求是"少删些"。两条都踩过：
+//   1. `no-access`（需订阅）曾被当成"不可用"剔除 → 订阅可能明天就买，不该删。
+//   2. 更隐蔽的：筛选只在**端点候选**里做，于是"配置里有、端点摘了"的免费模型
+//      被静默删掉 —— 而 `sync-models` 早就写明了「端点没列 ≠ 不能用」
+//      （gemini-2.5-flash 被服务端别名到 3.1 继续可用）。
+console.log('\n保守口径（少删些）');
+const src = readFileSync(join(PACK, 'tools', 'sync-model-policy.mjs'), 'utf8');
+check('确凿坏的定义只含 dead / no-funds（不含 no-access / region / capacity）',
+  /DEFINITELY_BROKEN = new Set\(\['dead', 'no-funds'\]\)/.test(src));
+check('免费候选池并上了"配置里已有的免费"（防端点缺失被静默删）',
+  /existingById\.values\(\)\]\.filter\(\(m\) => isFree\(m\.id\)\)/.test(src));
+check('对"端点没列 + 探测不到"的已有模型保留',
+  /!endpointListed\.has\(m\.id\)/.test(src));
+check('输出里会说明"端点已不再列出但保留"',
+  /端点已不再列出但\*\*保留\*\*/.test(src));
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);
