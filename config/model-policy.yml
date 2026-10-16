@@ -124,6 +124,29 @@ providers:
       # commandcode 的 id 常带 `vendor/` 前缀；family 匹配会自动去前缀
       exclude: []
 
+    # ── 免费额度公告（**端点完全不提供这些信息**，只能人工记）──────────────
+    #
+    # `/models` 只回 id/name/created/context，**没有额度字段**；我的探针也只能测
+    # "此刻能不能调通"，测不出"每天几次"。这些数字来自 commandcode 的 UI 公告。
+    #
+    # 用途：① 打印在扫描结果里，方便你判断留哪个；
+    #       ② 影响**排序** —— 无上限的排在前面（UI 选择器里第一个就是最优选）。
+    #
+    # `quota` 取值：unlimited（不计次/不计 credits）/ 数字+单位 / unknown
+    # 注：公告都带"while the stealth preview lasts" —— 是**限时**的，随时可能变。
+    free_notices:
+      - model: 'stealth/cat-jam:free'
+        quota: unlimited
+        note: '免费且无每日请求上限，不计 credits（stealth 预览期内）'
+      - model: 'stealth/glyph-cluster:free'
+        quota: 100/day
+        note: '免费，每天上限 100 次（stealth 预览期内）'
+      - model: 'poolside/laguna-s-2.1-free'
+        quota: unlimited
+        note: '免费、不计 credits，但注明"while capacity lasts" —— 上游满载时不可用（实测探测到 capacity）'
+        # 虽然无上限，但当前满载 → 排到最后
+        priority: low
+
 # ── 视觉推断表 ──────────────────────────────────────────────────────────────
 # 端点上**没有**视觉字段（实测 6 家都没有），所以只能按 id 关键词推断。
 # 这直接影响"旗舰没视觉时要补一个视觉型号"这条规则。

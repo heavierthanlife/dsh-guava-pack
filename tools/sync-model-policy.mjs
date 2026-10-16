@@ -199,6 +199,27 @@ export function solveProvider(providerName, rule, candidates, defaults, existing
       return c !== 0 ? c : a.id.localeCompare(b.id); // 同版本按 id 稳定排序
     });
 
+  // 免费模型的**额度优先序**：只靠端点拿不到额度（实测 `/models` 没有这些字段），
+  // 数字来自策略表里的 `free_notices`（人工从供应商 UI 抄的）。
+  // 排序规则：unlimited(0) → 有额度(1) → 未知(2) → 公告标了 priority: low(3)。
+  // 目的：UI 选择器里第一个免费模型就是"最划算的那个"。
+  const noticeOf = (id) => (rule.free_notices ?? []).find((n) => n.model === id);
+  const freeRank = (id) => {
+    const n = noticeOf(id);
+    if (!n) return 2;
+    if (n.priority === 'low') return 3;
+    const q = String(n.quota ?? '').toLowerCase();
+    if (q === 'unlimited') return 0;
+    if (q && q !== 'unknown') return 1;
+    return 2;
+  };
+  const byFreeRank = (arr) =>
+    [...arr].sort((a, b) => {
+      const r = freeRank(a.id) - freeRank(b.id);
+      if (r !== 0) return r;
+      return compareVersion(versionOf(b.id), versionOf(a.id)) || a.id.localeCompare(b.id);
+    });
+
   const takeMode = pick.take ?? 'all';
 
   if (famRe) {
@@ -291,8 +312,14 @@ export function solveProvider(providerName, rule, candidates, defaults, existing
           skippedNew.push({ id: m.id, kind });   // 新的不可用 → 不加
         }
       }
-      chosen.push(...byNewest(good).map((m) => m.id));
-      notes.push(`保留 ${good.length} 个免费模型（保守口径：已配置的只剔确凿坏的）：${byNewest(good).map((m) => m.id).join(', ') || '(无)'}`);
+      const ordered = byFreeRank(good).map((m) => m.id);
+      chosen.push(...ordered);
+      notes.push(`保留 ${good.length} 个免费模型（保守口径：已配置的只剔确凿坏的）：${ordered.join(', ') || '(无)'}`);
+      // 把人工抄来的额度公告打出来 —— 端点不提供这些，但要影响"留哪个"的判断。
+      for (const id of ordered) {
+        const n = noticeOf(id);
+        if (n) notes.push(`  ℹ️ \`${id}\` 额度 ${n.quota}：${n.note ?? ''}`);
+      }
       for (const b of dropped) notes.push(`  ✗ 剔除 \`${b.id}\`（${kindLabel(b.kind)}，确凿不可用）`);
       for (const b of skippedNew) notes.push(`  ＋跳过 \`${b.id}\`（新候选但${kindLabel(b.kind)}，不加入）`);
       const keptSoft = allFree.filter((m) => {
