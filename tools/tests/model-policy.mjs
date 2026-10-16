@@ -171,5 +171,28 @@ check('对"端点没列 + 探测不到"的已有模型保留',
 check('输出里会说明"端点已不再列出但保留"',
   /端点已不再列出但\*\*保留\*\*/.test(src));
 
+// ── 8. 免费额度公告：端点拿不到，但必须影响排序与输出 ────────────────────
+// `/models` 完全没有额度字段（实测），所以额度只能人工从供应商 UI 抄进策略表。
+// 它必须**影响排序** —— UI 选择器里第一个免费模型应当是最划算的那个。
+console.log('\n免费额度公告');
+const ccNotices = policy.providers.commandcode?.free_notices ?? [];
+check('commandcode 记了额度公告', ccNotices.length >= 3, { n: ccNotices.length });
+check('每条公告都有 model / quota / note',
+  ccNotices.every((n) => n.model && n.quota && n.note));
+check('cat-jam:free 记为 unlimited（官方说无每日上限）',
+  ccNotices.find((n) => n.model === 'stealth/cat-jam:free')?.quota === 'unlimited');
+check('glyph-cluster:free 记为 100/day（官方说每天 100 次）',
+  ccNotices.find((n) => n.model === 'stealth/glyph-cluster:free')?.quota === '100/day');
+check('laguna 标了 priority: low（免费但当前满载）',
+  ccNotices.find((n) => n.model === 'poolside/laguna-s-2.1-free')?.priority === 'low');
+
+// 排序规则必须在源码里成立：unlimited(0) < 有额度(1) < 未知(2) < priority:low(3)
+const src2 = readFileSync(join(PACK, 'tools', 'sync-model-policy.mjs'), 'utf8');
+check('实现了 freeRank 排序', /const freeRank = \(id\) =>/.test(src2));
+check('unlimited 排最前', /q === 'unlimited'\) return 0/.test(src2));
+check('priority: low 排最后', /n\.priority === 'low'\) return 3/.test(src2));
+check('免费模型用 byFreeRank 排序（不是纯 byNewest）',
+  /const ordered = byFreeRank\(good\)/.test(src2));
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);

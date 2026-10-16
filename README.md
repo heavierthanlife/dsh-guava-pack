@@ -231,6 +231,23 @@ crontab -e
 
 脚本每次都会打印"🔒 保留 …（被 … 引用）"。这条是拿构造场景实测过的，不是宣称。
 
+#### 免费额度：端点拿不到，只能人工记
+
+`/models` **完全没有额度字段**，探针也只能测"此刻调不调得通"，测不出"每天几次"。
+所以额度写在策略表的 `free_notices` 里（从供应商 UI 公告抄），作用是
+① 打印在扫描结果里；② **影响排序** —— 无上限的排在前面。
+
+commandcode 当前（2026-10-16 官方公告）：
+
+| 模型 | 额度 | 备注 |
+|---|---|---|
+| `stealth/cat-jam:free` | **无上限** | 不计 credits |
+| `stealth/glyph-cluster:free` | 100 次/天 | |
+| `poolside/laguna-s-2.1-free` | 无上限 | 但"while capacity lasts"，实测探测到满载 → 排序靠后 |
+
+⚠️ 公告都带 "while the stealth preview lasts" —— 是**限时**的，随时可能变。
+策略里的 `free_notices` 需要你偶尔对一下 UI。
+
 #### 思考强度
 
 端点上**完全拿不到** reasoning effort（要发真实请求才知道），所以按 **id 家族**套用，
