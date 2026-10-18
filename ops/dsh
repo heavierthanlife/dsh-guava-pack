@@ -1,0 +1,61 @@
+#!/bin/sh
+# dsh launcher for WSL — DSH_HOME = this directory (~/dsh)
+# 直连更快：dsh 的 LLM/registry 访问走代理会超时
+unset HTTP_PROXY HTTPS_PROXY FTP_PROXY ALL_PROXY http_proxy https_proxy ftp_proxy all_proxy
+export DSH_HOME="${DSH_HOME:-$HOME/dsh}"
+# 让 dsh 内部调用的 pnpm 走 WSL 自带的那份（而非 /mnt/d 上 Windows 的）
+export PATH="$HOME/.npm-global/bin:$HOME/.local/bin:$PATH"
+# 新机器 npm 全局前缀未必在上面两个目录里 -> 按 npm 自己报告的前缀兜底
+if ! command -v pnpm >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
+  _npmbin="$(npm prefix -g 2>/dev/null)/bin"
+  [ -d "$_npmbin" ] && PATH="$_npmbin:$PATH"
+fi
+# 非交互式启动时 .bashrc 的 export 不会执行 -> 显式载入 provider keys
+# （credentials-local.resolve 优先读 process.env，其次 .credentials.yaml）
+if [ -f "$HOME/.bashrc" ]; then
+  # 除了 API key，也载入每台机器的 DSH_* 设置（如 DSH_SSR_PROXY）——
+  # systemd 启动时不读 .bashrc，必须在这里显式取。
+  eval "$(grep -E "^export ([A-Z_]+_API_KEY|DSH_[A-Z_]+)=" "$HOME/.bashrc" 2>/dev/null)"
+fi
+basedir=$(cd "$(dirname "$0")" && pwd)
+# 自动拉起 commandcode 桥接：Go $1/月 套餐不含官方 /provider/v1 的 API 访问权，
+# 桥接改走 CLI 自己的 /alpha/generate。幂等（已在跑则秒退），失败不影响 dsh。
+BRIDGE_START="$basedir/playground/themes/commandcode-bridge/start.sh"
+if [ -x "$BRIDGE_START" ]; then
+  "$BRIDGE_START" >/dev/null 2>&1 || true
+fi
+# 自动拉起 provider-router 本地路由代理：按 mode.json 把「翻墙」供应商的请求
+# 经 SSR(127.0.0.1:2080) 送出、国内供应商直连。opencode-go / agentrouter 的
+# baseURL 已指向 127.0.0.1:8318，所以它必须在 dsh 之前就绪。幂等，失败不影响 dsh。
+ROUTER_START="$basedir/playground/themes/provider-router/start.sh"
+if [ -x "$ROUTER_START" ]; then
+  "$ROUTER_START" >/dev/null 2>&1 || true
+fi
+# 手机/平板经 tailscale serve 访问时 Host 是 MagicDNS 名字，而 /api 的浏览器信任
+# 围栏（防 DNS rebinding）默认只信 loopback 与 IP 字面量 —— 主机名必须显式放行，
+# 否则页面能打开但所有 API 调用 403。
+#
+# 只在真正 serve（子命令 web）时追加：其它子命令不接受该参数，比如
+# `./dsh --profile web --dump-config` 会报
+#   error: config dumps take no app arguments, got "--trusted-host" …
+# 所以先扫一遍参数，遇到 web 置真、遇到不接受该参数的命令再置假。
+WANT_TRUSTED_HOST=false
+for _arg in "$@"; do
+  case "$_arg" in
+    web) WANT_TRUSTED_HOST=true ;;
+    --dump-config|--help|-h|--version|-V) WANT_TRUSTED_HOST=false ;;
+  esac
+done
+if [ "$WANT_TRUSTED_HOST" = true ]; then
+  case " $* " in
+    *" --trusted-host "*|*" --trusted-host="*) ;;
+    *)
+      TAILNET_SUFFIX=$(sed -n "s/^search[[:space:]]*//p" /etc/resolv.conf 2>/dev/null | awk "{print \$1; exit}")
+      if [ -n "$TAILNET_SUFFIX" ]; then
+        TAILNET_HOST="$(hostname 2>/dev/null | tr "A-Z" "a-z").$TAILNET_SUFFIX"
+        set -- "$@" --trusted-host "$TAILNET_HOST"
+      fi
+      ;;
+  esac
+fi
+exec node "$basedir/node_modules/@deepseek-ai/dsh/lib/bin.js" "$@"
