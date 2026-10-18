@@ -333,6 +333,12 @@ function apply(ctx, rawConfig) {
   const perAgent = new Map();
   /** 至少有一个 agent 的 realm 里解析到 compaction 吗（显示层的诚实指示灯）。 */
   let armed = false;
+  /**
+   * 最近一次 handoff 尝试的真实结果：
+   * `{ written, file?, reason, sessionId, at }`。
+   * 面板经 `/context-guard/getSettings` 读它，从而能显示"写了没有 / 写到哪 / 为什么失败"。
+   */
+  let lastHandoff = null;
 
   // ── 1. 投影：压缩次数 / 释放量 / 轮步数 / 容量 ────────────────────────
   ctx.sessionProjections.register({
@@ -461,7 +467,10 @@ function apply(ctx, rawConfig) {
     }
 
     // ── 2. handoff（独立判定：只看「已压缩次数」）──────────────────────────
-    await maybeHandoff(session);
+    // 结果留着给面板看：{written, file?, reason}。以前算完就丢，于是面板只能
+    // 显示"已达阈值"，说不清到底写没写、写到哪、为什么失败。
+    const handoff = await maybeHandoff(session);
+    lastHandoff = { ...handoff, sessionId: session.id, at: Date.now() };
   }
 
   /** 本进程内已写出的 handoff：sessionId → 绝对路径（用于判重并回报真实状态）。 */
@@ -613,7 +622,11 @@ function apply(ctx, rawConfig) {
         const compaction = resolveCompaction(agent);
         if (compaction !== undefined) armed = true;
         // 解析不到 compaction 也要继续：压缩是可选步骤，handoff 不依赖它。
-        void afterTurnEnd(agent, compaction, session, event);
+        // 必须 .catch：事件监听器的返回值没人 await，漏出去的 rejection 在 Node 里
+        // 会变成 unhandledRejection（默认直接终止进程）。
+        void afterTurnEnd(agent, compaction, session, event).catch((error) => {
+          ctx.logger?.warn?.(`context-guard: turn-end handler failed (${describeError(error)})`);
+        });
       });
     }, 'context-guard/agent');
     perAgent.set(agent, dispose);
@@ -730,12 +743,13 @@ function apply(ctx, rawConfig) {
       },
     }), 'context-guard: route');
 
-    /** 面板读的权威值（含 armed，便于自检）。 */
+    /** 面板读的权威值（含 armed 与最近一次 handoff 的真实结果）。 */
     function publicSettings() {
       return {
         thresholdPercent: Math.round(settings.thresholdRatio * 100),
         handoffAfter: settings.handoffAfterCompactions,
         armed,
+        handoff: lastHandoff,
       };
     }
   });

@@ -13,6 +13,17 @@ LOG_FILE="$DIR/router.log"
 PORT=8318
 HEALTH_URL="http://127.0.0.1:$PORT/health"
 
+# 载入每台机器的 DSH_* 设置（DSH_SSR_PROXY 等）。
+#
+# 为什么必须在脚本里做：这些值放在 ~/.bashrc，而**非交互 shell 不读 .bashrc**。
+# 从启动器 / systemd 起时，启动器已经 eval 过一遍，所以一直没暴露；但手动跑
+# start.sh 时环境是空的 → router 落到默认 2080，而本机 SSR 在 2099 →
+# **所有 SSR 请求 ECONNREFUSED**（真踩过）。自己加载一遍就两种起法都对了。
+if [ -f "$HOME/.bashrc" ]; then
+  eval "$(grep -E '^export DSH_[A-Z_]+=' "$HOME/.bashrc" 2>/dev/null)"
+fi
+echo "[dsh-provider-router] DSH_SSR_PROXY=${DSH_SSR_PROXY:-（未设置，用默认 2080）}" >>"$LOG_FILE"
+
 healthy() { curl -sf "$HEALTH_URL" >/dev/null 2>&1; }
 
 if [ -f "$PID_FILE" ]; then

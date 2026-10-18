@@ -53,6 +53,10 @@ window.__ModuleLoader__.load({
         'panel.handoff': 'handoff',
         'panel.handoff.waiting': '压缩满 {count} 次后自动写出',
         'panel.handoff.due': '已达阈值 · 文件在会话目录 HANDOFF-context-guard-*.md',
+        'panel.handoffStatus': 'handoff 文件',
+        'panel.handoffNoRecord': '本会话暂无记录',
+        'panel.handoffWritten': '已写出 · {file}',
+        'panel.handoffNotWritten': '未写出（{reason}）',
         'panel.when': '每轮对话自然结束后检查；任务运行中绝不压缩',
         'panel.hold': '按住上下键可连续调整',
         'panel.saved': '已保存',
@@ -79,6 +83,10 @@ window.__ModuleLoader__.load({
         'panel.handoff': 'Handoff',
         'panel.handoff.waiting': 'written automatically at {count} compactions',
         'panel.handoff.due': 'threshold reached · file is HANDOFF-context-guard-*.md in the session dir',
+        'panel.handoffStatus': 'Handoff file',
+        'panel.handoffNoRecord': 'no record for this session yet',
+        'panel.handoffWritten': 'written · {file}',
+        'panel.handoffNotWritten': 'not written ({reason})',
         'panel.when': 'checked after each turn ends; never mid-task',
         'panel.hold': 'hold the arrows to repeat',
         'panel.saved': 'saved',
@@ -245,6 +253,13 @@ window.__ModuleLoader__.load({
       return Math.min(max, Math.max(min, value));
     }
 
+    /** 面板里只显示文件名，完整路径放进 title。 */
+    function shortPath(file) {
+      if (typeof file !== 'string' || file === '') return '—';
+      const parts = file.split('/');
+      return parts[parts.length - 1] || file;
+    }
+
     /** zip 压缩包图标：方框 + 拉链虚线 + 拉链头。 */
     /**
      * 压缩图标：台钳夹住被夹物（WinZip 的"zip = vice"双关，最简笔画版）。
@@ -377,6 +392,10 @@ window.__ModuleLoader__.load({
       // 而改设置不产生会话事件，回落到投影会让面板立刻弹回旧值（看着像"没保存"）。
       const [saved, setSaved] = React.useState(null);
       const [savedFlash, setSavedFlash] = React.useState(false);
+      // 最近一次 handoff 的真实结果 `{written, file?, reason, at}`，打开面板时向 host 拉。
+      // 投影里的 `handoffDue` 只是「压缩次数达阈值」，说明不了写没写 —— 那个信息只有
+      // host 侧知道，所以单独问一次。
+      const [handoff, setHandoff] = React.useState(null);
       // 提前声明：下面的 dock 标记 effect 要用它（否则 TDZ 报错，整个药丸会崩）。
       const rootRef = React.useRef(null);
 
@@ -532,6 +551,37 @@ window.__ModuleLoader__.load({
         }, 250);
       };
 
+      // 打开面板时向 host 取一次「最近一次 handoff 的真实结果」。
+      React.useEffect(() => {
+        if (!open) return undefined;
+        let alive = true;
+        void (async () => {
+          try {
+            const response = await fetch(`${ROUTE}/getSettings`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              credentials: 'same-origin',
+              body: JSON.stringify({
+                type: 'client-request',
+                rpcId: `${Date.now()}`,
+                method: 'getSettings',
+                payload: {},
+              }),
+            });
+            const json = await response.json();
+            if (!alive) return;
+            const value = json?.result?.ok === true ? json.result.value : null;
+            setHandoff(value?.handoff ?? null);
+          } catch {
+            // 面板不该因为这一条附加信息报错。
+            if (alive) setHandoff(null);
+          }
+        })();
+        return () => {
+          alive = false;
+        };
+      }, [open]);
+
       if (guard === undefined && pressure === undefined) return null;
 
       const label = tr('pill.count', { count: compactions });
@@ -579,6 +629,15 @@ window.__ModuleLoader__.load({
             : due
               ? tr('panel.handoff.due')
               : tr('panel.handoff.waiting', { count: shownAfter }),
+        ],
+        // 真实结果（打开了才有）：写了没有、写到哪、为什么没写。
+        [
+          tr('panel.handoffStatus'),
+          handoff === null
+            ? tr('panel.handoffNoRecord')
+            : handoff.written === true
+              ? h('span', { title: handoff.file ?? '' }, tr('panel.handoffWritten', { file: shortPath(handoff.file) }))
+              : tr('panel.handoffNotWritten', { reason: String(handoff.reason ?? '?') }),
         ],
       ];
 

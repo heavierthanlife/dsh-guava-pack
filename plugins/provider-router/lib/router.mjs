@@ -44,6 +44,20 @@ const SSR_HOST = SSR_URL.hostname;
 const SSR_PORT = Number(SSR_URL.port || (SSR_URL.protocol === 'https:' ? 443 : 80));
 /** Give up on a CONNECT handshake that never answers, so a request cannot hang. */
 const CONNECT_TIMEOUT_MS = 15000;
+
+/**
+ * SSR 出口的共享 Agent。
+ *
+ * 以前每个请求 `new SsrProxyAgent()`：意味着**每次**经 SSR 的调用都要重做
+ * TCP 连接 + CONNECT 握手 + TLS 握手（实测每个请求多 ~100ms，还制造大量
+ * TIME_WAIT）。这里复用一个开了 keepAlive 的实例，隧道连接会被池化复用。
+ */
+let ssrAgent;
+function getSsrAgent() {
+  ssrAgent ??= new SsrProxyAgent({ keepAlive: true, maxSockets: 32 });
+  return ssrAgent;
+}
+
 /**
  * 上游**响应头**等待上限（只覆盖"还没收到响应头"这段，不是整段时长）。
  *
@@ -382,7 +396,7 @@ const server = createServer(async (req, res) => {
     const upstream = doRequest(target, {
       method: req.method,
       headers,
-      agent: useSsr ? new SsrProxyAgent() : undefined,
+      agent: useSsr ? getSsrAgent() : undefined,
     }, (upRes) => {
       settled = true;
       if (headerTimer !== null) clearTimeout(headerTimer);
