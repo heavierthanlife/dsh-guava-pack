@@ -43,7 +43,15 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const MODE_FILE = join(ROOT, 'mode.json');
+/**
+ * mode.json 的位置。
+ *
+ * 必须可配：插件从 `dsh-guava-pack` 加载，而路由代理由启动器从工作区拉起，
+ * 两边的相对路径不同 —— 各读各的 mode.json 会让面板开关**切换不生效**（真踩过）。
+ * 启动器统一导出 `DSH_ROUTER_MODE_FILE`，host 插件 / router / commandcode 桥接
+ * 三方都用同一个值。
+ */
+const MODE_FILE = process.env.DSH_ROUTER_MODE_FILE || join(ROOT, 'mode.json');
 const ROUTE_PATH = '/provider-router';
 const MAX_BODY_BYTES = 256 * 1024;
 

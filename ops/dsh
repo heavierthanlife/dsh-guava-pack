@@ -18,6 +18,11 @@ if [ -f "$HOME/.bashrc" ]; then
   eval "$(grep -E "^export ([A-Z_]+_API_KEY|DSH_[A-Z_]+)=" "$HOME/.bashrc" 2>/dev/null)"
 fi
 basedir=$(cd "$(dirname "$0")" && pwd)
+
+# 供应商路由的 mode.json 必须**三方共用同一个文件**：
+#   host 插件（从 dsh-guava-pack 加载）、router（从工作区启动）、commandcode 桥接
+# 各自的相对路径不同，各读各的会让面板开关切换后不生效（真踩过）。这里统一指定。
+export DSH_ROUTER_MODE_FILE="${DSH_ROUTER_MODE_FILE:-$basedir/playground/themes/provider-router/mode.json}"
 # 自动拉起 commandcode 桥接：Go $1/月 套餐不含官方 /provider/v1 的 API 访问权，
 # 桥接改走 CLI 自己的 /alpha/generate。幂等（已在跑则秒退），失败不影响 dsh。
 BRIDGE_START="$basedir/playground/themes/commandcode-bridge/start.sh"

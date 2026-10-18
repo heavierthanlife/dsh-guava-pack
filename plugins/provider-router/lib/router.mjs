@@ -70,7 +70,11 @@ const HEADER_TIMEOUT_MS = Number(process.env.DSH_ROUTER_HEADER_TIMEOUT_MS || 120
 const MAX_BODY_BYTES = Number(process.env.DSH_ROUTER_MAX_BODY_BYTES || 64 * 1024 * 1024);
 
 const HERE = join(dirname(fileURLToPath(import.meta.url)), '..');
-const MODE_FILE = join(HERE, 'mode.json');
+/**
+ * mode.json 的位置。启动器统一导出 `DSH_ROUTER_MODE_FILE`：host 插件从 pack 加载、
+ * router 从工作区启动，各读各的会让面板开关切换不生效（真踩过）。
+ */
+const MODE_FILE = process.env.DSH_ROUTER_MODE_FILE || join(HERE, 'mode.json');
 /** 上游表覆盖文件：DSH_ROUTER_PROVIDERS > <插件目录>/providers.json。 */
 const PROVIDERS_FILE = process.env.DSH_ROUTER_PROVIDERS || join(HERE, 'providers.json');
 
