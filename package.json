@@ -36,5 +36,8 @@
     "check": "node install.mjs --check",
     "sync-models": "node tools/sync-models.mjs",
     "sync-models:write": "node tools/sync-models.mjs --write"
+  },
+  "dependencies": {
+    "zod": "^4.6.7"
   }
 }

@@ -119,6 +119,20 @@ function num(value) {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
+/**
+ * 把异常压成一行可诊断文本。
+ *
+ * 存在的理由：压缩与写盘的失败以前是 `void error` 直接吞掉的，于是"面板说写好了、
+ * 磁盘上没有"完全无从排查。至少要留下 code / message。
+ */
+function describeError(error) {
+  if (error === null || error === undefined) return 'unknown';
+  const code = error?.code ? `${error.code}: ` : '';
+  const message = error?.message ? String(error.message) : String(error);
+  const cause = error?.cause?.code ? ` (cause=${error.cause.code})` : '';
+  return `${code}${message}${cause}`;
+}
+
 /** 面板 → host 的设置通道路径（自己注册的 webServer 前缀路由）。 */
 const ROUTE_PATH = '/context-guard';
 
@@ -410,7 +424,12 @@ function apply(ctx, rawConfig) {
   }
 
   /**
-   * 一个 turn 结束之后：算压力，够阈值就压缩，压缩够次数就写 handoff。
+   * 一个 turn 结束之后：先按阈值压缩（可选），再按「已压缩次数」写 handoff。
+   *
+   * **两条路是独立的。** 旧实现把 `maybeHandoff()` 放在压缩成功之后，压缩一旦抛错
+   * （busy / cancelled / changed / summary / commit / persistence 都算）就被
+   * `void error` 吞掉，handoff 永远不写；而面板的 `handoffDue` 只看压缩次数，
+   * 于是显示「已写出」但磁盘上没有文件。现在压缩失败只影响压缩，不影响 handoff。
    *
    * 有意**不**在这里 `await agent.whenIdle()`：`agent/created` 的契约明确禁止
    * 监听器 await 它，而 `compactNow()` 自己带 idle admission —— agent 不空闲会抛
@@ -421,64 +440,145 @@ function apply(ctx, rawConfig) {
     if (!cfg.triggerOn.includes(reasonKind)) return;
     if (inFlight.has(session.id)) return;
 
+    // ── 1. 压缩（可选；失败不影响 handoff）────────────────────────────────
     const pressure = readPressure(session);
     const own = ctx.sessionProjections.stateOf(session, 'contextGuard');
     const window = num(pressure?.contextWindow) ?? num(own?.contextWindow);
     const used = num(pressure?.projectedTokens) ?? num(pressure?.pressureTokens);
-    if (window === undefined || window === 0 || used === undefined) return;
-    if (used / window < settings.thresholdRatio) return;
+    const overThreshold =
+      window !== undefined && window > 0 && used !== undefined && used / window >= settings.thresholdRatio;
 
-    inFlight.add(session.id);
+    if (overThreshold && compaction !== undefined) {
+      inFlight.add(session.id);
+      try {
+        await compaction.compactNow(agent, new AbortController().signal);
+      } catch (error) {
+        // 预期失败，只记一条（以前是 `void error`，导致"没写出来"无从排查）。
+        ctx.logger?.debug?.(`context-guard: compaction skipped (${describeError(error)})`);
+      } finally {
+        inFlight.delete(session.id);
+      }
+    }
+
+    // ── 2. handoff（独立判定：只看「已压缩次数」）──────────────────────────
+    await maybeHandoff(session);
+  }
+
+  /** 本进程内已写出的 handoff：sessionId → 绝对路径（用于判重并回报真实状态）。 */
+  const handoffWritten = new Map();
+
+  /**
+   * 会话在文件名里的短标识。
+   *
+   * **不能直接 `session.id.slice(0, 8)`**：真实 id 形如
+   * `session-a6796537-a77a-4e58-b081-…`，前 8 位恒为 `"session-"` —— 所有会话会
+   * 得到同一个前缀，同目录下的判重就会跨会话互相误判（后开的会话以为"已经写过"，
+   * 直接跳过）。这里剥掉 `session-` 前缀并且只保留字母数字。
+   */
+  function handoffSessionKey(session) {
+    const raw = String(session.id ?? '');
+    const bare = raw.startsWith('session-') ? raw.slice('session-'.length) : raw;
+    const compact = bare.replace(/[^a-zA-Z0-9]/g, '');
+    return (compact !== '' ? compact : raw.replace(/[^a-zA-Z0-9]/g, '')).slice(0, 8) || 'unknown';
+  }
+
+  function handoffPrefix(session) {
+    return `${cfg.handoffPrefix}-${handoffSessionKey(session)}-`;
+  }
+
+  /**
+   * handoff 的落盘目录。
+   *
+   * 首选会话自己的工作目录（用户能直接找到）；`header.cwd` 缺失时退到 DSH_HOME ——
+   * 宁可换个位置，也不要因为拿不到 cwd 就静默不写（旧实现就是这样丢的）。
+   */
+  function resolveHandoffDir(session) {
+    const cwd = session.header?.cwd;
+    if (typeof cwd === 'string' && cwd !== '') return cwd;
+    if (process.env.DSH_HOME) return process.env.DSH_HOME;
+    if (process.env.HOME) return join(process.env.HOME, 'dsh');
+    return undefined;
+  }
+
+  /**
+   * 目录里已存在的 handoff 文件名（上一次进程写的），没有则 undefined。
+   * 用文件系统当权威：进程重启后依然记得这个会话已经写过。
+   */
+  async function findExistingHandoff(cwd, session) {
     try {
-      const result = await compaction.compactNow(agent, new AbortController().signal);
-      if (result !== null && result !== undefined) await maybeHandoff(session);
-    } catch (error) {
-      // busy / cancelled / changed / summary / commit / persistence 都属预期失败；
-      // 不做任何写入，等下一次对话自然结束再试。
-      void error;
-    } finally {
-      inFlight.delete(session.id);
+      const prefix = handoffPrefix(session);
+      const entries = await readdir(cwd);
+      return entries.filter((entry) => entry.startsWith(prefix)).sort().pop();
+    } catch {
+      // 目录读不到（权限/已删除）时按"没写过"处理。
+      return undefined;
     }
   }
 
   /**
-   * 这个会话是否已经写过 handoff。
+   * 达到配置的压缩次数后写一次 handoff —— 每个会话最多一份。
    *
-   * 用文件系统当权威：文件名前缀 = handoffPrefix + 会话 id 前 8 位，扫一次目录
-   * 就能回答，且进程重启后依然记得。投影状态是纯 fold（加字段还要动
-   * stateVersion 并兼容老 checkpoint），内存集合则活不过重启，都不合适。
+   * 返回值是**真实结果**而不是"该不该写"：
+   *   `{ written: true, file, reason: 'written' | 'existing' | 'cached' }`
+   *   `{ written: false, reason: 'below-threshold' | 'disabled' | 'no-cwd' | 'write-failed' | 'error', … }`
+   * 面板据此能说清楚"写了没有、写在哪"，而不是只看阈值就宣称「已写出」。
+   *
+   * 整个函数包一层 try/catch：`buildHandoff()` 会去读 `session.snapshotEvents()`，
+   * 任何内部异常都不该变成一个未捕获的 rejection（那样 handoff 又静默丢了）。
    */
-  async function handoffExists(cwd, session) {
-    const prefix = `${cfg.handoffPrefix}-${String(session.id).slice(0, 8)}-`;
+  async function maybeHandoff(session) {
     try {
-      const entries = await readdir(cwd);
-      return entries.some((entry) => entry.startsWith(prefix));
-    } catch {
-      // 目录读不到（权限/已删除）时按"没写过"处理，保持旧行为。
-      return false;
+      return await maybeHandoffUnsafe(session);
+    } catch (error) {
+      const reason = describeError(error);
+      ctx.logger?.warn?.(`context-guard: handoff failed (${reason})`);
+      return { written: false, reason: 'error', error: reason };
     }
   }
 
-  /** 达到配置的压缩次数后写一次 handoff —— 每个会话最多一份。 */
-  async function maybeHandoff(session) {
+  async function maybeHandoffUnsafe(session) {
     const state = ctx.sessionProjections.stateOf(session, 'contextGuard');
-    if (state === undefined || state.compactions < settings.handoffAfterCompactions) return;
-    if (!cfg.writeHandoff) return;
-    const cwd = session.header?.cwd;
-    if (typeof cwd !== 'string' || cwd === '') return;
-    // 越过阈值后的每一次压缩都会走到这里，所以必须自己判重。
-    if (await handoffExists(cwd, session)) return;
-    const file = join(
-      cwd,
-      `${cfg.handoffPrefix}-${String(session.id).slice(0, 8)}-c${state.compactions}-${stamp(Date.now())}.md`,
-    );
+    if (state === undefined) return { written: false, reason: 'no-state' };
+    if (state.compactions < settings.handoffAfterCompactions) {
+      return { written: false, reason: 'below-threshold', compactions: state.compactions };
+    }
+    if (!cfg.writeHandoff) return { written: false, reason: 'disabled' };
+
+    const cached = handoffWritten.get(session.id);
+    if (cached !== undefined) return { written: true, file: cached, reason: 'cached' };
+
+    const cwd = resolveHandoffDir(session);
+    if (cwd === undefined) {
+      ctx.logger?.warn?.('context-guard: no session cwd and no DSH_HOME — handoff skipped');
+      return { written: false, reason: 'no-cwd' };
+    }
+
+    // 上一次进程已经写过：认回来，别写第二份。
+    const existing = await findExistingHandoff(cwd, session);
+    if (existing !== undefined) {
+      const file = join(cwd, existing);
+      handoffWritten.set(session.id, file);
+      ctx.logger?.info?.(`context-guard: handoff already exists at ${file}`);
+      return { written: true, file, reason: 'existing' };
+    }
+
+    const file = join(cwd, `${handoffPrefix(session)}c${state.compactions}-${stamp(Date.now())}.md`);
     const body = buildHandoff(session, state, {
       ...cfg,
       thresholdRatio: settings.thresholdRatio,
       handoffAfterCompactions: settings.handoffAfterCompactions,
     });
-    await writeFile(file, body, 'utf8');
-    ctx.logger?.info?.('context-guard: handoff written to %s', file);
+    try {
+      await writeFile(file, body, 'utf8');
+    } catch (error) {
+      // 以前这里是裸 `await writeFile`，异常被上层的 catch 吞掉 —— 静默丢文件。
+      const reason = describeError(error);
+      ctx.logger?.warn?.(`context-guard: handoff write FAILED: ${file} — ${reason}`);
+      return { written: false, reason: 'write-failed', file, error: reason };
+    }
+    handoffWritten.set(session.id, file);
+    ctx.logger?.info?.(`context-guard: handoff written to ${file}`);
+    return { written: true, file, reason: 'written' };
   }
 
   /**
@@ -511,8 +611,8 @@ function apply(ctx, rawConfig) {
       yield agent.ctx.on('session/event', (session, event) => {
         if (event.type !== 'turn/end') return;
         const compaction = resolveCompaction(agent);
-        if (compaction === undefined) return;
-        armed = true;
+        if (compaction !== undefined) armed = true;
+        // 解析不到 compaction 也要继续：压缩是可选步骤，handoff 不依赖它。
         void afterTurnEnd(agent, compaction, session, event);
       });
     }, 'context-guard/agent');
