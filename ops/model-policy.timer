@@ -1,0 +1,14 @@
+[Unit]
+Description=Daily Model Policy Sync & Probe Timer
+After=dsh.service
+
+[Timer]
+# 每天 09:30 执行一次模型探测与策略同步
+OnCalendar=*-*-* 09:30:00
+# 若错过（如机器休眠或关机），开机后补跑一次
+Persistent=true
+# 随机打散 5 分钟，避免并发冲击端点
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

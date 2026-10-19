@@ -35,6 +35,8 @@ const REQUIRED = [
   'ops/restart-dsh.sh',
   'ops/tailnet-url.sh',
   'ops/dsh.service',
+  'ops/model-policy.service',
+  'ops/model-policy.timer',
   'ops/bashrc.dsh.example',
   'ops/wsl.conf.example',
   'ops/NETWORK-NOTES.md',

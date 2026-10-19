@@ -1,0 +1,12 @@
+[Unit]
+Description=DeepSeek Harness Model Policy Sync & Probe
+Documentation=https://127.0.0.1:3080/
+After=network-online.target
+
+[Service]
+Type=oneshot
+# `%h` 是 systemd 的用户家目录说明符
+WorkingDirectory=%h/dsh/playground/themes/dsh-guava-pack
+ExecStart=/usr/bin/node tools/sync-model-policy.mjs --probe --write
+StandardOutput=append:%h/dsh/logs/model-policy.log
+StandardError=append:%h/dsh/logs/model-policy.log
