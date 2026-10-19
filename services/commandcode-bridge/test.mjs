@@ -1,5 +1,5 @@
 const BASE = "http://127.0.0.1:8317/v1";
-const MODEL = "inclusionai/ling-3.1-flash:free";
+const MODEL = "reflection/beam:free";
 
 async function call(body) {
   const r = await fetch(BASE + "/chat/completions", {

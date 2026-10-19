@@ -161,7 +161,8 @@ function safeParse(s) {
 }
 
 /** OpenAI messages → Vercel-AI-SDK 形态的 ModelMessage[]（上游要的形状）。 */
-function toWireMessages(messages) {
+function toWireMessages(messages, model) {
+  const isBeam = /beam/i.test(model || "");
   const out = [];
   for (const m of messages || []) {
     if (m.role === "system" || m.role === "developer") continue; // 已并入 system
@@ -169,6 +170,33 @@ function toWireMessages(messages) {
       out.push({ role: "user", content: textOf(m.content) });
     } else if (m.role === "assistant") {
       const parts = [];
+
+      // 提取已有的思考/推理内容
+      let reasoningText = "";
+      if (typeof m.reasoning_content === "string") {
+        reasoningText = m.reasoning_content;
+      } else if (typeof m.reasoning === "string") {
+        reasoningText = m.reasoning;
+      } else if (Array.isArray(m.content)) {
+        for (const p of m.content) {
+          if (p?.type === "thinking" && typeof p.thinking === "string") {
+            reasoningText += p.thinking;
+          } else if (p?.type === "reasoning" && typeof p.text === "string") {
+            reasoningText += p.text;
+          }
+        }
+      }
+
+      // Beam 等推理模型强制要求每一条 assistant 历史消息都带有 reasoning_content。
+      // 若已有推理内容则原样转入；若为其它模型产生的历史消息（无推理内容），则兜底填一个空格 " "
+      // （不能填空字符串 ""，上游序列化时会把空字符串判为 false 并丢弃，导致后端报 400）。
+      if (reasoningText.length > 0 || isBeam) {
+        parts.push({
+          type: "reasoning",
+          text: reasoningText.length > 0 ? reasoningText : " ",
+        });
+      }
+
       const t = textOf(m.content);
       if (t) parts.push({ type: "text", text: t });
       for (const tc of m.tool_calls || []) {
@@ -215,7 +243,7 @@ function buildEnvelope(body) {
   const params = {
     model: body.model,
     system,
-    messages: toWireMessages(body.messages),
+    messages: toWireMessages(body.messages, body.model),
     max_tokens: body.max_tokens ?? body.max_completion_tokens ?? 8192,
     stream: true, // 上游强制要求 stream:true
   };
