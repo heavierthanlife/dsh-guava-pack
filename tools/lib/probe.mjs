@@ -211,13 +211,42 @@ function analyzeBody(text) {
     if (obj?.error) {
       return { hasError: true, message: String(obj.error.message ?? obj.error.type ?? ''), type: obj.error.type, contentChars: 0, reasoningTokens: 0 };
     }
+    // ── OpenAI 系（pi-ai 的 openai-completions）──
     for (const ch of obj?.choices ?? []) {
       const d = ch?.delta ?? ch?.message;
       if (typeof d?.content === 'string' && d.content.length > 0) { contentChars += d.content.length; hasContent = true; }
       if (ch?.finish_reason) finish = ch.finish_reason;
     }
-    const rt = obj?.usage?.completion_tokens_details?.reasoning_tokens;
+    // ── Anthropic 系（antigravity / agentrouter 用 anthropic-messages）──
+    // 格式完全不同：**不是 SSE 的 delta.content，而是一整个 message 对象**，
+    // 正文在 `content: [{type:"text", text:"…"}]`。
+    // 踩过：只认 OpenAI 格式时，antigravity 的正文数恒为 0 →
+    // 好模型被误判成"只出推理不出正文"。
+    if (obj?.type === 'message' && Array.isArray(obj.content)) {
+      for (const blk of obj.content) {
+        if (blk?.type === 'text' && typeof blk.text === 'string' && blk.text.length > 0) {
+          contentChars += blk.text.length;
+          hasContent = true;
+        }
+      }
+      if (obj.stop_reason) finish = obj.stop_reason;
+    }
+    if (obj?.type === 'content_block_delta' && typeof obj?.delta?.text === 'string') {
+      contentChars += obj.delta.text.length;
+      if (obj.delta.text.length > 0) hasContent = true;
+    }
+    // 推理 token：OpenAI 在 usage.completion_tokens_details，Anthropic 的 thinking 另算
+    const rt = obj?.usage?.completion_tokens_details?.reasoning_tokens
+      ?? obj?.usage?.output_tokens_details?.reasoning_tokens;
     if (typeof rt === 'number') reasoningTokens = Math.max(reasoningTokens, rt);
+    // Anthropic 的 thinking 块也算"推理吃掉的量"
+    if (Array.isArray(obj?.content)) {
+      for (const blk of obj.content) {
+        if (blk?.type === 'thinking' && typeof blk.thinking === 'string') {
+          reasoningTokens = Math.max(reasoningTokens, Math.ceil(blk.thinking.length / 4));
+        }
+      }
+    }
   }
   return { hasError: false, message: '', type: undefined, contentChars, hasContent, reasoningTokens, finish };
 }

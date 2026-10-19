@@ -234,6 +234,10 @@ crontab -e
 #### ⚠️ HTTP 200 ≠ 能用
 
 探针必须看**正文产出**，不能只看状态码。两个真实教训：
+0. **两种协议格式完全不同**：`openai-completions` 的正文在 `choices[].delta.content`；
+   `anthropic-messages`（antigravity / agentrouter）是**一整个 message 对象**，
+   正文在 `content: [{type:"text", text:"…"}]`。只认前者的话，后者正文数恒为 0
+   → 好模型被误判成"只出推理不出正文"（踩过）。
 1. commandcode 的桥接**对失败也返回 200**，错误藏在 SSE body 里（`data: {"error":…}`）。
 2. 推理型模型 200 且无错误，但 `reasoning_tokens` 吃光额度、**正文 0 字符**
    → 判为 `🧠 只出推理不出正文`（`reasoning-only`），不算可用。
@@ -275,8 +279,12 @@ Cat Jam（仅推理·正文极简）
 Laguna S 2.1（免费但常满载）
 ```
 
-规则写在策略表的 `annotations`（正则 → 标签），**幂等**：反复跑不会叠加成两个括号，
-手工加的 `(Antigravity)` 这类括号会保留。
+规则写在策略表的 `annotations`（正则 → 标签），**幂等**：反复跑不会叠加成两个括号。
+
+**括号剥离**：策略表的 `strip` 列出要**去掉**的括号内容。默认剥 `(Antigravity)` 与
+`(free)` —— 归属在 id 里已有（`antigravity/gemini-…`），免费与否看 id 的 `free` 后缀，
+name 里重复标一遍是噪音。**不认识的括号会保留**（只剥明确列出的），所以
+`(Experimental)` 这类不会被误删。
 
 #### 思考强度
 

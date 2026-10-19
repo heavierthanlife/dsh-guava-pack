@@ -187,6 +187,17 @@ version_patterns:
 #   why:   写给自己看的解释（不显示）
 #
 # 顺序敏感：第一条匹配的生效，所以把更具体的放前面。
+#
+# `strip`：写进 name 前要**剥掉**的既有括号内容（正则）。
+# 用户 2026-10-16 明确："手写的 Antigravity 不用保留" —— 模型 id 里已经能看出
+# 是哪家的，name 里重复标一遍是噪音。`(free)` 也一并剥掉（免费与否看 id 的
+# `free` 后缀即可，且在 UI 里不是决策依据）。
+# ⚠️ 只剥这些"纯归属/重复"标记；像 `(Antigravity)` 这种如果哪天你想留，
+# 从下面删掉即可。
+strip:
+  - '^Antigravity$'
+  - '^free$'
+
 annotations:
   - match: '^glyph-cluster'
     tag: '仅推理，不出正文'

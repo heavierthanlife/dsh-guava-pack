@@ -241,5 +241,52 @@ const src3 = readFileSync(join(PACK, 'tools', 'sync-model-policy.mjs'), 'utf8');
 check('新候选宽严有别：未探测的新候选不加入',
   /if \(kind === undefined\) \{ skippedNew\.push\(\{ id: m\.id, kind: 'unknown' \}\); continue; \}/.test(src3));
 
+// ── 10. 括号剥离（用户："手写的 Antigravity 不用保留"）─────────────────────
+// 归属信息在 id 里已有（antigravity/gemini-…），name 里重复标一遍是噪音。
+// 但**只剥明确列出的**，不认识的括号要留着 —— 万一哪天用户想留某个标记。
+console.log('\n括号剥离');
+const stripList = policy.strip ?? [];
+check('策略表里配了 strip', Array.isArray(stripList) && stripList.length >= 2, stripList);
+check('strip 含 Antigravity', stripList.some((x) => /Antigravity/i.test(x)));
+check('strip 含 free', stripList.some((x) => /^\^free\$$/i.test(x.trim())));
+
+const own2 = new RegExp(ann.map((a) => a.tag).join('|'));
+const L2 = (n) => [`          - id: x`, `            name: ${n}`, `            contextWindow: 1`];
+
+// 剥 (Antigravity)，且加标签
+let a1 = annotateName(L2('Gemini 3.8 Flash High (Antigravity)'), '固定推理档', own2, stripList);
+check('剥掉 (Antigravity) 并加标签',
+  a1.changed && !/Antigravity/.test(a1.lines[1]) && /（固定推理档）$/.test(a1.lines[1]), a1.lines[1]);
+// 已经是 "X (Antigravity)（标签）" 的，也应剥干净
+let a2 = annotateName(L2('Gemini 3.8 Flash High (Antigravity)（固定推理档）'), '固定推理档', own2, stripList);
+check('已带标签的也能剥掉 (Antigravity)（幂等收敛）',
+  a2.changed && !/Antigravity/.test(a2.lines[1]) && /^.*Gemini 3\.8 Flash High（固定推理档）$/.test(a2.lines[1]), a2.lines[1]);
+// 再跑一次应稳定
+let a3 = annotateName(a2.lines, '固定推理档', own2, stripList);
+check('剥完再跑幂等', !a3.changed, a3.lines[1]);
+// 剥 (free)
+let a4 = annotateName(L2('Mimo V2.6 Flash (free)'), null, own2, stripList);
+check('剥掉 (free)（无标签时也剥）',
+  a4.changed && !/\(free\)/.test(a4.lines[1]) && /Mimo V2\.6 Flash$/.test(a4.lines[1]), a4.lines[1]);
+// **不认识的括号要留着**
+let a5 = annotateName(L2('Some Model (Experimental)'), '图像生成', own2, stripList);
+check('不认识的括号保留（只剥明确列出的）',
+  /Some Model \(Experimental\)（图像生成）$/.test(a5.lines[1]), a5.lines[1]);
+// 没有 strip 配置时不影响
+let a6 = annotateName(L2('X (free)'), null, own2, []);
+check('没有 strip 配置时不剥（向后兼容）', !a6.changed, a6.lines[1]);
+// 只改 name 行
+check('剥括号也只改 name 行', a4.lines[0] === L2('Mimo V2.6 Flash (free)')[0] && a4.lines[2] === L2('Mimo V2.6 Flash (free)')[2]);
+
+// ── 11. 探针必须同时解析 OpenAI 与 Anthropic 两种协议 ────────────────────
+// 踩过：只认 `delta.content` 时，antigravity/agentrouter（anthropic-messages）
+// 的正文数恒为 0 → 好模型被误判成"只出推理不出正文"。
+console.log('\n双协议解析');
+const pSrc = readFileSync(join(PACK, 'tools', 'lib', 'probe.mjs'), 'utf8');
+check('解析 Anthropic 的 content[].text', /obj\?\.type === 'message' && Array\.isArray\(obj\.content\)/.test(pSrc));
+check('解析 Anthropic 的 content_block_delta', /content_block_delta/.test(pSrc));
+check('解析 Anthropic 的 thinking 块', /blk\?\.type === 'thinking'/.test(pSrc));
+check('OpenAI 的 delta.content 仍在', /ch\?\.delta \?\? ch\?\.message/.test(pSrc));
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);

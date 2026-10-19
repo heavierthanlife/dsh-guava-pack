@@ -176,17 +176,32 @@ function looksVision(id, hints, existingById) {
  * @param {RegExp} ownTagRe - 识别"我们自己加过的后缀"的正则
  * @returns {{lines: string[], changed: boolean, before?: string, after?: string}}
  */
-export function annotateName(lines, tag, ownTagRe) {
+export function annotateName(lines, tag, ownTagRe, stripList) {
   const idx = lines.findIndex((l) => /^\s*name:\s*/.test(l));
   if (idx < 0) return { lines, changed: false };
   const line = lines[idx];
   const m = line.match(/^(\s*name:\s*)(.*?)\s*$/);
   if (!m) return { lines, changed: false };
   const [, prefix, rawName] = m;
-  if (!tag) return { lines, changed: false };
-  // 先剥掉**我们自己**加过的后缀（保证幂等），手工括号保留
-  const stripped = rawName.replace(/\s*（[^）]*）\s*$/, '').replace(/\s*\(([^)]*)\)\s*$/, (full, inner) =>
-    ownTagRe && ownTagRe.test(inner) ? '' : full);
+  // 先做"剥离"：把末尾的括号按规则去掉。要剥的包括
+  //   ① 我们自己加过的标签（保证幂等）
+  //   ② `strip` 里列出的（用户说 `(Antigravity)` / `(free)` 不用保留）
+  const stripRes = (stripList ?? []).map((x) => { try { return new RegExp(x); } catch { return null; } }).filter(Boolean);
+  let stripped = rawName;
+  for (;;) {
+    const bm = stripped.match(/^(.*?)\s*[（(]([^）)]*)[）)]\s*$/);
+    if (!bm) break;
+    const inner = bm[2];
+    const drop = (ownTagRe && ownTagRe.test(inner)) || stripRes.some((re) => re.test(inner));
+    if (!drop) break;             // 不认识的括号 → 留着（可能是用户想保留的）
+    stripped = bm[1];
+  }
+  if (!tag) {
+    if (stripped === rawName) return { lines, changed: false };
+    const out0 = lines.slice();
+    out0[idx] = `${prefix}${stripped}`;
+    return { lines: out0, changed: true, before: rawName, after: stripped };
+  }
   const next = `${prefix}${stripped}（${tag}）`;
   if (next === line) return { lines, changed: false, before: rawName, after: stripped };
   const out = lines.slice();
@@ -417,6 +432,8 @@ async function main() {
   const rules = policy.providers ?? {};
   // 用途标注：把"这模型干不了常规对话"这类信息写进 name（UI 只显示 name）。
   const annotations = policy.annotations ?? [];
+  // 要剥掉的括号内容（用户不想在 name 里保留的归属标记）
+  const stripList = policy.strip ?? [];
   // 识别"我们自己加过的后缀"，用于幂等替换
   const ownTagRe = new RegExp(annotations.map((a) => a.tag).filter(Boolean).map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'));
   let annotated = 0;
@@ -614,8 +631,9 @@ async function main() {
       const tag = tagFor(id, annotations, ownTagRe);
       const prev = existingById.get(id);
       if (prev) {
-        // 已存在：只改 `name:` 那一行（人工的 contextWindow/efforts/compat 一字不动）
-        const r = annotateName(prev.lines, tag, ownTagRe);
+        // 已存在：只改 `name:` 那一行（人工的 contextWindow/efforts/compat 一字不动）。
+        // **即使没有 tag 也要走一遍** —— 否则 `strip` 剥不掉 `(Antigravity)`。
+        const r = annotateName(prev.lines, tag, ownTagRe, stripList);
         if (r.changed) { annotated++; annotateLog.push({ id, before: r.before, after: r.after }); }
         return r.lines;
       }
@@ -623,7 +641,7 @@ async function main() {
       const efforts = defaults.auto_reasoning_efforts ? effortsFor(p.name, id) : null;
       const base = renderModel(meta, { efforts });
       if (tag) {
-        const r = annotateName(base, tag, ownTagRe);
+        const r = annotateName(base, tag, ownTagRe, stripList);
         if (r.changed) annotateLog.push({ id, before: r.before, after: r.after });
         return r.lines;
       }
