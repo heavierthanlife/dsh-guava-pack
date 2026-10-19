@@ -47,7 +47,10 @@
         api: openai-completions
         baseURL: https://opencode.ai/inference/openai/v1/chat/completions
         headers:
-          x-opencode-session: 00000000-0000-0000-0000-000000000000
+          # 不要在这里写死 x-opencode-session：该 header 由插件
+          # dsh-opencode-session-header 按会话动态注入。写死会让所有机器共用同一个
+          # session，破坏 prompt cache 亲和性（也会把真实 session id 分发出去）。
+          # 原文件此处有一个真实 UUID，为分发安全已移除（见 8742943 / 本次）。
         models:
           - id: deepseek-v4.1-flash
             name: DeepSeek V4.1 Flash

@@ -135,6 +135,14 @@ providers:
     # `quota` 取值：unlimited（不计次/不计 credits）/ 数字+单位 / unknown
     # 注：公告都带"while the stealth preview lasts" —— 是**限时**的，随时可能变。
     free_notices:
+      # Beam 排**免费模型第一位**：实测 1M 上下文、会推理（27 个推理块答对 17×23）、
+      # 正文正常、中文流利（递归解释用了俄罗斯套娃比喻）。综合能力明显强于另两个。
+      # 它也是 commandcode 自家模型（`owned_by: command-code`，自称 CommandCodeBot）。
+      - model: 'reflection/beam:free'
+        quota: unknown
+        note: '1M 上下文；推理型但正文正常；中文好。综合最强的免费模型 → 排第一'
+        priority: top
+
       - model: 'stealth/cat-jam:free'
         quota: unlimited
         note: '免费且无每日请求上限，不计 credits（stealth 预览期内）'
@@ -206,6 +214,10 @@ annotations:
   - match: '^cat-jam'
     tag: '仅推理·正文极简'
     why: '同样偏推理，但正文会出（实测 contentChars=2、finish=stop）。可当"想问题"用，常规编码别指望。'
+
+  - match: '^beam'
+    tag: '推理型·1M上下文'
+    why: 'commandcode 自家模型。推理型但正文正常，中文好。综合最强的免费模型。'
 
   - match: '^laguna-s-2.1'
     tag: '免费但常满载'

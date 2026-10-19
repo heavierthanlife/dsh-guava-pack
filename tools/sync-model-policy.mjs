@@ -273,6 +273,10 @@ export function solveProvider(providerName, rule, candidates, defaults, existing
   const noticeOf = (id) => (rule.free_notices ?? []).find((n) => n.model === id);
   const freeRank = (id) => {
     const n = noticeOf(id);
+    // 排序层级：top(-1) → 无上限(0) → 有额度(1) → 未知(2) → low(3)
+    // `top` 是显式覆盖："这个综合能力最强，排第一"，比额度更能反映实际好用程度
+    // （Beam 就是这种：额度未知，但 1M 上下文 + 会推理 + 正文正常）。
+    if (n?.priority === 'top') return -1;
     if (!n) return 2;
     if (n.priority === 'low') return 3;
     const q = String(n.quota ?? '').toLowerCase();

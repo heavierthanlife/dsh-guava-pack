@@ -288,5 +288,20 @@ check('解析 Anthropic 的 content_block_delta', /content_block_delta/.test(pSr
 check('解析 Anthropic 的 thinking 块', /blk\?\.type === 'thinking'/.test(pSrc));
 check('OpenAI 的 delta.content 仍在', /ch\?\.delta \?\? ch\?\.message/.test(pSrc));
 
+// ── 12. priority: top（显式把某个免费模型排第一）────────────────────────
+// Beam 是这种：额度未知，但 1M 上下文 + 会推理 + 正文正常 + 中文好，
+// 综合能力明显强于"额度无上限但正文极简"的 cat-jam。额度排序不该压过能力。
+console.log('\npriority: top 排序');
+const cc2 = policy.providers.commandcode;
+const beam2 = cc2.free_notices.find((n) => n.model === 'reflection/beam:free');
+check('Beam 记了 priority: top', beam2?.priority === 'top', beam2?.priority);
+check('Beam 是 free_notices 的第一条（文档顺序也对）', cc2.free_notices[0]?.model === 'reflection/beam:free');
+check('Beam 的 note 说明了它强在哪',
+  (beam2?.note ?? '').length > 20 && /上下文|推理|中文/.test(beam2?.note ?? ''));
+const src4 = readFileSync(join(PACK, 'tools', 'sync-model-policy.mjs'), 'utf8');
+check('freeRank 支持 top → -1（排在无上限之前）', /n\?\.priority === 'top'\) return -1/.test(src4));
+check('top 判定在 unlimited 之前', src4.indexOf("=== 'top'") < src4.indexOf("q === 'unlimited'"));
+check('Beam 有用途标注', policy.annotations.some((a) => a.match === '^beam'));
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);
