@@ -20,19 +20,25 @@ fi
 basedir=$(cd "$(dirname "$0")" && pwd)
 
 # 供应商路由的 mode.json 必须**三方共用同一个文件**：
-#   host 插件（从 dsh-guava-pack 加载）、router（从工作区启动）、commandcode 桥接
+#   host 插件（从 dsh-guava-pack 加载）、router、commandcode 桥接
 # 各自的相对路径不同，各读各的会让面板开关切换后不生效（真踩过）。这里统一指定。
 export DSH_ROUTER_MODE_FILE="${DSH_ROUTER_MODE_FILE:-$basedir/playground/themes/provider-router/mode.json}"
+
+# 桥接与路由代理**从 guava 包启动**（与 profile 加载插件的来源一致）。
+# 为什么不用工作区副本：两边会漂移 —— 曾经工作区的桥接落后 pack 两个修复，
+# 结果"代码修好了但跑的还是旧的"。工作区只当开发镜像，运行一律用 pack。
+GUAVA_PACK="${DSH_GUAVA_PACK:-$HOME/dsh-guava-pack}"
+
 # 自动拉起 commandcode 桥接：Go $1/月 套餐不含官方 /provider/v1 的 API 访问权，
 # 桥接改走 CLI 自己的 /alpha/generate。幂等（已在跑则秒退），失败不影响 dsh。
-BRIDGE_START="$basedir/playground/themes/commandcode-bridge/start.sh"
+BRIDGE_START="$GUAVA_PACK/services/commandcode-bridge/start.sh"
 if [ -x "$BRIDGE_START" ]; then
   "$BRIDGE_START" >/dev/null 2>&1 || true
 fi
 # 自动拉起 provider-router 本地路由代理：按 mode.json 把「翻墙」供应商的请求
-# 经 SSR(127.0.0.1:2080) 送出、国内供应商直连。opencode-go / agentrouter 的
-# baseURL 已指向 127.0.0.1:8318，所以它必须在 dsh 之前就绪。幂等，失败不影响 dsh。
-ROUTER_START="$basedir/playground/themes/provider-router/start.sh"
+# 经 SSR 送出、国内供应商直连。opencode-go / agentrouter 的 baseURL 已指向
+# 127.0.0.1:8318，所以它必须在 dsh 之前就绪。幂等，失败不影响 dsh。
+ROUTER_START="$GUAVA_PACK/plugins/provider-router/start.sh"
 if [ -x "$ROUTER_START" ]; then
   "$ROUTER_START" >/dev/null 2>&1 || true
 fi
