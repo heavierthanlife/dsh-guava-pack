@@ -38,6 +38,7 @@ export const KIND = {
   NO_FUNDS: 'no-funds',    // 账户余额不足
   AUTH: 'auth',            // 401：key 无效
   REASONING_ONLY: 'reasoning-only', // 200 但正文为空：推理吃光 token（**探针曾误判为可用**）
+  SLOW: 'slow',            // 200 且正文正常，但**慢到不能当主力**（上游限流）
   UNKNOWN: 'unknown',
 };
 
@@ -50,10 +51,20 @@ const KIND_LABEL = {
   'no-funds': '💰 余额不足',
   auth: '🔑 key 无效',
   'reasoning-only': '🧠 只出推理不出正文',
+  slow: '🐌 能通但极慢（上游限流）',
   unknown: '❓ 未分类',
 };
 
 export const kindLabel = (k) => KIND_LABEL[k] ?? k;
+
+/**
+ * 慢速阈值：单次探测超过这个毫秒数就算 `slow`（能通但不可用）。
+ *
+ * 默认 15s —— 对话场景里单轮 >15s 就已经明显卡顿；实测正常模型都在 0.4–3.5s，
+ * 而限流中的 gemini-3.8 家族是 50–59s，分界很干净。
+ * 可用 `PROBE_SLOW_MS` 覆盖。
+ */
+export const SLOW_MS = Number(process.env.PROBE_SLOW_MS || 15000);
 
 /**
  * 把响应体（可能是 SSE 多行 `data: {...}`，也可能是普通 JSON）里的错误信息挖出来。
@@ -129,7 +140,7 @@ function callUrl(baseURL, api) {
  * @param {number} [opts.timeoutMs]
  * @returns {Promise<{kind:string,status:number,message:string,ms:number}>}
  */
-export async function probeModel({ baseURL, api, apiKey, model, provider, timeoutMs = 25000 }) {
+export async function probeModel({ baseURL, api, apiKey, model, provider, timeoutMs = SLOW_MS + 10000 }) {
   const headers = { 'content-type': 'application/json', accept: 'application/json' };
   if (apiKey) {
     headers.authorization = `Bearer ${apiKey}`;
@@ -159,9 +170,20 @@ export async function probeModel({ baseURL, api, apiKey, model, provider, timeou
     status = res.status;
     text = await res.text();
   } catch (err) {
-    return { kind: KIND.UNKNOWN, status: 0, message: `请求失败: ${err.message}`, ms: Date.now() - started };
+    const ms = Date.now() - started;
+    const msg = String(err?.message ?? err);
+    // **超时 = 太慢 = 不能用**。实测限流中的 gemini-3.8 家族会一直挂到超时；
+    // 如果归成 `unknown`，调用方会以为"没测出来"从而放宽保留，等于漏判。
+    const timedOut = /aborted|timeout|timed out/i.test(msg) && /timeout|aborted/i.test(msg);
+    return {
+      kind: timedOut ? KIND.SLOW : KIND.UNKNOWN,
+      status: 0,
+      message: timedOut ? `超过 ${(timeoutMs / 1000).toFixed(0)}s 未响应（太慢，疑似上游限流）` : `请求失败: ${msg}`,
+      ms,
+    };
   }
 
+  const elapsedMs = Date.now() - started;
   const { isError, message, type } = extractMessage(text);
   if (!isError && status === 200) {
     // ⚠️ **HTTP 200 不等于它能干活。**
@@ -187,7 +209,20 @@ export async function probeModel({ baseURL, api, apiKey, model, provider, timeou
         contentChars: 0,
       };
     }
-    return { kind: KIND.USABLE, status, message: '', ms: Date.now() - started, contentChars: stats.contentChars };
+    // ⚠️ **"能通"不等于"能用"**。实测 2026-10-20：`gemini-3.8-flash-tiered` 正常返回 200
+    // 且正文正常，但**每次要 50–59 秒**（上游 `MODEL_CAPACITY_EXHAUSTED` 限流）。
+    // 这种模型当默认模型会让每轮对话都卡将近一分钟，用户看到的就是"运行失败/超时"。
+    // 所以设一个慢速阈值：超过就判 `slow`，不再算 `usable`。
+    if (elapsedMs > SLOW_MS) {
+      return {
+        kind: KIND.SLOW,
+        status,
+        message: `能通但用了 ${(elapsedMs / 1000).toFixed(1)}s（阈值 ${(SLOW_MS / 1000).toFixed(0)}s，疑似上游限流）`,
+        ms: elapsedMs,
+        contentChars: stats.contentChars,
+      };
+    }
+    return { kind: KIND.USABLE, status, message: '', ms: elapsedMs, contentChars: stats.contentChars };
   }
   const kind = classify(status, message, type);
   return { kind, status, message: String(message).slice(0, 160), ms: Date.now() - started };

@@ -303,5 +303,21 @@ check('freeRank 支持 top → -1（排在无上限之前）', /n\?\.priority ==
 check('top 判定在 unlimited 之前', src4.indexOf("=== 'top'") < src4.indexOf("q === 'unlimited'"));
 check('Beam 有用途标注', policy.annotations.some((a) => a.match === '^beam'));
 
+// ── 13. slow 分类：能通但极慢 ≠ 可用 ──────────────────────────────────
+// 事故（2026-10-20）：`gemini-3.8-flash-high` 200 正常但每次 50–95s（上游
+// MODEL_CAPACITY_EXHAUSTED 限流）。旧探针只看状态码 + 正文 → 判成 `usable`，
+// 于是它被当默认模型，每轮对话卡近一分钟，用户看到的就是"运行失败"。
+console.log('\nslow 分类（能通但极慢）');
+const pSrc2 = readFileSync(join(PACK, 'tools', 'lib', 'probe.mjs'), 'utf8');
+check('KIND 有 slow', /SLOW: 'slow'/.test(pSrc2));
+check('有 SLOW_MS 阈值且可环境变量覆盖',
+  /export const SLOW_MS = Number\(process\.env\.PROBE_SLOW_MS \|\| 15000\)/.test(pSrc2));
+check('usable 判定前会查慢速阈值', /elapsedMs > SLOW_MS/.test(pSrc2));
+check('超时归为 slow（不是 unknown，否则会被"放宽"漏判）',
+  /timedOut \? KIND\.SLOW : KIND\.UNKNOWN/.test(pSrc2));
+check('默认探测超时收紧为 SLOW_MS + 10s（慢模型快速判定）',
+  /timeoutMs = SLOW_MS \+ 10000/.test(pSrc2));
+check('slow 有可读标签', /slow: '🐌 能通但极慢（上游限流）'/.test(pSrc2));
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);
