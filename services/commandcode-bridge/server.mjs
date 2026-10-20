@@ -160,6 +160,19 @@ function safeParse(s) {
   try { return JSON.parse(s); } catch { return {}; }
 }
 
+/**
+ * 过滤模型内部控制 token（例如 <|start|>, <|end|>, <|channel|>, <|constrain|>, </rfl:parameter> 等）。
+ * 这些是 Beam / Reflection 等模型在思考流或正文中偶发泄漏的内部模板标记。
+ * 如果直接在历史消息中回传给上游，jinja / tokenizer 会因非法控制字符崩溃，报错：
+ * "The request could not be rendered into a prompt for this model."
+ */
+function sanitizeControlTokens(str) {
+  if (typeof str !== "string") return str;
+  return str
+    .replace(/<\|[a-zA-Z0-9_:.\- ]+?\|>/g, " ")
+    .replace(/<\/?rfl:[a-zA-Z0-9_:.\- ]+?>/g, " ");
+}
+
 /** OpenAI messages → Vercel-AI-SDK 形态的 ModelMessage[]（上游要的形状）。 */
 function toWireMessages(messages, model) {
   const isBeam = /beam/i.test(model || "");
@@ -167,7 +180,7 @@ function toWireMessages(messages, model) {
   for (const m of messages || []) {
     if (m.role === "system" || m.role === "developer") continue; // 已并入 system
     if (m.role === "user") {
-      out.push({ role: "user", content: textOf(m.content) });
+      out.push({ role: "user", content: sanitizeControlTokens(textOf(m.content)) });
     } else if (m.role === "assistant") {
       const parts = [];
 
@@ -187,6 +200,9 @@ function toWireMessages(messages, model) {
         }
       }
 
+      // 清除泄漏的控制标记（防止上游 jinja 模板渲染失败）
+      reasoningText = sanitizeControlTokens(reasoningText).trim();
+
       // Beam 等推理模型强制要求每一条 assistant 历史消息都带有 reasoning_content。
       // 若已有推理内容则原样转入；若为其它模型产生的历史消息（无推理内容），则兜底填一个空格 " "
       // （不能填空字符串 ""，上游序列化时会把空字符串判为 false 并丢弃，导致后端报 400）。
@@ -197,7 +213,7 @@ function toWireMessages(messages, model) {
         });
       }
 
-      const t = textOf(m.content);
+      const t = sanitizeControlTokens(textOf(m.content)).trim();
       if (t) parts.push({ type: "text", text: t });
       for (const tc of m.tool_calls || []) {
         parts.push({
@@ -236,10 +252,11 @@ function toWireTools(tools) {
 }
 
 function buildEnvelope(body) {
-  const system = (body.messages || [])
+  const rawSystem = (body.messages || [])
     .filter((m) => m.role === "system" || m.role === "developer")
     .map((m) => textOf(m.content))
     .join("\n\n");
+  const system = sanitizeControlTokens(rawSystem);
   const params = {
     model: body.model,
     system,
@@ -367,14 +384,18 @@ async function handleChat(req, res, body) {
     let ev;
     try { ev = JSON.parse(s); } catch { return; }
     switch (ev.type) {
-      case "reasoning-delta":
-        reasoning += ev.text || "";
-        if (wantsStream) sse(res, chunk(model, { reasoning_content: ev.text || "" }));
+      case "reasoning-delta": {
+        const clean = sanitizeControlTokens(ev.text || "");
+        reasoning += clean;
+        if (wantsStream && clean) sse(res, chunk(model, { reasoning_content: clean }));
         break;
-      case "text-delta":
-        text += ev.text || "";
-        if (wantsStream) sse(res, chunk(model, { content: ev.text || "" }));
+      }
+      case "text-delta": {
+        const clean = sanitizeControlTokens(ev.text || "");
+        text += clean;
+        if (wantsStream && clean) sse(res, chunk(model, { content: clean }));
         break;
+      }
       case "tool-input-start": {
         const tc = ensureTool(ev.id, ev.toolName);
         if (wantsStream) {
