@@ -138,17 +138,23 @@ providers:
       # Beam 排**免费模型第一位**：实测 1M 上下文、会推理（27 个推理块答对 17×23）、
       # 正文正常、中文流利（递归解释用了俄罗斯套娃比喻）。综合能力明显强于另两个。
       # 它也是 commandcode 自家模型（`owned_by: command-code`，自称 CommandCodeBot）。
+      # 官方公告：is free, with no daily request limit. Requests on this model cost no credits. while capacity lasts.
       - model: 'reflection/beam:free'
-        quota: unknown
-        note: '1M 上下文；推理型但正文正常；中文好。综合最强的免费模型 → 排第一'
+        quota: unlimited
+        note: '无每日请求上限、不计 credits（while capacity lasts）；1M 上下文；推理型但正文正常；中文好。综合最强的免费模型 → 排第一'
         priority: top
+
+      # 官方公告：is free for a limited time, with no daily request limit. Requests on this model cost no credits. for a limited time.
+      - model: 'minimax/minimax-m3.1-flash:free'
+        quota: unlimited
+        note: '限时免费、无每日请求上限、不计 credits（for a limited time）；1M 上下文'
 
       - model: 'stealth/cat-jam:free'
         quota: unlimited
         note: '免费且无每日请求上限，不计 credits（stealth 预览期内）'
       - model: 'stealth/glyph-cluster:free'
         quota: 100/day
-        note: '免费，每天上限 100 次（stealth 预览期内）'
+        note: '免费，每天上限 100 次（while the stealth preview lasts）'
       - model: 'poolside/laguna-s-2.1-free'
         quota: unlimited
         note: '免费、不计 credits，但注明"while capacity lasts" —— 上游满载时不可用（实测探测到 capacity）'
@@ -218,6 +224,10 @@ annotations:
   - match: '^beam'
     tag: '推理型·1M上下文'
     why: 'commandcode 自家模型。推理型但正文正常，中文好。综合最强的免费模型。'
+
+  - match: '^minimax-m3\.1-flash'
+    tag: '限时免费·1M'
+    why: '官方限时免费，无每日上限不计 credits，1M 上下文通用模型。'
 
   - match: '^laguna-s-2.1'
     tag: '免费但常满载'

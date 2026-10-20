@@ -472,6 +472,9 @@ async function main() {
         for (const m of e?.config?.models ?? []) defined.add(`deepseek-official::${m.id}`);
       }
     }
+    // deepseek-account 是官方账号插件提供的 provider（内置 deepseek-flash / deepseek-v4-pro）
+    defined.add('deepseek-account::deepseek-flash');
+    defined.add('deepseek-account::deepseek-v4-pro');
     console.log(`检查 ${refs.size} 条被引用的路由：`);
     let dangling = 0;
     for (const [key, by] of refs) {

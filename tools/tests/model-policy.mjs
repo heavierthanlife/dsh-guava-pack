@@ -86,8 +86,8 @@ try {
     // 每条引用的 provider 必须真的是 providers 里的一家
     const pi = real.find((e) => e?.id === 'llm-pi-ai');
     const provNames = new Set(Object.keys(pi?.config?.providers ?? {}));
-    const fromPi = [...r.keys()].filter((k) => k.split('::')[0] !== 'deepseek-official');
-    check('引用的 provider 都在 llm-pi-ai 里（deepseek-official 除外，它来自独立条目）',
+    const fromPi = [...r.keys()].filter((k) => !['deepseek-official', 'deepseek-account'].includes(k.split('::')[0]));
+    check('引用的 provider 都在 llm-pi-ai 里（deepseek-official/deepseek-account 除外，它们来自独立条目）',
       fromPi.every((k) => provNames.has(k.split('::')[0])),
       fromPi.filter((k) => !provNames.has(k.split('::')[0])));
   }
