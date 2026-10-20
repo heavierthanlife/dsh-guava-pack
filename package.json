@@ -38,6 +38,7 @@
     "sync-models:write": "node tools/sync-models.mjs --write"
   },
   "dependencies": {
+    "undici": "^7.0.0",
     "zod": "^4.6.7"
   }
 }

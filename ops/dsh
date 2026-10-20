@@ -29,6 +29,14 @@ export DSH_ROUTER_MODE_FILE="${DSH_ROUTER_MODE_FILE:-$basedir/playground/themes/
 # 结果"代码修好了但跑的还是旧的"。工作区只当开发镜像，运行一律用 pack。
 GUAVA_PACK="${DSH_GUAVA_PACK:-$HOME/dsh-guava-pack}"
 
+# 从 DSH 凭证库（<DSH_HOME>/.credentials.yaml 的 refs 段）导出 provider key。
+# 为什么需要：DSH 自己会解析凭证库，所以 LLM 请求没问题；但**桥接和定时任务是独立
+# 进程**，只读环境变量 —— 用户把 key 填在凭证库而没写 .bashrc 时，桥接会报
+# "COMMANDCODE_API_KEY 未设置"。这里统一导出，两处都能用，也免得 key 存两份。
+if [ -f "$GUAVA_PACK/tools/export-provider-keys.mjs" ] && command -v node >/dev/null 2>&1; then
+  eval "$(node "$GUAVA_PACK/tools/export-provider-keys.mjs" 2>/dev/null)"
+fi
+
 # 自动拉起 commandcode 桥接：Go $1/月 套餐不含官方 /provider/v1 的 API 访问权，
 # 桥接改走 CLI 自己的 /alpha/generate。幂等（已在跑则秒退），失败不影响 dsh。
 BRIDGE_START="$GUAVA_PACK/services/commandcode-bridge/start.sh"

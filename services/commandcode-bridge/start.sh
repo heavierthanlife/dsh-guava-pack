@@ -10,8 +10,17 @@ PORT="${BRIDGE_PORT:-8317}"
 if [ -z "${COMMANDCODE_API_KEY:-}" ]; then
   eval "$(grep -E '^export COMMANDCODE_API_KEY=' "$HOME/.bashrc" 2>/dev/null)"
 fi
+# 回落到 DSH 凭证库：key 可能存在 <DSH_HOME>/.credentials.yaml 的 refs 段
+# （用户在设置里填 key 时就走这里，不会写 .bashrc）。
 if [ -z "${COMMANDCODE_API_KEY:-}" ]; then
-  echo "错误：COMMANDCODE_API_KEY 未设置（~/.bashrc 里也没有）" >&2
+  GUAVA_PACK="${DSH_GUAVA_PACK:-$HOME/dsh-guava-pack}"
+  HELPER="$GUAVA_PACK/tools/export-provider-keys.mjs"
+  if [ -f "$HELPER" ] && command -v node >/dev/null 2>&1; then
+    eval "$(node "$HELPER" 2>/dev/null)"
+  fi
+fi
+if [ -z "${COMMANDCODE_API_KEY:-}" ]; then
+  echo "错误：COMMANDCODE_API_KEY 未设置（~/.bashrc 与 DSH 凭证库都没有）" >&2
   exit 1
 fi
 
