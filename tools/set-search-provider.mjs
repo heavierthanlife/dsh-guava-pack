@@ -25,6 +25,7 @@
  *   node tools/set-search-provider.mjs switch       # 只钉 pin，不动偏好
  */
 
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -61,13 +62,52 @@ function writePreference(backend) {
   writeFileSync(PREFERENCE_FILE, JSON.stringify({ backend, updatedAt: new Date().toISOString() }, null, 2) + '\n', { mode: 0o600 });
 }
 
-/** 插件是否已挂载：看 profile 的 bundles 里有没有它。 */
+/** 插件是否已**装进** profile（bundles 列表里有它）。 */
 function pluginInstalled() {
   try {
     const pkg = JSON.parse(readFileSync(join(DSH_HOME, 'profiles', 'web', 'package.json'), 'utf8'));
     return (pkg?.dsh?.profile?.bundles ?? []).includes('dsh-web-search-switch');
   } catch {
     return false;
+  }
+}
+
+/**
+ * 插件是否**已挂在运行中的 DSH 里**。
+ *
+ * 这两件事必须分开：
+ *   · 装进 profile（bundles 列表）→ 下次启动才加载；
+ *   · 已挂载 → 运行中的进程真的注册了 `switch` provider。
+ *
+ * 在"装好但没重启"的窗口里把 pin 改成 switch，搜索会立刻
+ * `configured provider "switch" is not registered`（真踩过）。
+ *
+ * 判据：插件 apply() 时写的 mounted 标记里的 pid，必须等于当前监听 3080 的进程 pid。
+ */
+function pluginMounted() {
+  const marker = join(DSH_HOME, 'storages', 'web-search-switch.mounted.json');
+  let pid;
+  try {
+    pid = JSON.parse(readFileSync(marker, 'utf8'))?.pid;
+  } catch {
+    return { mounted: false, reason: '没有挂载标记（插件从未在本机启动过，或版本太旧）' };
+  }
+  const listener = listeningPid(3080);
+  if (!listener) return { mounted: false, reason: `读不到 3080 的监听进程（标记 pid=${pid}）` };
+  if (pid !== listener) {
+    return { mounted: false, reason: `挂载标记是 pid=${pid}，但当前 DSH 是 pid=${listener}（装好后还没重启）` };
+  }
+  return { mounted: true, pid };
+}
+
+/** 用 fuser 找监听某端口的 pid（Linux）。拿不到就返回 undefined。 */
+function listeningPid(port) {
+  try {
+    const out = execFileSync('fuser', ['-n', 'tcp', String(port)], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    const match = out.match(/(\d+)/g);
+    return match && match.length ? Number(match[match.length - 1]) : undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -85,6 +125,8 @@ async function main() {
     info(`searchProvider: ${pin.value ?? '(未写，base 默认 deepseek-official)'}`);
     info(`偏好后端      : ${preference}`);
     info(`插件已装进 profile: ${installed ? '是' : '否'}`);
+    const mounted = pluginMounted();
+    info(`插件已挂载到运行中的 DSH: ${mounted.mounted ? `是（pid=${mounted.pid}）` : `否 —— ${mounted.reason}`}`);
     const effective = pin.value === SWITCH_PROVIDER_ID ? preference : OFFICIAL_PROVIDER_ID;
     console.log(`\n  → 当前实际生效：${effective}`);
     if (pin.value === SWITCH_PROVIDER_ID && !installed) {
@@ -101,9 +143,12 @@ async function main() {
   }
 
   if (cmd === 'switch') {
-    if (!installed) {
-      warn('插件还没装进 profile —— 先把 pin 钉成 switch 会让搜索立刻报错。');
-      warn('建议：先重启 DSH，或先按 README「搜索后端」一节把插件加进 bundles。');
+    const mounted = pluginMounted();
+    if (!mounted.mounted) {
+      warn('插件还没挂载到运行中的 DSH —— 现在把 pin 钉成 switch 会让搜索立刻报错：');
+      warn(`  ${mounted.reason}`);
+      warn('建议：先重启 DSH 再跑这条命令（或直接在设置面板里点）。');
+      return 1;
     }
     const r = pinSearchProvider(DSH_HOME, SWITCH_PROVIDER_ID);
     ok(r.changed ? `pin 已钉到 ${SWITCH_PROVIDER_ID}（${r.how}）` : `pin 已经是 ${SWITCH_PROVIDER_ID}`);
@@ -116,10 +161,13 @@ async function main() {
     return 2;
   }
 
-  if (!installed) {
-    warn('插件还没装进 profile。pin 会先保持不动（否则搜索会立刻坏）。');
+  const mounted = pluginMounted();
+  if (!mounted.mounted) {
+    // 只记偏好、不动 pin：等插件挂载后 apply() 会自愈（那时 provider 已注册，安全）。
     writePreference(cmd);
-    ok(`偏好已记为 ${cmd}；等插件挂载后会自动把 pin 钉到 switch（插件 apply 时自愈）`);
+    warn('插件还没挂载到运行中的 DSH，pin 先保持不动（否则搜索会立刻坏）。');
+    warn(`  ${mounted.reason}`);
+    ok(`偏好已记为 ${cmd}；重启 DSH 后插件会自己把 pin 钉到 switch`);
     return 0;
   }
 

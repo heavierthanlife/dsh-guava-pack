@@ -31,6 +31,12 @@ window.__ModuleLoader__.load({
       configured: '已配置',
       current: '当前',
       commandHint: '也可以在聊天里用 `/search-backend official|tavily` 切换。',
+      keyLabel: 'Tavily API Key',
+      keyPlaceholder: 'tvly-...（存在本机 storages，0600，不进配置文件）',
+      keySave: '保存 key',
+      keySaved: '已保存（本机）',
+      keyClear: '清除',
+      keyHint: '没 key 时切到 Tavily 会报 CREDENTIAL_MISSING。填在这里可以立刻生效，不用改 .bashrc / 不用重启。',
       pinWarning: '注意：web.searchProvider 没有钉在 switch 上，切换不会生效（需要重启 DSH 让 profile 生效）。',
     };
 
@@ -50,6 +56,15 @@ window.__ModuleLoader__.load({
 .wsw_ok{color:var(--dsw-alias-state-success-primary)}
 .wsw_hint{font-size:11px;opacity:.6;line-height:16px}
 .wsw_err{font-size:12px;color:var(--dsw-alias-state-error-primary)}
+.wsw_key{display:flex;flex-direction:column;gap:6px;padding:8px 10px;border-radius:var(--dsw-radius-sm,6px);
+  border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1)}
+.wsw_key label{font-size:12px;opacity:.75}
+.wsw_key .row{display:flex;gap:6px}
+.wsw_key input{flex:1;min-width:0;padding:5px 8px;border-radius:var(--dsw-radius-sm,6px);
+  border:1px solid var(--dsw-alias-border-l1);background:transparent;color:inherit;font:inherit;font-size:12px}
+.wsw_key button{padding:5px 10px;border:0;border-radius:var(--dsw-radius-sm,6px);
+  background:var(--dsw-alias-button-tool-bar-fill);color:var(--dsw-alias-label-primary);font:inherit;font-size:12px;cursor:pointer}
+.wsw_key button:disabled{opacity:.5;cursor:default}
 `;
 
     /** 调 host 的面板路由（与 session-purge 同一套 client-request 信封）。 */
@@ -88,12 +103,27 @@ window.__ModuleLoader__.load({
         return function () { alive = false; };
       }, []);
 
+      var keyPair = React.useState('');
+      var keyDraft = keyPair[0];
+      var setKeyDraft = keyPair[1];
+
       function choose(backend) {
         if (busy || (state && backend === state.backend)) return;
         setBusy(true);
         setError('');
         call('set', { backend })
           .then(function (value) { setState(value); })
+          .catch(function (err) { setError(String((err && err.message) || err)); })
+          .then(function () { setBusy(false); });
+      }
+
+      /** 保存/清除 Tavily key：走同一个 set 接口（顺带保持当前后端不变）。 */
+      function saveKey(value) {
+        if (busy) return;
+        setBusy(true);
+        setError('');
+        call('set', { backend: state ? state.backend : 'official', tavilyApiKey: value })
+          .then(function (next) { setState(next); setKeyDraft(''); })
           .catch(function (err) { setError(String((err && err.message) || err)); })
           .then(function () { setBusy(false); });
       }
@@ -129,6 +159,34 @@ window.__ModuleLoader__.load({
         })));
 
       if (error) children.push(h('div', { key: 'err', className: 'wsw_err' }, error));
+
+      children.push(h('div', { key: 'key', className: 'wsw_key' }, [
+        h('label', { key: 'l' }, T.keyLabel + (state.tavilyKeyFromPanel ? '（' + T.keySaved + '）' : '')),
+        h('div', { key: 'row', className: 'row' }, [
+          h('input', {
+            key: 'i',
+            type: 'password',
+            value: keyDraft,
+            placeholder: T.keyPlaceholder,
+            disabled: busy,
+            onChange: function (e) { setKeyDraft(e.target.value); },
+          }),
+          h('button', {
+            key: 's',
+            type: 'button',
+            disabled: busy || !keyDraft.trim(),
+            onClick: function () { saveKey(keyDraft); },
+          }, T.keySave),
+          state.tavilyKeyFromPanel ? h('button', {
+            key: 'c',
+            type: 'button',
+            disabled: busy,
+            onClick: function () { saveKey(''); },
+          }, T.keyClear) : null,
+        ]),
+        h('div', { key: 'h', className: 'wsw_hint' }, T.keyHint),
+      ]));
+
       children.push(h('div', { key: 'hint', className: 'wsw_hint' }, T.commandHint));
       if (state.pinned === false) {
         children.push(h('div', { key: 'pin', className: 'wsw_err' }, T.pinWarning));

@@ -66,7 +66,7 @@ function stateFile() {
  * 偏好读写（热读，带 1 次 stat 的缓存）
  * ------------------------------------------------------------------ */
 
-let cached = { key: '', backend: 'official' };
+let cached = { key: '', state: { backend: 'official', tavilyApiKey: undefined } };
 
 /**
  * 读当前偏好的后端。
@@ -80,31 +80,50 @@ let cached = { key: '', backend: 'official' };
  * 文件缺失/损坏/取值非法时回落 `official`：默认后端永远是"能用的那个"，
  * 偏好文件坏掉不该把搜索功能一起弄坏。
  */
-function readBackend() {
+function readStateFile() {
   const file = stateFile();
   try {
     const st = statSync(file);
     const key = `${st.mtimeMs}:${st.size}`;
-    if (key === cached.key) return cached.backend;
+    if (key === cached.key) return cached.state;
     const parsed = JSON.parse(readFileSync(file, 'utf8'));
-    const backend = BACKENDS.includes(parsed?.backend) ? parsed.backend : 'official';
-    cached = { key, backend };
-    return backend;
+    const state = {
+      backend: BACKENDS.includes(parsed?.backend) ? parsed.backend : 'official',
+      // 面板里填的 Tavily key。**只在本机 0600 文件里**，不进 config、不进日志、不进错误文案。
+      tavilyApiKey: typeof parsed?.tavilyApiKey === 'string' && parsed.tavilyApiKey.length > 0
+        ? parsed.tavilyApiKey
+        : undefined,
+    };
+    cached = { key, state };
+    return state;
   } catch {
-    cached = { key: '', backend: 'official' };
-    return 'official';
+    cached = { key: '', state: { backend: 'official', tavilyApiKey: undefined } };
+    return cached.state;
   }
 }
 
+function readBackend() {
+  return readStateFile().backend;
+}
+
 /** 写偏好。`0600` —— 里面目前只有偏好，但将来可能放 key 引用。 */
+function writeStateFile(patch) {
+  const file = stateFile();
+  const current = readStateFile();
+  const next = { ...current, ...patch };
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, JSON.stringify({
+    backend: next.backend,
+    ...(next.tavilyApiKey ? { tavilyApiKey: next.tavilyApiKey } : {}),
+    updatedAt: new Date().toISOString(),
+  }, null, 2) + '\n', { mode: 0o600 });
+  cached = { key: '', state: next };
+  return next;
+}
+
 function writeBackend(backend) {
   if (!BACKENDS.includes(backend)) throw new Error(`未知搜索后端：${backend}`);
-  const file = stateFile();
-  mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, JSON.stringify({ backend, updatedAt: new Date().toISOString() }, null, 2) + '\n', {
-    mode: 0o600,
-  });
-  cached = { key: '', backend };
+  writeStateFile({ backend });
   return backend;
 }
 
@@ -155,7 +174,14 @@ async function resolveSecret(ctx, ref) {
     }
   }
   const ambient = process.env[ref];
-  return typeof ambient === 'string' && ambient.length > 0 ? ambient : undefined;
+  if (typeof ambient === 'string' && ambient.length > 0) return ambient;
+  // 最后一档：面板里直接填的 Tavily key（本机 0600 状态文件）。
+  // 这样**不用重启**就能用 Tavily —— 环境变量只在进程启动时读一次，改 .bashrc 必须重启。
+  if (ref === TAVILY_API_KEY_ENV) {
+    const own = readStateFile().tavilyApiKey;
+    if (typeof own === 'string' && own.length > 0) return own;
+  }
+  return undefined;
 }
 
 /* ------------------------------------------------------------------ *
@@ -367,8 +393,11 @@ async function readState(ctx) {
   const credentialsAvailable = ctx.get('credentials') !== undefined;
   const officialKey = await resolveSecret(ctx, 'DEEPSEEK_API_KEY');
   const tavilyKey = await resolveSecret(ctx, TAVILY_API_KEY_ENV);
+  const ownTavilyKey = readStateFile().tavilyApiKey;
   return {
     backend: readBackend(),
+    // 面板据此决定是否显示"已保存（本机）"，以及要不要让用户填。
+    tavilyKeyFromPanel: typeof ownTavilyKey === 'string' && ownTavilyKey.length > 0,
     backends: [
       {
         id: 'official',
@@ -428,6 +457,19 @@ async function apply(ctx) {
   // 这里补上。provider 已经在上面注册过，所以此刻钉住是安全的。
   if (readBackend() === 'tavily' && currentSearchProvider(DSH_HOME).value !== SWITCH_PROVIDER_ID) {
     ensurePinnedToSwitch(ctx);
+  }
+
+  // 挂载标记：`CLI` 靠它判断"运行中的 DSH 到底有没有挂载本插件"。
+  //
+  // 为什么需要：profile 的 bundles 列表里**有**插件 ≠ 运行中的进程**已加载**它。
+  // 在"装好但没重启"的窗口里把 pin 改成 switch，搜索会立刻坏掉（真踩过）。
+  // 标记里带 pid —— CLI 再比对监听 3080 的进程，就得到确切答案。
+  try {
+    mkdirSync(join(DSH_HOME, 'storages'), { recursive: true });
+    writeFileSync(join(DSH_HOME, 'storages', 'web-search-switch.mounted.json'),
+      JSON.stringify({ pid: process.pid, at: new Date().toISOString() }, null, 2) + '\n');
+  } catch {
+    /* 标记写不了不影响功能 */
   }
 
   // ── `/search-backend` 命令：不打开设置页也能切 ──────────────────────
@@ -509,6 +551,12 @@ async function apply(ctx) {
               return;
             }
             writeBackend(backend);
+            // 可选：顺手保存用户刚填的 Tavily key（空字符串 = 清除）。
+            const providedKey = body.payload?.tavilyApiKey;
+            if (typeof providedKey === 'string') {
+              const trimmed = providedKey.trim();
+              writeStateFile({ tavilyApiKey: trimmed.length > 0 ? trimmed : undefined });
+            }
             // 只有插件已挂载时才走到这里 → 钉住是安全的，且切 Tavily 必须钉住才生效。
             ensurePinnedToSwitch(cctx);
             sendRpc(res, rpcId, { ok: true, value: await readState(cctx) });
@@ -523,5 +571,8 @@ async function apply(ctx) {
   });
 }
 
-export { apply, inject, name, PROVIDER_ID, ROUTE_PATH, BACKENDS, readBackend, writeBackend, stateFile };
+export {
+  apply, inject, name, PROVIDER_ID, ROUTE_PATH, BACKENDS,
+  readBackend, writeBackend, readStateFile, writeStateFile, stateFile,
+};
 export default { apply, inject, name };

@@ -48,9 +48,11 @@ brave / serper / firecrawl 也都 404）。
 引用名固定为 **`TAVILY_API_KEY`**，按 DSH 的常规顺序解析：
 `ctx.credentials`（设置里存的） → 进程环境（`~/.bashrc` 由启动器载入）。
 
-```sh
-echo 'export TAVILY_API_KEY=tvly-...' >> ~/.bashrc   # 然后重启 DSH 或重新登录
-```
+三种填法（优先级从高到低）：
+
+1. **设置 → 搜索后端** 里直接粘贴（推荐）—— 存本机 0600 状态文件，**立刻生效、不用重启**；
+2. DSH 凭证库（`ctx.credentials`）；
+3. 进程环境 `~/.bashrc` —— 注意环境变量只在进程启动时读一次，**改完必须重启 DSH**。
 
 没配 key 时切到 Tavily **不会崩**：搜索会返回一条结构化错误，直接告诉你缺哪个变量。
 

@@ -372,6 +372,9 @@ DSH 的搜索是可插拔的（`ctx.web` seam）。**官方**只发布了三个 
 切换只是改一个 JSON，**下一次搜索立即生效**：
 
 ```sh
+# ⚠️ 这些脚本在 **pack 目录**里（不在 ~/dsh 根目录 —— 那里没有 scripts）
+cd ~/dsh/playground/themes/dsh-guava-pack
+
 npm run search -- status          # 看当前实际生效的后端
 npm run search -- tavily          # 切 Tavily（顺手把 pin 钉好）
 npm run search -- official
@@ -380,8 +383,16 @@ npm run search -- bypass          # pin 写回 deepseek-official（绕过本插�
 
 也可以在 **设置 → 搜索后端** 点按钮，或聊天里 `/search-backend tavily`。
 
-Tavily 的 key 引用名固定为 `TAVILY_API_KEY`（`~/.bashrc` 或 DSH 凭证库）。
+Tavily 的 key 走 `TAVILY_API_KEY`，三种填法（按优先级）：
+DSH 凭证库 → 进程环境（`~/.bashrc`，**改完要重启**）→ **设置 → 搜索后端 里直接粘贴**
+（存本机 `storages/web-search-switch.json`，0600，不进配置文件、不进日志；
+优势是**立刻生效、不用重启**）。
+
 没配 key 时切过去不会崩：搜索会回一条结构化错误，直接说明缺哪个变量。
+
+⚠️ CLI 会先确认"运行中的 DSH 真的挂载了插件"（比对 `storages/web-search-switch.mounted.json`
+的 pid 与监听 3080 的进程）。**装好但没重启**时它拒绝直接钉 `switch`，只记偏好 ——
+否则搜索会立刻 `configured provider "switch" is not registered`（踩过）。
 
 偏好文件：`<DSH_HOME>/storages/web-search-switch.json`（0600，热读，坏了回落官方）。
 

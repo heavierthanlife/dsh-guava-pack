@@ -174,13 +174,47 @@ check('OFFICIAL/SWITCH 常量正确',
   pinMod.OFFICIAL_PROVIDER_ID === 'deepseek-official' && pinMod.SWITCH_PROVIDER_ID === 'switch');
 rmSync(fakeHome, { recursive: true, force: true });
 
+// ── 6b. 面板里填的 Tavily key（本机 0600 状态文件）──────────────────────
+// 为什么要支持这条路径：环境变量只在进程启动时读一次，改 .bashrc 必须重启；
+// 而"填个 key"这种小事不该逼用户重启 DSH。
+console.log('\n面板 Tavily key');
+check('导出了 writeStateFile / readStateFile',
+  typeof mod.writeStateFile === 'function' && typeof mod.readStateFile === 'function');
+mod.writeStateFile({ tavilyApiKey: 'tvly-test-123' });
+check('key 写进状态文件后能读回', mod.readStateFile().tavilyApiKey === 'tvly-test-123');
+mod.writeBackend('tavily');
+check('切后端不会丢掉已保存的 key', mod.readStateFile().tavilyApiKey === 'tvly-test-123');
+check('切后端后 backend 正确', mod.readBackend() === 'tavily');
+mod.writeStateFile({ tavilyApiKey: undefined });
+check('可以清除 key', mod.readStateFile().tavilyApiKey === undefined);
+check('清除 key 后 backend 保持不变', mod.readBackend() === 'tavily');
+mod.writeBackend('official');
+
+const stateFileBody = readFileSync(join(scratch, 'storages', 'web-search-switch.json'), 'utf8');
+check('key 不会出现在 backend 切换前的残留里（当前已清空）', !stateFileBody.includes('tvly-test-123'));
+
+// ── 6c. 挂载标记（CLI 靠它判断"运行中的 DSH 是否真的加载了插件"）──────────
+// 踩过：bundles 列表里有插件 ≠ 进程已加载它。在"装好没重启"的窗口里钉 switch，
+// 搜索会立刻 configured provider not registered。
+console.log('\n挂载标记与 CLI 守卫');
+const hostForMarker = readFileSync(join(PACK, 'plugins', 'dsh-web-search-switch', 'lib', 'index.js'), 'utf8');
+check('插件 apply 会写 mounted 标记（含 pid）',
+  /web-search-switch\.mounted\.json/.test(hostForMarker) && /pid: process\.pid/.test(hostForMarker));
+const cliForMounted = readFileSync(join(PACK, 'tools', 'set-search-provider.mjs'), 'utf8');
+check('CLI 用 mounted 标记 + 监听端口 pid 双重确认',
+  /pluginMounted/.test(cliForMounted) && /listeningPid\(3080\)/.test(cliForMounted));
+check('未挂载时 CLI 拒绝钉 switch（return 1）',
+  /现在把 pin 钉成 switch 会让搜索立刻报错/.test(cliForMounted) && /return 1;/.test(cliForMounted));
+check('未挂载时切后端只记偏好、不动 pin',
+  /pin 先保持不动/.test(cliForMounted));
+
 // ── 7. CLI 与接线 ───────────────────────────────────────────────────────
 console.log('\nCLI 与接线');
 const cliSrc = readFileSync(join(PACK, 'tools', 'set-search-provider.mjs'), 'utf8');
 check('CLI 支持 status / official / tavily / switch / bypass',
   ['status', 'official', 'tavily', 'switch', 'bypass'].every((c) => cliSrc.includes(c)));
-check('CLI 在插件未装时会拒绝直接钉 switch（防把搜索弄坏）',
-  /插件还没装进 profile/.test(cliSrc));
+check('CLI 在插件未挂载时会拒绝直接钉 switch（防把搜索弄坏）',
+  /插件还没挂载到运行中的 DSH/.test(cliSrc));
 check('CLI 复用 pin.mjs（不重复实现）', /from '\.\.\/plugins\/dsh-web-search-switch\/lib\/pin\.mjs'/.test(cliSrc));
 const hostSrc = readFileSync(join(PACK, 'plugins', 'dsh-web-search-switch', 'lib', 'index.js'), 'utf8');
 check('面板 set 会顺手钉住 pin', /ensurePinnedToSwitch\(cctx\)/.test(hostSrc));
