@@ -44,14 +44,21 @@ import { existsSync, readFileSync, writeFileSync, copyFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import yaml from '/home/guava5tar_/dsh/node_modules/js-yaml/dist/js-yaml.mjs';
+import { loadYaml } from './lib/yaml.mjs';
+
+// js-yaml 走统一解析（以前写死绝对路径，换机器/换用户名就 ERR_MODULE_NOT_FOUND）。
+const yaml = await loadYaml();
 
 import {
   probeMany,
+  probeManyTools,
   loadCache,
   saveCache,
   cachedKind,
+  cachedTools,
   kindLabel,
+  toolLabel,
+  TOOL,
   KIND,
 } from './lib/probe.mjs';
 
@@ -95,6 +102,15 @@ const ok = (m) => console.log(`  \u2705 ${m}`);
 const bad = (m) => console.log(`  \u274c ${m}`);
 const info = (m) => console.log(`  \u2139\ufe0f  ${m}`);
 const warn = (m) => console.log(`  \u26a0\ufe0f  ${m}`);
+
+/**
+ * 工具能力标签 —— **由探测结果派生**，不写在策略表里。
+ *
+ * 一个"能聊但不能挂工具"的模型在 DSH 里是定时炸弹：Agent 每轮都带工具，
+ * 选中它就每轮 400。把结论写进 name 是为了在模型选择器里**一眼可见**
+ * （UI 只渲染 `model.name`）。
+ */
+export const TOOL_TAG = '无工具调用';
 
 // ── 版本号抽取与比较（"最新"的唯一可行判据）────────────────────────────────
 
@@ -439,7 +455,16 @@ async function main() {
   // 要剥掉的括号内容（用户不想在 name 里保留的归属标记）
   const stripList = policy.strip ?? [];
   // 识别"我们自己加过的后缀"，用于幂等替换
-  const ownTagRe = new RegExp(annotations.map((a) => a.tag).filter(Boolean).map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'));
+  //
+  // `TOOL_TAG` 必须一起并进来：它是**由探测结果动态派生**的标签（不是策略表里的
+  // 静态条目），如果不参与 ownTagRe，重复跑就剥不掉它 —— 最后会叠成
+  // "（无工具调用）（无工具调用）"。这是标签机制的通用陷阱。
+  const ownTagRe = new RegExp(
+    [...annotations.map((a) => a.tag), TOOL_TAG]
+      .filter(Boolean)
+      .map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      .join('|'),
+  );
   let annotated = 0;
   if (Object.keys(rules).length === 0) { bad('策略表里没有 providers'); process.exit(1); }
 
@@ -476,17 +501,58 @@ async function main() {
     defined.add('deepseek-account::deepseek-flash');
     defined.add('deepseek-account::deepseek-v4-pro');
     console.log(`检查 ${refs.size} 条被引用的路由：`);
+    // 引用完整性之外，这里还要回答一个更关键的问题：
+    // **"你现在正在用的这些模型，还能不能跑？"**
+    //
+    // 引用保护（🔒）的目的是"别把用户在用的删掉"，但它有个副作用：如果被引用的
+    // 模型已经下线/限流/在当前协议上不支持工具，保护机制会**把它焊死在配置里**，
+    // 用户每次开新会话都失败却不知道原因。所以这个只读检查要升级成体检：
+    //   · 悬空引用（没有定义）        → exit 2（配置错误，必须修）
+    //   · 被引用但探测为确凿不可用    → exit 3（"能定义但跑不了"，同样要修）
+    //   · 免费模型 / 不支持工具 / 慢  → 只告警（exit 0），但必须显式喊出来
+    const refCache = loadCache(PACK_DIR);
+    const refApi = new Map(); // provider → api（判断该协议能不能挂工具）
+    const piEntry = (Array.isArray(doc) ? doc : []).find((e) => e?.id === 'llm-pi-ai');
+    for (const [name, cfg] of Object.entries(piEntry?.config?.providers ?? {})) {
+      if (typeof cfg?.api === 'string') refApi.set(name, cfg.api);
+    }
+    const CONFIRMED_BAD = new Set([KIND.DEAD, KIND.NO_ACCESS, KIND.REGION, KIND.NO_FUNDS]);
+
     let dangling = 0;
+    let unusable = 0;
     for (const [key, by] of refs) {
-      const [prov] = key.split('::');
+      const [prov, model] = key.split('::');
       // 该 provider 若由独立条目提供（不在 llm-pi-ai 里），只要模型定义存在就算命中
       const hit = defined.has(key);
-      if (!hit) { dangling++; bad(`${key}  ← 被 ${by.join(', ')} 引用，但没有对应定义`); }
-      else ok(`${key}  ← ${by.join(', ')}`);
+      if (!hit) { dangling++; bad(`${key}  ← 被 ${by.join(', ')} 引用，但没有对应定义`); continue; }
+
+      const kind = cachedKind(refCache, prov, model);
+      const tools = cachedTools(refCache, prov, model);
+      const api = refApi.get(prov);
+      const problems = [];
+      if (kind && CONFIRMED_BAD.has(kind)) {
+        problems.push(`探测为「${kindLabel(kind)}」→ 选中它会直接失败`);
+      }
+      if (tools === TOOL.NO) {
+        problems.push(`当前路由（${api || '未知协议'}）**不支持工具调用** → Agent 每轮会 400`);
+      }
+      if (isFree(model)) {
+        problems.push('免费模型 → 可能随时下线/限流，不建议长期做默认或子代理主力');
+      }
+
+      if (problems.length === 0) {
+        ok(`${key}  ← ${by.join(', ')}`);
+      } else {
+        if (kind && CONFIRMED_BAD.has(kind)) unusable++;
+        warn(`${key}  ← ${by.join(', ')}`);
+        for (const p of problems) console.log(`       ⚠️ ${p}`);
+        console.log(`       ↳ 处理：在 设置 → 模型 里换成可用的模型，或改策略后重跑 --probe --write`);
+      }
     }
     console.log();
     if (dangling) { bad(`${dangling} 条悬空引用`); process.exit(2); }
-    ok('引用全部有定义');
+    if (unusable) { bad(`${unusable} 条被引用但**确认不可用**的模型（详见上面的 ⚠️）`); process.exit(3); }
+    ok('引用全部有定义且可用');
     return;
   }
 
@@ -500,6 +566,8 @@ async function main() {
   // `--probe` 刷新缓存；没给就用现有缓存（过期则退回"放宽"语义，见 solveProvider）。
   let probeCache = loadCache(PACK_DIR);
   if (PROBE) {
+    /** 探测结果（一次写缓存，两次探测共用同一个 results 表）。 */
+    const results = {};
     const targets = [];
     for (const p of providers) {
       const rule = rules[p.name];
@@ -522,12 +590,11 @@ async function main() {
       const apiKey = apiKeyEnv ? envFromBashrc(apiKeyEnv) : undefined;
       for (const id of ids) targets.push({ provider: p.name, baseURL, api, apiKey, model: id });
     }
+    const t0 = Date.now();
     if (targets.length === 0) {
       info('没有需要探测的免费模型（策略里没写 plus_free: usable）');
     } else {
       console.log(`\n探测 ${targets.length} 个免费模型（真的发一次 max_tokens:1 请求）…`);
-      const results = {};
-      const t0 = Date.now();
       const rows = await probeMany(targets, {
         concurrency: 4,
         onResult: (it, r) => {
@@ -536,12 +603,61 @@ async function main() {
         },
       });
       void rows;
-      const file = saveCache(PACK_DIR, results);
       const usable = Object.values(results).flatMap((m) => Object.values(m)).filter((r) => r.kind === KIND.USABLE).length;
-      ok(`探测完成：${usable}/${targets.length} 可用，用时 ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+      ok(`免费模型探测完成：${usable}/${targets.length} 可用，用时 ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+    }
+
+    // ── 工具能力探测 ────────────────────────────────────────────────────
+    //
+    // 对象是**会真正留在清单里的模型**：现有全部 + explicit 点名（免费候选里没通过
+    // 纯文本探测的就不必再浪费一次请求）。
+    //
+    // 为什么值得多花这些请求：DSH 每一轮都会带工具，一个"能聊但不能挂工具"的模型
+    // 一旦被选为主模型就是**每轮必 400**，而且报错看起来像网络问题，极难自查。
+    const toolTargets = [];
+    const seenTool = new Set();
+    for (const p of providers) {
+      const rule = rules[p.name];
+      if (!rule || (ONLY && p.name !== ONLY)) continue;
+      const api = field(p.body, 'api');
+      const baseURL = field(p.body, 'baseURL');
+      const apiKeyEnv = field(p.body, 'apiKeyEnv');
+      if (!baseURL || !api) continue;
+      const { models: existing } = parseModels(p.body);
+      const ids = new Set([...existing.map((m) => m.id), ...(rule.pick?.explicit ?? [])]);
+      const apiKey = apiKeyEnv ? envFromBashrc(apiKeyEnv) : undefined;
+      for (const id of ids) {
+        const key = `${p.name}::${id}`;
+        if (seenTool.has(key)) continue;
+        seenTool.add(key);
+        toolTargets.push({ provider: p.name, baseURL, api, apiKey, model: id });
+      }
+    }
+    if (process.env.DSH_PROBE_TOOLS === '0') {
+      info('工具能力探测已按 DSH_PROBE_TOOLS=0 跳过');
+    } else if (toolTargets.length === 0) {
+      info('没有需要探测工具能力的模型');
+    } else {
+      console.log(`\n探测 ${toolTargets.length} 个模型的工具调用能力（每模型一次带 tools 的请求）…`);
+      await probeManyTools(toolTargets, {
+        concurrency: 4,
+        onResult: (it, r) => {
+          const row = ((results[it.provider] ??= {})[it.model] ??= { kind: undefined, status: r.status, message: '', ms: r.ms });
+          row.tools = r.tools;
+          row.toolsStatus = r.status;
+          row.toolsMessage = r.message ? String(r.message).slice(0, 160) : '';
+          console.log(`  ${toolLabel(r.tools).padEnd(16)} ${it.provider.padEnd(22)} ${it.model}`);
+        },
+      });
+    }
+
+    if (Object.keys(results).length > 0) {
+      const file = saveCache(PACK_DIR, results);
       info(`缓存：${file}`);
       probeCache = loadCache(PACK_DIR);
     }
+    const flat = Object.values(results).flatMap((m) => Object.values(m));
+    if (flat.length > 0) ok(`探测总用时 ${((Date.now() - t0) / 1000).toFixed(1)}s（${flat.length} 条记录）`);
   } else if (probeCache?.fresh) {
     const n = Object.values(probeCache.results ?? {}).flatMap((m) => Object.values(m)).length;
     info(`使用探测缓存（${new Date(probeCache.at).toLocaleString()}，${n} 条记录；加 --probe 可刷新）`);
@@ -621,7 +737,25 @@ async function main() {
     console.log(`   意图：${rule.intent ?? '（未写）'}`);
     for (const n of notes) console.log(`     · ${n}`);
     if (keptByRef.length) {
-      for (const k of keptByRef) console.log(`     🔒 保留 \`${k.model}\`（被 ${k.by.join(', ')} 引用）`);
+      for (const k of keptByRef) {
+        console.log(`     🔒 保留 \`${k.model}\`（被 ${k.by.join(', ')} 引用）`);
+        // 保护机制不能变成"把坏配置焊死"。被引用的模型如果已被探测为不可用、
+        // 或者是不支持工具的协议组合，必须当场喊出来 —— 否则用户会一直带着一个
+        // 新会话必挂的默认模型而不知道为什么。
+        const kind = cachedKind(probeCache, p.name, k.model);
+        const tools = cachedTools(probeCache, p.name, k.model);
+        if (kind && kind !== KIND.USABLE && kind !== KIND.SLOW) {
+          warn(`⚠️ 被引用的 \`${k.model}\` 当前探测为「${kindLabel(kind)}」——` +
+            `保留它只是为了不删掉你正在用的配置；请尽快在 设置 → 模型 里换掉，否则新会话会失败`);
+        }
+        if (tools === TOOL.NO) {
+          warn(`⚠️ 被引用的 \`${k.model}\` 在当前路由上**不支持工具调用** —— ` +
+            `作为主模型会每轮 400；请换到支持工具的模型/路由`);
+        }
+        if (isFree(k.model)) {
+          warn(`⚠️ 被引用的 \`${k.model}\` 是免费模型（可能随时下线或限流）—— 不建议长期做默认模型`);
+        }
+      }
     }
     console.log(`   现有 ${existing.length} → 目标 ${targetIds.length}` +
       (toAdd.length ? `  +${toAdd.length}` : '') + (toRemove.length ? `  -${toRemove.length}` : ''));
@@ -634,8 +768,17 @@ async function main() {
     // `+0 -0` 直接 continue，一个标签都没打上。
     const orderedIds = [...targetIds];
     const annotateLog = [];
+    /**
+     * 该模型最终要打的标签。
+     *
+     * 优先级：策略表静态标注（人工判断）> 探测得出的「无工具调用」。
+     * 人工标注优先是有意的：像 `glyph-cluster` 那种"只推理不出正文"更致命，
+     * 已经说明它不能当常规模型，再叠一个"无工具调用"只是噪音。
+     */
+    const tagOf = (id) => tagFor(id, annotations, ownTagRe)
+      ?? (cachedTools(probeCache, p.name, id) === TOOL.NO ? TOOL_TAG : null);
     const newLines = orderedIds.flatMap((id) => {
-      const tag = tagFor(id, annotations, ownTagRe);
+      const tag = tagOf(id);
       const prev = existingById.get(id);
       if (prev) {
         // 已存在：只改 `name:` 那一行（人工的 contextWindow/efforts/compat 一字不动）。

@@ -86,13 +86,28 @@ providers:
       # 端点没列出点名的型号时：keep = 保留（可能被服务端别名）/ drop = 删掉
       on_missing: keep
 
-  # ── agentrouter ───────────────────────────────────────────────────────────
-  # 意图：最新的可用 ds + gpt-6.1-sol
+  # ── agentrouter（Anthropic 协议）──────────────────────────────────────────
+  # 只留 deepseek-v4-flash。
+  #
+  # ⚠️ 反例留档：`gpt-6.1-sol` **不能**放这条路由。AgentRouter 把 /v1/messages
+  # 翻成 OpenAI /v1/chat/completions，而该模型在这个端点上禁止 Function tools，
+  # DSH 每一轮带工具都会 400（"Function tools with reasoning_effort are not
+  # supported"）。它已迁到下面的 agentrouter-responses。
   agentrouter:
-    intent: 最新的可用 deepseek 与 gpt-6.1-sol
+    intent: 最新的可用 deepseek（仅 Anthropic 协议路由）
     pick:
       explicit:
         - deepseek-v4-flash
+      on_missing: keep
+
+  # ── agentrouter-responses（OpenAI Responses 协议）────────────────────────
+  # 放**必须走 /v1/responses 才有工具能力**的模型。已实测：同模型在
+  # /v1/chat/completions 上挂 tools 会被上游 400；在 /v1/responses 上返回
+  # 正常 function_call。
+  agentrouter-responses:
+    intent: 需要 Responses 协议才有工具能力的模型
+    pick:
+      explicit:
         - gpt-6.1-sol
       on_missing: keep
 

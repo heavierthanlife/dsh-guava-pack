@@ -23,32 +23,76 @@ basedir=$(cd "$(dirname "$0")" && pwd)
 #   host 插件（从 dsh-guava-pack 加载）、router、commandcode 桥接
 # 各自的相对路径不同，各读各的会让面板开关切换后不生效（真踩过）。这里统一指定。
 export DSH_ROUTER_MODE_FILE="${DSH_ROUTER_MODE_FILE:-$basedir/playground/themes/provider-router/mode.json}"
+# 目录不存在时 router 那边写不进去（面板开关会静默失效）—— 先建好。
+mkdir -p "$(dirname "$DSH_ROUTER_MODE_FILE")" 2>/dev/null || true
 
 # 桥接与路由代理**从 guava 包启动**（与 profile 加载插件的来源一致）。
 # 为什么不用工作区副本：两边会漂移 —— 曾经工作区的桥接落后 pack 两个修复，
 # 结果"代码修好了但跑的还是旧的"。工作区只当开发镜像，运行一律用 pack。
-GUAVA_PACK="${DSH_GUAVA_PACK:-$HOME/dsh-guava-pack}"
+#
+# ⚠️ pack 的位置**不能写死一个默认值**：它曾在另一台机器上被写成
+#    `$HOME/dsh-guava-pack`，而本机实际在 `$HOME/dsh/playground/themes/dsh-guava-pack`
+#    —— 路径不存在时 start.sh 只是被静默跳过，8317/8318 双双起不来，所有走路由
+#    代理的供应商都 ECONNREFUSED，而且看不到任何报错。所以这里按优先级探测，
+#    并且**找不到就大声说出来**（不阻塞 dsh 启动，但不能沉默）。
+find_guava_pack() {
+  for c in "${DSH_GUAVA_PACK:-}" \
+           "$basedir/playground/themes/dsh-guava-pack" \
+           "$HOME/dsh/playground/themes/dsh-guava-pack" \
+           "$HOME/dsh-guava-pack"; do
+    [ -n "$c" ] || continue
+    if [ -d "$c/services/commandcode-bridge" ] && [ -d "$c/plugins/provider-router" ]; then
+      printf '%s\n' "$c"
+      return 0
+    fi
+  done
+  return 1
+}
+GUAVA_PACK="$(find_guava_pack || true)"
+if [ -z "$GUAVA_PACK" ]; then
+  echo "[dsh] ⚠️ 找不到 dsh-guava-pack（试过 DSH_GUAVA_PACK、$basedir/playground/themes/...、" \
+       "\$HOME/dsh-guava-pack）—— 桥接与路由代理不会自动启动。" >&2
+  echo "[dsh]    请设 DSH_GUAVA_PACK=/path/to/dsh-guava-pack 后重试。" >&2
+else
+  export DSH_GUAVA_PACK="$GUAVA_PACK"
+fi
 
 # 从 DSH 凭证库（<DSH_HOME>/.credentials.yaml 的 refs 段）导出 provider key。
 # 为什么需要：DSH 自己会解析凭证库，所以 LLM 请求没问题；但**桥接和定时任务是独立
 # 进程**，只读环境变量 —— 用户把 key 填在凭证库而没写 .bashrc 时，桥接会报
 # "COMMANDCODE_API_KEY 未设置"。这里统一导出，两处都能用，也免得 key 存两份。
-if [ -f "$GUAVA_PACK/tools/export-provider-keys.mjs" ] && command -v node >/dev/null 2>&1; then
+if [ -n "$GUAVA_PACK" ] && [ -f "$GUAVA_PACK/tools/export-provider-keys.mjs" ] && command -v node >/dev/null 2>&1; then
   eval "$(node "$GUAVA_PACK/tools/export-provider-keys.mjs" 2>/dev/null)"
+fi
+
+# node_modules 补丁**自愈**。
+#
+# 为什么放在启动器里：那两个补丁是就地改 DSH 的 node_modules，一次 `pnpm install`
+# 就会被原包覆盖掉；覆盖后 agentrouter 的工具格式立刻 400，而报错完全看不出原因。
+# `install.mjs --patch` 是幂等的（已打就 no-op），成本只有几十毫秒，所以每次启动
+# 顺手续一遍最省心。失败不阻塞启动，只写日志 + 提示。
+if [ -n "$GUAVA_PACK" ] && [ -f "$GUAVA_PACK/install.mjs" ] && command -v node >/dev/null 2>&1; then
+  mkdir -p "$DSH_HOME/logs" 2>/dev/null || true
+  if ! node "$GUAVA_PACK/install.mjs" --patch >>"$DSH_HOME/logs/patches.log" 2>&1; then
+    echo "[dsh] ⚠️ node_modules 补丁未全部应用，agentrouter 可能报 400。" \
+         "详见 $DSH_HOME/logs/patches.log（手动跑：node $GUAVA_PACK/install.mjs --patch）" >&2
+  fi
 fi
 
 # 自动拉起 commandcode 桥接：Go $1/月 套餐不含官方 /provider/v1 的 API 访问权，
 # 桥接改走 CLI 自己的 /alpha/generate。幂等（已在跑则秒退），失败不影响 dsh。
-BRIDGE_START="$GUAVA_PACK/services/commandcode-bridge/start.sh"
-if [ -x "$BRIDGE_START" ]; then
-  "$BRIDGE_START" >/dev/null 2>&1 || true
-fi
-# 自动拉起 provider-router 本地路由代理：按 mode.json 把「翻墙」供应商的请求
-# 经 SSR 送出、国内供应商直连。opencode-go / agentrouter 的 baseURL 已指向
-# 127.0.0.1:8318，所以它必须在 dsh 之前就绪。幂等，失败不影响 dsh。
-ROUTER_START="$GUAVA_PACK/plugins/provider-router/start.sh"
-if [ -x "$ROUTER_START" ]; then
-  "$ROUTER_START" >/dev/null 2>&1 || true
+if [ -n "$GUAVA_PACK" ]; then
+  BRIDGE_START="$GUAVA_PACK/services/commandcode-bridge/start.sh"
+  if [ -x "$BRIDGE_START" ]; then
+    "$BRIDGE_START" >/dev/null 2>&1 || true
+  fi
+  # 自动拉起 provider-router 本地路由代理：按 mode.json 把「翻墙」供应商的请求
+  # 经 SSR 送出、国内供应商直连。opencode-go / agentrouter 的 baseURL 已指向
+  # 127.0.0.1:8318，所以它必须在 dsh 之前就绪。幂等，失败不影响 dsh。
+  ROUTER_START="$GUAVA_PACK/plugins/provider-router/start.sh"
+  if [ -x "$ROUTER_START" ]; then
+    "$ROUTER_START" >/dev/null 2>&1 || true
+  fi
 fi
 # 手机/平板经 tailscale serve 访问时 Host 是 MagicDNS 名字，而 /api 的浏览器信任
 # 围栏（防 DNS rebinding）默认只信 loopback 与 IP 字面量 —— 主机名必须显式放行，

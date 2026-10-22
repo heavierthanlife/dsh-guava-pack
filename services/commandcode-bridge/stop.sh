@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # 停止 commandcode-bridge
 set -uo pipefail
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# $0 而不是 BASH_SOURCE：被 `sh start.sh` 调用时 bash 专属变量会直接
+# "Bad substitution" 退出（systemd / 别的 shell 里踩过）。
+HERE="$(cd "$(dirname "$0")" && pwd)"
 PIDFILE="$HERE/bridge.pid"
 
 if [ -f "$PIDFILE" ]; then

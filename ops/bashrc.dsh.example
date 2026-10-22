@@ -9,7 +9,32 @@ case ":$PATH:" in
   *) export PATH="$PNPM_HOME/bin:$PATH" ;;
 esac
 
-# ── LLM provider keys（dsh 启动器会 grep '^export [A-Z_]+_API_KEY=' 载入）──
+# ── guava pack 位置（可选）───────────────────────────────────────────────
+# 启动器会依次探测 $DSH_GUAVA_PACK / $DSH_HOME/playground/themes/dsh-guava-pack /
+# $HOME/dsh-guava-pack。只有装在别处时才需要显式指定 —— 显式写死一个不存在的
+# 路径是**最坑的一类故障**：桥接与路由代理会被静默跳过，所有经 8318 的供应商
+# 直接 ECONNREFUSED，而日志里什么都没有。
+# export DSH_GUAVA_PACK="$HOME/dsh/playground/themes/dsh-guava-pack"
+
+# ── SSR 出口（**端口每台机器都可能不同**，必须按机器写）──────────────────
+# 启动器 / router start.sh / 桥接都会读这一条。不写就默认 2080。
+# 踩过的坑：一台机器是 2080、另一台是 2099；写成默认值时那台机器所有 SSR
+# 请求 ECONNREFUSED，但只有"翻墙"的那几家供应商挂，看起来像上游坏了。
+# export DSH_SSR_PROXY="http://127.0.0.1:2080"
+
+# ── 上游响应头超时（毫秒）───────────────────────────────────────────────
+# 默认 60000。上游卡住时，这个值决定 UI 要傻等多久；DSH 还会自己重试，
+# 所以 120000（旧默认）叠加重试能挂将近 4 分钟。正常模型首字节 0.4–3.5s。
+# export DSH_ROUTER_HEADER_TIMEOUT_MS=60000
+
+# ── 排障开关（默认关，别常开）───────────────────────────────────────────
+# DSH_ROUTER_CAPTURE=1 会把提示词明文抓包落盘，只在排查 provider 协议问题时开。
+# export DSH_ROUTER_CAPTURE=1
+
+# ── LLM provider keys ───────────────────────────────────────────────────
+# dsh 启动器会载入 `^export [A-Z_]+_API_KEY=` 与 `^export DSH_` 两类；
+# router/桥接/定时任务的 start.sh 也会各自再 grep 一遍（非交互 shell 不读 .bashrc）。
+# 也可以不写这里，改填进 DSH 凭证库（设置 → 模型），由 tools/export-provider-keys.mjs 导出。
 export MIMO_API_KEY=
 export XIAOMI_TOKEN_PLAN_CN_API_KEY=
 export DEEPSEEK_API_KEY=

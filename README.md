@@ -189,25 +189,37 @@ antigravity 的 `gemini-3.5-flash` 调用后直接返回文字
 
 ```sh
 node tools/sync-model-policy.mjs                 # 预览 diff（默认，不写盘）
-node tools/sync-model-policy.mjs --probe         # 预览 + **真调一遍**免费模型判断可用性
+node tools/sync-model-policy.mjs --probe         # 预览 + **真调**（可用性 + 工具能力）
 node tools/sync-model-policy.mjs --write         # 落盘（自动备份）
-node tools/sync-model-policy.mjs --probe --write # 推荐的完整姿势：先验可用性再落盘
+node tools/sync-model-policy.mjs --probe --write # 推荐的完整姿势：先验再落盘
 node tools/sync-model-policy.mjs --only xiaomi-token-plan-cn
-node tools/sync-model-policy.mjs --check-refs    # 只查引用完整性，exit 2 = 有悬空
+node tools/sync-model-policy.mjs --check-refs    # 引用体检
+#   exit 0 好 · 2 悬空引用 · 3 被引用但确认不可用
 ```
 
 意图写在 **`config/model-policy.yml`**（人话 + 可判定规则），改它就能改行为。
 
-**每天自动跑一次**（09:30），加一行 crontab 即可：
+**每天自动跑一次**（09:30），用 systemd user timer（本仓库已带单元文件）：
 
 ```sh
-crontab -e
-# 每天 09:30 按策略收敛；日志留一份好回看
-30 9 * * * cd $HOME/dsh/playground/themes/dsh-guava-pack && /usr/bin/node tools/sync-model-policy.mjs --probe --write >> $HOME/dsh/logs/model-policy.log 2>&1
+cp ops/model-policy.service ops/model-policy.timer ~/.config/systemd/user/
+mkdir -p ~/.config/systemd/user/timers.target.wants
+ln -sf ../model-policy.timer ~/.config/systemd/user/timers.target.wants/model-policy.timer
+systemctl --user daemon-reload
+systemctl --user start model-policy.timer
 ```
 
-用 cron 而不是插件内置定时器，是因为**不依赖 DSH 是否开着**，也更好调试。
-手动触发就再跑一次同样的命令。
+**必须走 `tools/run-model-policy.sh`，不能直接 `node tools/sync-model-policy.mjs`。**
+systemd 既不读 `~/.bashrc`（拿不到每台机器不同的 `DSH_SSR_PROXY`），也不能 `eval`
+（拿不到 DSH 凭证库里的 provider key）。缺任一项任务都不会报错，但会**静默**把一批
+模型探测成 401 并"保守保留"——非常隐蔽。这个壳脚本负责把两样都补齐。
+
+用系统定时器而不是插件内置定时器，是因为**不依赖 DSH 是否开着**，也更好调试。
+手动触发：
+
+```sh
+sh tools/run-model-policy.sh --probe --write
+```
 
 #### ⚠️ 三条必须先知道的事实（实测）
 
@@ -334,11 +346,82 @@ services/commandcode-bridge/start.sh
 **不装也行的部分是安全的**：`provider-router` 没启动时，只有那些把 baseURL 指向它的供应商会失败；
 其余供应商不受影响。所以云端可以先只装不启用。
 
+## 一条命令体检（出问题先跑它）
+
+```sh
+node tools/preflight.mjs          # 只读，不改任何东西
+node tools/preflight.mjs --json   # 给别的脚本用
+```
+
+它逐条断言这套东西的**全部前提**，失败时直接给出下一步该敲什么：
+
+| 检查 | 为什么值得单列 |
+|---|---|
+| Node / `DSH_HOME` | 版本太旧或家目录指错时，一切看起来都像"模型坏了" |
+| pack 位置 | 曾把默认值写成 `$HOME/dsh-guava-pack`（实际在 `$DSH_HOME/playground/themes/...`）→ 桥接与路由代理被**静默跳过**，8317/8318 双双起不来 |
+| `node_modules` 补丁 | 一次 `pnpm install` 就把 Anthropic 工具补丁冲掉，之后 agentrouter 立刻 400，报错完全看不出原因 |
+| 8318 / 8317 / 3080 | 三进程互相独立，挂哪个现象都不一样 |
+| `mode.json` 可写 | 不可写时面板开关"点了没反应"，没有任何提示 |
+| provider key 可得性 | 只报"有没有"，绝不打印值。缺 key 时探测全是 401，免费模型会被"保守保留"成噪音 |
+| 被引用模型的可用性 | 默认/子代理引用的模型若已下线或该协议不支持工具，**新会话每轮必失败** |
+
+退出码：`0` 全通；`1` 有致命问题；`2` 只有告警。
+
+## 改了服务代码怎么让它真的生效
+
+两个 `start.sh` 默认是**幂等**的（活着且健康就退出）。这在启动器里正确，但会造成一个
+几乎无法自察的坑：**代码改了、进程还是旧的，健康检查却全绿**。
+
+```sh
+sh plugins/provider-router/start.sh --force      # 按 pidfile / 监听端口收掉老进程再起
+sh services/commandcode-bridge/start.sh --force
+
+curl -s http://127.0.0.1:8318/health ; curl -s http://127.0.0.1:8317/health
+```
+
+## 模型能力 ↔ 协议：一个模型可能只认某条路由
+
+DSH 是 Agent，**每一轮都会把工具清单塞进请求**。而"能聊"和"能挂工具"是两件事：
+
+- `agentrouter`（`api: anthropic-messages`）：适配层会把请求翻成 OpenAI
+  `/v1/chat/completions`。`gpt-6.1-sol` 在这个端点上**禁止 Function tools**
+  （400 `Function tools with reasoning_effort are not supported`）。
+- `agentrouter-responses`（`api: openai-responses`）：同一个模型走 `/v1/responses`，
+  工具调用完全正常（实测返回 `function_call`）。
+
+所以 `gpt-6.1-sol` 放在后者。**加新模型时先确认它支持哪种协议**：
+
+```sh
+node tools/sync-model-policy.mjs --probe     # 会额外探测一次"带 tools 的请求"
+```
+
+探测结果是三态：`ok` / `no` / `unknown`。
+- `no` → 自动在模型名后打上 **（无工具调用）**，在模型选择器里一眼可见；
+- `unknown` → 不下结论（模型只是"没听话"而已，不能冤枉它）。
+
+`--check-refs` 会把"被引用但不可用 / 不支持工具 / 是免费模型"全部列出来，
+并用 `exit 3` 与"悬空引用"的 `exit 2` 区分开。
+
+## 超时：为什么默认是 60 秒
+
+`DSH_ROUTER_HEADER_TIMEOUT_MS` 默认 **60000**（旧默认 120000）。上游卡住时这个值
+决定 UI 傻等多久；DSH 自己还会重试，所以 120s 叠加重试能挂近 **4 分钟**，除了强刷
+页面没有出路。正常模型首字节 0.4–3.5s，60s 已经非常宽松；跑超大上下文首包时再调大。
+
+## 可移植性：不要写死家目录路径
+
+`tools/lib/yaml.mjs` 统一解析 `js-yaml`（DSH 自带依赖），按
+`裸解析 → $DSH_HOME/node_modules → $HOME/dsh/node_modules → createRequire` 四级回落。
+以前两个工具把 `/home/<user>/dsh/node_modules/js-yaml/...` 写死在 `import` 里 ——
+换用户名、或从 systemd/cron 跑就直接 `ERR_MODULE_NOT_FOUND`，而且只在无人值守时才炸。
+自检里有一条规则专门守这个（不认注释里的示例路径）。
+
 ## 验证装好了没
 
 ```sh
 dsh --profile web --dump-config | grep -nE "dsh-guava-pack|mobile-ui|provider-router"
 node install.mjs --check
+node tools/preflight.mjs
 ```
 
 浏览器里应看到设置页多出 **5 项**：「移动端显示 / 主题管理 / 供应商路由 / 连接信息 / **代码配色**」，

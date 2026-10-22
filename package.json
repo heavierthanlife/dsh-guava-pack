@@ -34,6 +34,11 @@
   },
   "scripts": {
     "check": "node install.mjs --check",
+    "preflight": "node tools/preflight.mjs",
+    "test": "node tools/tests/model-policy.mjs",
+    "model-policy": "node tools/sync-model-policy.mjs",
+    "model-policy:probe": "node tools/sync-model-policy.mjs --probe",
+    "model-policy:check": "node tools/sync-model-policy.mjs --check-refs",
     "sync-models": "node tools/sync-models.mjs",
     "sync-models:write": "node tools/sync-models.mjs --write"
   },

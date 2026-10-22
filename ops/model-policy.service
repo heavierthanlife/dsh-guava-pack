@@ -7,6 +7,13 @@ After=network-online.target
 Type=oneshot
 # `%h` 是 systemd 的用户家目录说明符
 WorkingDirectory=%h/dsh/playground/themes/dsh-guava-pack
-ExecStart=/usr/bin/node tools/sync-model-policy.mjs --probe --write
+# ⚠️ 必须走 tools/run-model-policy.sh 这个壳，不能直接 `node tools/sync-model-policy.mjs`：
+#   · systemd 不读 ~/.bashrc → 拿不到每台机器的 DSH_SSR_PROXY（端口各机不同）
+#   · systemd 不能 eval   → 拿不到 DSH 凭证库里的 provider key
+# 两者缺一时任务不会报错，但会静默把一批模型探测成 401 / 走错出口。
+ExecStart=/bin/sh tools/run-model-policy.sh --probe --write
+# 任务本身是"探测 + 收窄清单"，失败时不要让 systemd 反复重启（oneshot 本来也不会），
+# 但要把退出码留在日志里便于排查。
+SuccessExitStatus=0 2 3
 StandardOutput=append:%h/dsh/logs/model-policy.log
 StandardError=append:%h/dsh/logs/model-policy.log

@@ -18,7 +18,7 @@
  *   DSH_ROUTER_PROVIDERS                上游表覆盖文件（默认 <插件目录>/providers.json）
  *   DSH_SSR_PROXY / SSR_PROXY           SSR 代理（默认 http://127.0.0.1:2080）
  *   DSH_ROUTER_CAPTURE=1                排障抓包（默认关，产物含提示词明文）
- *   DSH_ROUTER_HEADER_TIMEOUT_MS        等上游响应头的上限（默认 120000）
+ *   DSH_ROUTER_HEADER_TIMEOUT_MS        等上游响应头的上限（默认 60000）
  *   DSH_ROUTER_MAX_BODY_BYTES           请求体上限（默认 64MiB，超了 413）
  *
  * Security boundary: only opens 127.0.0.1 by default, never touches the system
@@ -64,8 +64,16 @@ function getSsrAgent() {
  * 为什么需要：`CONNECT_TIMEOUT_MS` 只管 SSR 的 CONNECT 握手那一跳。上游接受了 TCP
  * 却永不回包时，请求会永久挂起，只能靠 DSH 自己的 LLM 超时脱身。用"响应头超时"而不是
  * 整体超时，是因为长流式输出（SSE）本来就可能持续很久，不该被总时长掐断。
+ *
+ * ## 为什么默认值从 120s 收紧到 60s
+ *
+ * 实测教训：上游卡住时，用户看到的是 UI **整整两分钟毫无反应**，紧接着 DSH 自己
+ * 又重试若干次 —— 单轮能挂将近 4 分钟，除了强刷页面没有别的出路。而正常模型的
+ * 首字节都在 0.4–3.5s，60s 已经是极度宽松的"上游没救了"判据。
+ *
+ * 需要更长（例如跑超大上下文的首包）时用 `DSH_ROUTER_HEADER_TIMEOUT_MS` 覆盖。
  */
-const HEADER_TIMEOUT_MS = Number(process.env.DSH_ROUTER_HEADER_TIMEOUT_MS || 120000);
+const HEADER_TIMEOUT_MS = Number(process.env.DSH_ROUTER_HEADER_TIMEOUT_MS || 60000);
 /** 请求体上限：超过就 413 并断开，避免超大 POST 把内存打爆（chunks + concat 是双份）。 */
 const MAX_BODY_BYTES = Number(process.env.DSH_ROUTER_MAX_BODY_BYTES || 64 * 1024 * 1024);
 

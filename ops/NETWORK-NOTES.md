@@ -10,6 +10,13 @@
 dsh ──▶ provider-router:8318 ──▶ SSR(127.0.0.1:2080) ──▶ 海外供应商
 ```
 
+> ⚠️ **SSR 端口每台机器都可能不同**（本机 2080，另一台 2099）。写死默认值的那台机器
+> 会表现为"只有走 SSR 的供应商全挂"。用 `~/.bashrc` 里的 `DSH_SSR_PROXY` 显式指定，
+> 启动器 / router `start.sh` / 桥接都会读它。`node tools/preflight.mjs` 会检查这一点。
+>
+> 另：`provider-router` 等上游响应头的上限默认已从 120s 收紧到 **60s**
+> （`DSH_ROUTER_HEADER_TIMEOUT_MS`）。上游卡住时 UI 不会再傻等两分钟。
+
 **SSR 完全不参与"手机 → 主机"这一跳。** 所以"套了代理所以手机卡"这个直觉是错的 ——
 除非代理把 **Tailscale 自己的流量**也吸走了（下面就是这个坑）。
 

@@ -75,7 +75,16 @@ const REQUIRED = [
   'tools/sync-models.mjs',
   'tools/sync-model-policy.mjs',
   'tools/lib/model-config.mjs',
+  'tools/lib/probe.mjs',
+  // js-yaml 的统一解析层：以前两个工具把 `/home/<user>/dsh/node_modules/...`
+  // 写死在 import 里，换机器/换用户名就直接 ERR_MODULE_NOT_FOUND。
+  'tools/lib/yaml.mjs',
   'tools/tests/model-policy.mjs',
+  // 一条命令体检（补丁 / pack 位置 / 端口 / mode.json / key / 模型引用）
+  'tools/preflight.mjs',
+  // 定时任务入口：补 provider key 与每台机器的 DSH_* 环境
+  'tools/run-model-policy.sh',
+  'tools/export-provider-keys.mjs',
   'config/model-policy.yml',
   'patches/apply-required-array.sh',
   'patches/apply-anthropic-tool-fixes.sh',
@@ -109,7 +118,12 @@ const MIN_BYTES = {
   'tools/sync-models.mjs': 1000,
   'tools/sync-model-policy.mjs': 3000,
   'tools/lib/model-config.mjs': 3000,
+  'tools/lib/probe.mjs': 3000,
+  'tools/lib/yaml.mjs': 500,
   'tools/tests/model-policy.mjs': 2000,
+  'tools/preflight.mjs': 2000,
+  'tools/run-model-policy.sh': 300,
+  'tools/export-provider-keys.mjs': 500,
   'config/model-policy.yml': 1000,
   'patches/apply-required-array.sh': 300,
   'patches/apply-anthropic-tool-fixes.sh': 500,

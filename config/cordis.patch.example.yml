@@ -164,6 +164,16 @@
               low: low
               medium: medium
               high: high
+      # ── AgentRouter · Responses API（走工具能力必须用这条路由）──────────
+      # 为什么单独开一家：AgentRouter 的 Anthropic 适配层会把 /v1/messages 翻成
+      # OpenAI /v1/chat/completions，而 gpt-6.1-sol 在该端点上**禁止 Function
+      # tools**（上游硬限制）。同一个模型走 /v1/responses 则完全支持工具调用。
+      agentrouter-responses:
+        apiKeyEnv: AGENTROUTER_API_KEY
+        displayName: AgentRouter (Responses API · 支持工具)
+        api: openai-responses
+        baseURL: http://127.0.0.1:8318/agentrouter/v1
+        models:
           - id: gpt-6.1-sol
             name: GPT 6.1 Sol
             contextWindow: 1050000

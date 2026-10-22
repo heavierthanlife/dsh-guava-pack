@@ -128,6 +128,191 @@ function callUrl(baseURL, api) {
   return `${base}/chat/completions`;
 }
 
+// ── 工具（function calling）能力探测 ──────────────────────────────────────
+//
+// ## 为什么必须单独探一次
+//
+// "能聊"和"能挂工具"是两件事，而 DSH 是 **Agent**：每一轮都会把工具清单塞进
+// 请求。实测踩过的坑：AgentRouter 的 Anthropic 适配层把 /v1/messages 翻成
+// OpenAI /v1/chat/completions，而 `gpt-6.1-sol` 在那个端点上**禁止 Function
+// tools**（400 "Function tools with reasoning_effort are not supported"），
+// 同一个模型走 /v1/responses 却完全正常。只看纯文本探测会把它判成 ✅ 可用，
+// 用户一选就当主模型，每轮必炸。
+//
+// 所以：纯文本探测通过后，再发一次**带工具的最小请求**，只有真的回了一个
+// 工具调用才算支持。判不了（网络/未知错误）记 `unknown`，绝不冤枉模型。
+
+/** 工具探测结果三态。`unknown` 表示"没测出来"，不应据此打标签。 */
+export const TOOL = { OK: 'ok', NO: 'no', UNKNOWN: 'unknown' };
+
+const TOOL_LABEL = { ok: '✅ 支持工具', no: '❌ 不支持工具', unknown: '❓ 工具未知' };
+export const toolLabel = (t) => TOOL_LABEL[t] ?? t;
+
+/** 探测用工具定义（三协议共用同一份语义，只是包装不同）。 */
+export const PROBE_TOOL = {
+  name: 'probe_echo',
+  description: 'Echo the given text back. Always call this when the user asks you to echo.',
+  parameters: {
+    type: 'object',
+    properties: { text: { type: 'string', description: 'The text to echo back.' } },
+    required: ['text'],
+    additionalProperties: false,
+  },
+};
+
+const PROBE_TOOL_PROMPT = 'Call the probe_echo tool with text "ping". Do not answer in prose.';
+
+function toolUrl(baseURL, api) {
+  const base = baseURL.replace(/\/+$/, '');
+  if (api === 'anthropic-messages') return `${base}/v1/messages`;
+  if (api === 'openai-responses') return `${base}/responses`;
+  return `${base}/chat/completions`;
+}
+
+/** 把三协议的工具定义包装成各自的上游形状。 */
+function toolPayload(api) {
+  const p = PROBE_TOOL;
+  // ⚠️ 不要传 tool_choice：实测 Anthropic 侧一旦开思考模式就报
+  //   "Thinking mode does not support this tool_choice"
+  // 而真实使用里 DSH 默认也不带 tool_choice。探测必须**贴近真实请求**，
+  // 否则会把能用的模型误判成不支持（真踩过）。
+  if (api === 'anthropic-messages') {
+    return {
+      tools: [{ name: p.name, description: p.description, input_schema: p.parameters }],
+    };
+  }
+  if (api === 'openai-responses') {
+    return {
+      tools: [{ type: 'function', name: p.name, description: p.description, parameters: p.parameters }],
+    };
+  }
+  return {
+    tools: [{ type: 'function', function: { name: p.name, description: p.description, parameters: p.parameters } }],
+  };
+}
+
+/** 解析响应里有没有工具调用；返回 { detected, sawText }。 */
+export function detectToolCall(text, api) {
+  let detected = false;
+  let sawText = false;
+  const visit = (obj) => {
+    if (!obj || typeof obj !== 'object') return;
+    // openai-completions：非流式 message.tool_calls / 流式 delta.tool_calls
+    for (const ch of obj.choices ?? []) {
+      const d = ch?.delta ?? ch?.message ?? {};
+      if (Array.isArray(d.tool_calls) && d.tool_calls.length > 0) detected = true;
+      if (typeof d.content === 'string' && d.content.length > 0) sawText = true;
+    }
+    // anthropic-messages：完整 message 的 tool_use / 流式 content_block_start
+    for (const blk of obj.content ?? []) {
+      if (blk?.type === 'tool_use') detected = true;
+      if (blk?.type === 'text' && typeof blk.text === 'string' && blk.text.length > 0) sawText = true;
+    }
+    if (obj?.type === 'content_block_start' && obj?.content_block?.type === 'tool_use') detected = true;
+    if (obj?.type === 'content_block_delta' && typeof obj?.delta?.text === 'string' && obj.delta.text.length > 0) sawText = true;
+    // openai-responses：output[] 里的 function_call
+    for (const item of obj.output ?? []) {
+      if (item?.type === 'function_call' || item?.type === 'custom_tool_call') detected = true;
+      if (item?.type === 'message') {
+        for (const c of item.content ?? []) {
+          if (c?.type === 'output_text' && typeof c.text === 'string' && c.text.length > 0) sawText = true;
+        }
+      }
+    }
+  };
+  for (const line of text.split('\n')) {
+    const raw = line.startsWith('data:') ? line.slice(5).trim() : line.trim();
+    if (!raw || raw === '[DONE]') continue;
+    try { visit(JSON.parse(raw)); } catch { /* 非 JSON 行忽略 */ }
+  }
+  if (!detected) { try { visit(JSON.parse(text)); } catch { /* ignore */ } }
+  return { detected, sawText };
+}
+
+/**
+ * 判断失败是不是"这个模型/这条协议明确不支持工具"。
+ * 只认措辞明确的；其余一律 unknown（宁可漏标，不可错标）。
+ */
+export function classifyToolFailure(status, message) {
+  const m = String(message || '').toLowerCase();
+  if (/function tools? (with reasoning_effort )?(are|is) not supported/.test(m)) return TOOL.NO;
+  if (/does not support (tools|function|tool use)/.test(m)) return TOOL.NO;
+  if (/tools? (are|is) not supported/.test(m)) return TOOL.NO;
+  if (/tool use is not supported/.test(m)) return TOOL.NO;
+  if (/use \/v1\/responses instead/.test(m)) return TOOL.NO;
+  if (/invalid.*(tools|tool_choice)/.test(m)) return TOOL.NO;
+  if (/unsupported.*(tools|tool_choice)/.test(m)) return TOOL.NO;
+  if (status === 400 && /tool/.test(m)) return TOOL.NO;
+  return TOOL.UNKNOWN;
+}
+
+/**
+ * 探测一个模型**能不能挂工具**。
+ *
+ * 返回 `{ tools: 'ok'|'no'|'unknown', status, message, ms }`。
+ * - `ok`：真的回了一个工具调用（不是"文本里提到工具"）。
+ * - `no`：上游明确说这条协议不支持工具。
+ * - `unknown`：网络/未知错误/既没工具也没正文 —— 不下结论。
+ */
+export async function probeToolUse({ baseURL, api, apiKey, model, provider, timeoutMs = SLOW_MS + 10000 }) {
+  const headers = { 'content-type': 'application/json', accept: 'application/json' };
+  if (apiKey) {
+    headers.authorization = `Bearer ${apiKey}`;
+    headers['x-api-key'] = apiKey;
+  }
+  if (api === 'anthropic-messages') headers['anthropic-version'] = '2023-06-01';
+  if (provider && /opencode/.test(provider)) {
+    headers['x-opencode-session'] = globalThis.crypto?.randomUUID?.() ?? String(Date.now());
+  }
+  // 推理模型会先花思考 token，给太小会"只思考不调工具" → 误判成不支持。
+  //
+  // 两种协议的请求体**结构不同**（真踩过）：
+  //   openai-completions / anthropic-messages → { messages: […] }
+  //   openai-responses                        → { input: … }（传 messages 会 500 "input is required"）
+  const body = api === 'openai-responses'
+    ? {
+        model,
+        input: PROBE_TOOL_PROMPT,
+        max_output_tokens: 512,
+        store: false,
+        ...toolPayload(api),
+      }
+    : {
+        model,
+        max_tokens: api === 'anthropic-messages' ? 1024 : 512,
+        messages: [{ role: 'user', content: PROBE_TOOL_PROMPT }],
+        ...toolPayload(api),
+      };
+
+  const started = Date.now();
+  let status = 0;
+  let text = '';
+  try {
+    const res = await fetch(toolUrl(baseURL, api), {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    status = res.status;
+    text = await res.text();
+  } catch (err) {
+    const msg = String(err?.message ?? err);
+    return { tools: TOOL.UNKNOWN, status: 0, message: `请求失败: ${msg.slice(0, 120)}`, ms: Date.now() - started };
+  }
+
+  const { isError, message } = extractMessage(text);
+  const ms = Date.now() - started;
+  if (isError) {
+    return { tools: classifyToolFailure(status, message), status, message: String(message).slice(0, 160), ms };
+  }
+  const { detected } = detectToolCall(text, api);
+  if (detected) return { tools: TOOL.OK, status, message: '', ms };
+  // 没有错误、也没有工具调用：可能是模型"没听话"而不是不支持 → 不下结论。
+  return { tools: TOOL.UNKNOWN, status, message: '响应里没有工具调用（模型未使用工具，不能据此判断不支持）', ms };
+}
+
+
 /**
  * 探测一个模型。
  *
@@ -320,6 +505,12 @@ export function cachedKind(cache, provider, model) {
   return cache.results?.[provider]?.[model]?.kind;
 }
 
+/** 读缓存里的工具能力：`'ok' | 'no' | 'unknown'`；没探过返回 `undefined`。 */
+export function cachedTools(cache, provider, model) {
+  if (!cache?.fresh) return undefined;
+  return cache.results?.[provider]?.[model]?.tools;
+}
+
 /**
  * 并发探测一批模型（默认 4 并发 —— 再高容易被上游当风控）。
  */
@@ -331,6 +522,23 @@ export async function probeMany(items, { concurrency = 4, onResult } = {}) {
       const idx = i++;
       const it = items[idx];
       const r = await probeModel(it);
+      out[idx] = r;
+      onResult?.(it, r);
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
+/** 并发探测一批模型的**工具能力**（同一套并发策略）。 */
+export async function probeManyTools(items, { concurrency = 4, onResult } = {}) {
+  const out = [];
+  let i = 0;
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (i < items.length) {
+      const idx = i++;
+      const it = items[idx];
+      const r = await probeToolUse(it);
       out[idx] = r;
       onResult?.(it, r);
     }

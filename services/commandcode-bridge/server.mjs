@@ -32,15 +32,21 @@ const MODELS = `${UPSTREAM}/provider/v1/models`;
 //   direct → 直连上游（实测 0.81s，当前最优）
 //   ssr    → 经 ShadowsocksR(127.0.0.1:2080) 出去（上游变慢/被墙时可切）
 //
-// 路径按布局自动找：源码布局是 themes/{commandcode-bridge,provider-router} 平级；
-// pack 布局是 services/commandcode-bridge + plugins/provider-router。
-// README 一直承诺"会自动在源码布局与打包布局之间找到该文件"，而以前代码里没有任何
-// fallback —— pack 布局下 MODE_FILE 不存在，异常被 catch 吞掉后**静默永远直连**，
-// 于是 direct/ssr 开关对桥接完全失效。
+// 路径按布局自动找，**四种真实布局都要覆盖**（以前只覆盖前两种，于是 pack 布局
+// 下 MODE_FILE 永远不存在，异常被 catch 吞掉后**静默永远直连** —— direct/ssr
+// 开关对桥接完全失效，而且没有任何日志能看出来）：
+//   1. 源码布局   themes/{commandcode-bridge,provider-router}      → ../provider-router
+//   2. pack 布局  dsh-guava-pack/services/commandcode-bridge
+//                  + dsh-guava-pack/plugins/provider-router        → ../../plugins/provider-router
+//   3. 混合布局   pack/services/... + themes/provider-router       → ../../../provider-router
+//   4. 工作区     themes/commandcode-bridge + pack/plugins/...     → ../dsh-guava-pack/plugins/provider-router
+// 另外永远优先用启动器导出的 `DSH_ROUTER_MODE_FILE`（三方共用的那份）。
 const MODE_FILE_CANDIDATES = [
   process.env.DSH_ROUTER_MODE_FILE,
   join(HERE, "..", "provider-router", "mode.json"),
-  join(HERE, "..", "plugins", "provider-router", "mode.json"),
+  join(HERE, "..", "..", "plugins", "provider-router", "mode.json"),
+  join(HERE, "..", "..", "..", "provider-router", "mode.json"),
+  join(HERE, "..", "dsh-guava-pack", "plugins", "provider-router", "mode.json"),
 ].filter((p) => typeof p === "string" && p !== "");
 const SSR_PROXY = process.env.DSH_SSR_PROXY || process.env.SSR_PROXY || "http://127.0.0.1:2080";
 let ssrDispatcher = null;

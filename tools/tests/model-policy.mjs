@@ -19,7 +19,10 @@ import { readFileSync, rmSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import yaml from '/home/guava5tar_/dsh/node_modules/js-yaml/dist/js-yaml.mjs';
+import { loadYaml } from '../lib/yaml.mjs';
+
+// js-yaml 走统一解析（以前写死绝对路径，换机器/换用户名就 ERR_MODULE_NOT_FOUND）。
+const yaml = await loadYaml();
 
 import { renderModel, parseModels, collectModelRefs, effortsFor, IND, sp } from '../lib/model-config.mjs';
 
@@ -318,6 +321,153 @@ check('超时归为 slow（不是 unknown，否则会被"放宽"漏判）',
 check('默认探测超时收紧为 SLOW_MS + 10s（慢模型快速判定）',
   /timeoutMs = SLOW_MS \+ 10000/.test(pSrc2));
 check('slow 有可读标签', /slow: '🐌 能通但极慢（上游限流）'/.test(pSrc2));
+
+// ── 14. 工具能力探测：能聊 ≠ 能挂工具 ──────────────────────────────────
+// 事故（2026-10-22）：`gpt-6.1-sol` 在 Anthropic 路由上纯文本完全正常，
+// 但 AgentRouter 把它翻成 /v1/chat/completions 后**禁止 Function tools**，
+// DSH 每一轮带工具就 400。纯文本探针判了 ✅ 可用 → 一选为主模型就每轮必炸。
+// 同一模型走 /v1/responses 完全支持工具，所以修法是换路由 + 探针要会测工具。
+console.log('\n工具能力探测');
+check('probe.mjs 导出 probeToolUse', typeof probeMod.probeToolUse === 'function');
+check('probe.mjs 导出 probeManyTools', typeof probeMod.probeManyTools === 'function');
+check('probe.mjs 导出 cachedTools', typeof probeMod.cachedTools === 'function');
+check('三态常量齐全（ok/no/unknown）',
+  probeMod.TOOL.OK === 'ok' && probeMod.TOOL.NO === 'no' && probeMod.TOOL.UNKNOWN === 'unknown');
+check('unknown 不会被误当成 no（判不了不能冤枉模型）',
+  probeMod.TOOL.UNKNOWN !== probeMod.TOOL.NO);
+check('探测工具定义自带 required（模型才知道要传参）',
+  Array.isArray(probeMod.PROBE_TOOL.parameters.required) && probeMod.PROBE_TOOL.parameters.required.length > 0);
+
+// 真实错误原文必须归为 no —— 这是这次事故的字面量，钉死它
+const REAL_TOOL_ERR = 'Function tools with reasoning_effort are not supported for gpt-6.1-sol in /v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to \'none\'.';
+check('真实报错被判为“不支持工具”', probeMod.classifyToolFailure(400, REAL_TOOL_ERR) === probeMod.TOOL.NO);
+check('“请改用 /v1/responses”也算不支持', probeMod.classifyToolFailure(400, 'please use /v1/responses instead') === probeMod.TOOL.NO);
+check('无关的 500 不乱判', probeMod.classifyToolFailure(500, 'internal server error') === probeMod.TOOL.UNKNOWN);
+check('未知错误不判 no', probeMod.classifyToolFailure(0, 'fetch failed') === probeMod.TOOL.UNKNOWN);
+
+// 三协议的“工具调用”识别
+check('识别 OpenAI completions 的 tool_calls',
+  probeMod.detectToolCall(JSON.stringify({ choices: [{ message: { tool_calls: [{ id: 'x' }] } }] }), 'openai-completions').detected === true);
+check('识别 Anthropic 的 tool_use',
+  probeMod.detectToolCall(JSON.stringify({ type: 'message', content: [{ type: 'tool_use', id: 'x' }] }), 'anthropic-messages').detected === true);
+check('识别 Responses 的 function_call',
+  probeMod.detectToolCall(JSON.stringify({ output: [{ type: 'function_call', name: 'x' }] }), 'openai-responses').detected === true);
+check('纯文本不算工具调用',
+  probeMod.detectToolCall(JSON.stringify({ choices: [{ message: { content: 'hi' } }] }), 'openai-completions').detected === false);
+
+// 探测请求体的协议差异（踩过：responses 传 messages 会 500 "input is required"）
+check('responses 用 input 而不是 messages', /api === 'openai-responses'[\s\S]{0,400}input: PROBE_TOOL_PROMPT/.test(pSrc2));
+check('探测不传 tool_choice（思考模式会 400）', !/tool_choice:\s*\{/.test(pSrc2));
+
+// 派生标签必须能被幂等剥掉，否则会叠成两个括号
+const { TOOL_TAG } = await import('../sync-model-policy.mjs');
+check('sync-model-policy 导出 TOOL_TAG', TOOL_TAG === '无工具调用');
+const toolOwnRe = new RegExp([...ann.map((a) => a.tag), TOOL_TAG].join('|'));
+const baseName = ['          - id: x', '            name: M', '            contextWindow: 1'];
+const once = annotateName(baseName, TOOL_TAG, toolOwnRe, stripList);
+const twice = annotateName(once.lines, TOOL_TAG, toolOwnRe, stripList);
+check('第一次打上“无工具调用”', once.changed && once.after.includes(TOOL_TAG), once.after);
+check('第二次幂等（不叠成两个括号）', twice.lines.join('\n') === once.lines.join('\n'));
+const cleared = annotateName(once.lines, null, toolOwnRe, stripList);
+check('模型恢复支持工具后标签会被清掉', !cleared.lines.join('\n').includes(TOOL_TAG));
+
+// ── 15. 可移植性：不允许再出现写死的家目录路径 ──────────────────────────
+// 事故：两个工具把 `/home/<user>/dsh/node_modules/js-yaml/...` 写进 import，
+// 换机器 / 从 systemd 跑就 ERR_MODULE_NOT_FOUND，而且只在无人值守时才炸。
+console.log('\n可移植性');
+const toolFiles = ['sync-model-policy.mjs', 'sync-models.mjs', 'preflight.mjs', 'export-provider-keys.mjs',
+  join('lib', 'probe.mjs'), join('lib', 'model-config.mjs'), join('lib', 'yaml.mjs'), join('tests', 'model-policy.mjs')];
+const hardcoded = toolFiles.filter((f) => {
+  // 先把注释行去掉：文档里写"以前写死成 import ... 长这样"是**有价值的记录**，
+  // 不该被这条防呆规则误伤。
+  const code = readFileSync(join(PACK, 'tools', f), 'utf8')
+    .split('\n')
+    .filter((l) => !/^\s*(\*|\/\/)/.test(l))
+    .join('\n');
+  return /(?:from|import)\s*\(?\s*['"`]\/(home|Users)\/[^'"`]+\/node_modules/.test(code);
+});
+check('tools/ 里没有写死的 /home/<user>/... 依赖路径', hardcoded.length === 0, hardcoded);
+check('yaml.mjs 提供 loadYaml', typeof (await import('../lib/yaml.mjs')).loadYaml === 'function');
+check('loadYaml 真能解析 YAML', yaml.load('a: 1\nb: [2]')?.a === 1);
+
+// ── 16. 规则书自身的防呆（超时 / 启动器 / 定时任务）──────────────────────
+// 事故：上游卡住时 UI 傻等 120s，DSH 再重试 → 单轮挂近 4 分钟。
+console.log('\n规则书防呆');
+const routerSrc = readFileSync(join(PACK, 'plugins', 'provider-router', 'lib', 'router.mjs'), 'utf8');
+check('router 响应头超时默认 60000（不再是 120000）',
+  /DSH_ROUTER_HEADER_TIMEOUT_MS \|\| 60000/.test(routerSrc));
+check('router 超时仍可用环境变量覆盖', /DSH_ROUTER_HEADER_TIMEOUT_MS/.test(routerSrc));
+
+const launcherSrc = readFileSync(join(PACK, 'ops', 'dsh'), 'utf8');
+check('启动器不再写死单一 pack 默认路径', /find_guava_pack/.test(launcherSrc));
+check('启动器遍历多个 pack 候选', /playground\/themes\/dsh-guava-pack/.test(launcherSrc));
+check('启动器找不到 pack 时会大声报错（不静默）', /找不到 dsh-guava-pack/.test(launcherSrc));
+check('启动器会自愈 node_modules 补丁', /install\.mjs" --patch/.test(launcherSrc));
+
+const unitSrc = readFileSync(join(PACK, 'ops', 'model-policy.service'), 'utf8');
+check('定时任务走 run-model-policy.sh（补 key 与 DSH_* 环境）', /run-model-policy\.sh/.test(unitSrc));
+check('定时任务不再直接 exec node', !/ExecStart=\/usr\/bin\/node/.test(unitSrc));
+
+const runSrc = readFileSync(join(PACK, 'tools', 'run-model-policy.sh'), 'utf8');
+check('定时任务入口载入 DSH_* 环境', /export DSH_\[A-Z_\]\+/.test(runSrc));
+check('定时任务入口载入凭证库 key', /export-provider-keys\.mjs/.test(runSrc));
+check('定时任务入口不写死 node 路径', /command -v node/.test(runSrc));
+
+const bridgeSrc = readFileSync(join(PACK, 'services', 'commandcode-bridge', 'server.mjs'), 'utf8');
+check('桥接 cover pack/混合/工作区 四种 mode.json 布局',
+  (bridgeSrc.match(/provider-router", "mode\.json"/g) ?? []).length >= 4);
+
+const startSrc = readFileSync(join(PACK, 'plugins', 'provider-router', 'start.sh'), 'utf8');
+check('router start.sh 端口可被 DSH_ROUTER_PORT 覆盖', /DSH_ROUTER_PORT:-8318/.test(startSrc));
+check('router start.sh 会创建 mode.json 父目录', /mkdir -p "\$\(dirname "\$DSH_ROUTER_MODE_FILE"\)"/.test(startSrc));
+
+// ── 17. gpt-6.1-sol 必须待在 Responses 路由上 ───────────────────────────
+// 这是"模型能力 ↔ 协议"绑定的具体修复，单独钉一条，防止以后被策略同步搬回去。
+console.log('\ngpt-6.1-sol 的路由归属');
+const policyProviders = Object.keys(policy.providers);
+check('策略表里有 agentrouter-responses 路由', policyProviders.includes('agentrouter-responses'));
+check('agentrouter（Anthropic）不再点名 gpt-6.1-sol',
+  !(policy.providers.agentrouter?.pick?.explicit ?? []).includes('gpt-6.1-sol'));
+check('agentrouter-responses 点名 gpt-6.1-sol',
+  (policy.providers['agentrouter-responses']?.pick?.explicit ?? []).includes('gpt-6.1-sol'));
+const exampleSrc = readFileSync(join(PACK, 'config', 'cordis.patch.example.yml'), 'utf8');
+check('分发模板里有 agentrouter-responses 且 api 是 openai-responses',
+  /agentrouter-responses:[\s\S]{0,200}api: openai-responses/.test(exampleSrc));
+check('模板里 gpt-6.1-sol 不在 agentrouter 的 models 下',
+  !/agentrouter:(?!-responses)[\s\S]{0,600}- id: gpt-6\.1-sol/.test(exampleSrc));
+
+// ── 18. 进程生命周期：改完代码必须能真的重启 ────────────────────────────
+// 事故（2026-10-22）：两个 start.sh 都是"健康就退出"，于是改了 router.mjs /
+// server.mjs 后**进程还是旧的、健康检查却全绿**。没有 --force 时只能猜 PID 去 kill。
+console.log('\n进程生命周期（--force 与 shell 可移植性）');
+const routerStart = readFileSync(join(PACK, 'plugins', 'provider-router', 'start.sh'), 'utf8');
+const bridgeStart = readFileSync(join(PACK, 'services', 'commandcode-bridge', 'start.sh'), 'utf8');
+const bridgeStop = readFileSync(join(PACK, 'services', 'commandcode-bridge', 'stop.sh'), 'utf8');
+check('router start.sh 支持 --force', /--force/.test(routerStart) && /FORCE=1/.test(routerStart));
+check('bridge start.sh 支持 --force', /--force/.test(bridgeStart) && /FORCE=1/.test(bridgeStart));
+check('--force 会按监听端口找进程（pidfile 可能过期）',
+  /fuser -n tcp/.test(routerStart) && /fuser -n tcp/.test(bridgeStart));
+// 只看**真的展开**（`${BASH_SOURCE...}`），注释里提这个名字是有价值的记录
+check('桥接 start/stop 不再展开 bash 专属 BASH_SOURCE',
+  !/\$\{?BASH_SOURCE/.test(bridgeStart) && !/\$\{?BASH_SOURCE/.test(bridgeStop));
+check('桥接找 pack 时不再只有单一写死默认路径',
+  /DSH_GUAVA_PACK/.test(bridgeStart) && /playground\/themes\/dsh-guava-pack/.test(bridgeStart));
+
+// ── 19. preflight 覆盖面 ────────────────────────────────────────────────
+console.log('\npreflight 覆盖面');
+const preSrc = readFileSync(join(PACK, 'tools', 'preflight.mjs'), 'utf8');
+for (const [label, re] of [
+  ['检查 pack 位置', /pack 位置/],
+  ['检查 node_modules 补丁', /install\.mjs/],
+  ['检查 8318/8317/3080', /8318\/health[\s\S]{0,300}8317\/health/],
+  ['检查 mode.json 可写', /W_OK/],
+  ['检查 key 可得性且不打印值', /fromBashrc/],
+  ['检查被引用模型可用性', /--check-refs/],
+  ['是只读的', /只读/],
+]) check(`preflight ${label}`, re.test(preSrc));
+check('preflight 有机器可读模式', /--json/.test(preSrc));
+check('preflight 区分 0/1/2 退出码',
+  /failures\.length > 0 \? 1 : warnings\.length > 0 \? 2 : 0/.test(preSrc));
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);
