@@ -31,6 +31,7 @@ import { Agent as HttpsAgent } from 'node:https';
 import net from 'node:net';
 import tls from 'node:tls';
 import { readFile, writeFile, mkdir, readdir, rm } from 'node:fs/promises';
+import { chooseAuto, resolveMode as resolveModePolicy, DEFAULT_MODES } from './auto-mode.mjs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -195,25 +196,122 @@ function filterHopByHop(headers) {
   return out;
 }
 
-const DEFAULT_MODES = {
-  'xiaomi-token-plan-cn': 'direct',
-  'opencode-go': 'direct',
-  'antigravity': 'direct',
-  'agentrouter': 'ssr',
-  'commandcode': 'direct',
-};
-
 function isLoopbackHost(host) {
   return host === '127.0.0.1' || host === 'localhost' || host === '::1' || host === '[::1]';
 }
 
-async function currentMode(provider) {
+/**
+ * `auto` 模式的实测结果缓存（进程内）。
+ *
+ * 为什么放内存而不是 mode.json：mode.json 是**用户意图**（"我要 auto"），
+ * 实测是**易变事实**（网络状况）。混在一起会让"用户改过的配置"和"上次测的数字"
+ * 互相覆盖。缓存丢失只会多测一次，无害。
+ */
+const AUTO_TTL_MS = Number(process.env.DSH_ROUTER_AUTO_TTL_MS || 10 * 60 * 1000);
+const AUTO_TIMEOUT_MS = Number(process.env.DSH_ROUTER_AUTO_TIMEOUT_MS || 3000);
+const autoCache = new Map(); // provider → { at, direct:{ok,ms}, ssr:{ok,ms}, winner, reason }
+
+/** 最近一次实测快照（只读，供状态端点/决策使用）。 */
+function measurements() {
+  const out = {};
+  for (const [provider, hit] of autoCache) out[provider] = hit;
+  return out;
+}
+
+/** 一次带超时的探活请求；**任何 HTTP 状态都算"通"**（401/404 也证明链路可达）。 */
+function timedProbe(entry, viaSsr) {
+  return new Promise((resolve) => {
+    let target;
+    try {
+      target = new URL(entry.baseURL);
+    } catch {
+      resolve({ ok: false, ms: 0 });
+      return;
+    }
+    const isHttps = target.protocol === 'https:';
+    const mod = isHttps ? httpsRequest : httpRequest;
+    const agent = viaSsr && isHttps ? getSsrAgent() : undefined;
+    const started = Date.now();
+    let settled = false;
+    const done = (ok) => {
+      if (settled) return;
+      settled = true;
+      resolve({ ok, ms: Date.now() - started });
+    };
+    let req;
+    try {
+      req = mod({
+        protocol: target.protocol,
+        hostname: target.hostname,
+        port: target.port || (isHttps ? 443 : 80),
+        path: '/',
+        method: 'GET',
+        agent,
+        headers: { ...(entry.headers || {}), accept: '*/*' },
+      }, (res) => {
+        res.resume();
+        done(true);
+      });
+    } catch {
+      resolve({ ok: false, ms: Date.now() - started });
+      return;
+    }
+    const timer = setTimeout(() => {
+      try { req.destroy(); } catch {}
+      done(false);
+    }, AUTO_TIMEOUT_MS);
+    req.on('error', () => { clearTimeout(timer); done(false); });
+    req.on('response', () => clearTimeout(timer));
+    // `http.request()` 只创建请求、**不发送** —— 漏了这句，请求永远不出去，
+    // 探活就只能等超时（实测：loopback 明明 1ms 能回，却被判成"两条路都不通"）。
+    req.end();
+  });
+}
+
+async function measureProvider(provider, entry, { force = false } = {}) {
+  const cached = autoCache.get(provider);
+  if (!force && cached && Date.now() - cached.at < AUTO_TTL_MS) return cached;
+
+  const target = (() => { try { return new URL(entry.baseURL); } catch { return undefined; } })();
+  const loopback = target && isLoopbackHost(target.hostname);
+  // loopback 上游塞进 SSR 没有意义（router.mjs 顶部已写明）→ 只测 direct。
+  const [direct, ssr] = await Promise.all([
+    timedProbe(entry, false),
+    loopback ? Promise.resolve({ ok: false, ms: 0 }) : timedProbe(entry, true),
+  ]);
+  const decision = loopback
+    ? { winner: 'direct', reason: 'loopback 上游无需翻墙' }
+    : chooseAuto(direct, ssr);
+  const hit = { at: Date.now(), direct, ssr, loopback: Boolean(loopback), ...decision };
+  autoCache.set(provider, hit);
+  return hit;
+}
+
+/** 读 mode.json 里的**用户意图**（direct/ssr/auto），不解析 auto。 */
+async function rawMode(provider) {
   try {
-    const raw = await readFile(MODE_FILE, 'utf8');
-    const parsed = JSON.parse(raw);
+    const parsed = JSON.parse(await readFile(MODE_FILE, 'utf8'));
     if (parsed && typeof parsed[provider] === 'string') return parsed[provider];
-  } catch {}
+  } catch { /* 缺失走默认 */ }
   return DEFAULT_MODES[provider] || 'direct';
+}
+
+/**
+ * 解析最终模式。`auto` 会**当场实测**（带缓存），而不是猜一个默认值。
+ *
+ * 单次测量最多 AUTO_TIMEOUT_MS（默认 1.5s），且只在用户显式选了 auto 时发生 ——
+ * 显式 direct/ssr 的请求路径上**不引入任何额外延迟**。
+ */
+async function currentMode(provider) {
+  const requested = await rawMode(provider);
+  const entry = PROVIDERS[provider];
+  if (requested !== 'auto') {
+    return resolveModePolicy(requested, provider, measurements()).resolved;
+  }
+  if (!entry) return 'direct';
+  const hit = await measureProvider(provider, entry);
+  const known = measurements();
+  return resolveModePolicy('auto', provider, known).resolved || hit.winner || 'direct';
 }
 
 /**
@@ -313,7 +411,10 @@ function describeUpstreamError(err) {
 
 const server = createServer(async (req, res) => {
   try {
-    const parts = (req.url || '/').split('/').filter(Boolean);
+    // 先剥掉 query：否则 `/_router/measure?provider=x` 会被当成 action 名
+    // `measure?provider=x`（真踩过一次，端点直接报 unknown action）。
+    const pathname = new URL(req.url || '/', 'http://localhost').pathname;
+    const parts = pathname.split('/').filter(Boolean);
 
     if (parts.length === 0 || parts[0] === 'health') {
       res.writeHead(200, { 'content-type': 'text/plain' });
@@ -321,11 +422,62 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    // ── 只读自省端点 ────────────────────────────────────────────────────
+    // 面板要"自适应"就必须知道：本代理认识哪些前缀、当前模式是什么、auto 测出了什么。
+    // 只暴露 host 名（不含完整 baseURL/凭证），且服务只监听 loopback。
+    if (parts[0] === '_router') {
+      const action = parts[1] || 'state';
+      if (action === 'state') {
+        const modes = {};
+        const resolved = {};
+        for (const provider of Object.keys(PROVIDERS)) {
+          const requested = await rawMode(provider);
+          modes[provider] = requested;
+          resolved[provider] = requested === 'auto'
+            ? resolveModePolicy('auto', provider, measurements())
+            : resolveModePolicy(requested, provider, measurements());
+        }
+        res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        res.end(JSON.stringify({
+          prefixes: Object.keys(PROVIDERS),
+          upstreams: Object.fromEntries(Object.entries(PROVIDERS).map(([k, v]) => {
+            try { return [k, new URL(v.baseURL).host]; } catch { return [k, '']; }
+          })),
+          modes,
+          resolved,
+          measurements: measurements(),
+          ssr: { origin: SSR_HOST + ':' + SSR_PORT },
+        }));
+        return;
+      }
+      if (action === 'measure') {
+        const provider = new URL(req.url || '/', 'http://localhost').searchParams.get('provider');
+        if (!provider || !PROVIDERS[provider]) {
+          res.writeHead(400, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ error: 'unknown provider', known: Object.keys(PROVIDERS) }));
+          return;
+        }
+        const hit = await measureProvider(provider, PROVIDERS[provider], { force: true });
+        res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        res.end(JSON.stringify({ provider, ...hit }));
+        return;
+      }
+      res.writeHead(404, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: 'unknown _router action', known: ['state', 'measure'] }));
+      return;
+    }
+
     const provider = parts[0];
     const entry = PROVIDERS[provider];
     if (!entry) {
-      res.writeHead(404, { 'content-type': 'text/plain' });
-      res.end('unknown provider: ' + provider + '\n');
+      // 未知前缀：把**已知前缀**列出来。以前只有一行 "unknown provider: x"，
+      // 用户根本不知道拼写错了还是上游表缺条目（真踩过）。
+      res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+      res.end(
+        'unknown provider: ' + provider + '\n' +
+        '已知前缀: ' + Object.keys(PROVIDERS).join(', ') + '\n' +
+        '若这是新供应商，请在 plugins/provider-router/providers.json 里补 { "<前缀>": { "baseURL": "https://..." } }，然后重启路由代理。\n',
+      );
       return;
     }
 

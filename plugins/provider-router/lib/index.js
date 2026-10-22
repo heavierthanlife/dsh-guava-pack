@@ -38,6 +38,12 @@
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
+import {
+  buildProviderCatalog,
+  DEFAULT_MODES as BUILTIN_DEFAULT_MODES,
+  resolveMode as resolveModePolicy,
+} from './auto-mode.mjs';
+import { readProviderEndpoints } from './profile-providers.mjs';
 import { hostname } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -56,23 +62,23 @@ const ROUTE_PATH = '/provider-router';
 const MAX_BODY_BYTES = 256 * 1024;
 
 /**
- * Provider → default routing mode.
+ * 内置兜底默认模式（**不再是一等公民**）。
  *
- * Derived from the 2026-10-04 measurement of each real upstream, direct vs via
- * the SSR proxy (`docs` in router.mjs repeats the numbers): only agentrouter is
- * blocked on this network (12s timeout direct, 1.70s via SSR). Every other
- * upstream is faster — or no slower — going direct, so SSR is opt-in per
- * provider rather than the blanket default it started as.
+ * 以前这张表是唯一来源 —— 于是新增供应商不会出现在面板、`auto` 静默回落 direct
+ * （实测漂移：profile 里 7 家、面板只认 5 家）。现在真正的目录来自
+ * `ctx.llm.listProviders()` ∪ `listConfigurableProviders()`，这张表只在
+ * llm 服务不可用时兜底。数值本身来自 2026-10-04 的实测。
  */
-export const DEFAULT_MODES = Object.freeze({
-  'xiaomi-token-plan-cn': 'direct',
-  'opencode-go': 'direct',
-  'antigravity': 'direct',
-  'agentrouter': 'ssr',
-  'commandcode': 'direct',
-});
+export const DEFAULT_MODES = BUILTIN_DEFAULT_MODES;
 
 const VALID_MODES = new Set(['direct', 'ssr', 'auto']);
+
+/** 宿主能力版本：客户端据此判断自己是不是在跟旧宿主说话（避免"点了没反应"）。 */
+const HOST_API_VERSION = 2;
+
+/** 路由代理自省端点的地址（只在 loopback）。 */
+const ROUTER_STATE_URL = process.env.DSH_ROUTER_STATE_URL || 'http://127.0.0.1:8318/_router/state';
+const ROUTER_MEASURE_URL = process.env.DSH_ROUTER_MEASURE_URL || 'http://127.0.0.1:8318/_router/measure';
 
 /** Resolve "auto" to the provider default. */
 function resolveMode(provider, mode) {
@@ -108,13 +114,94 @@ async function writeModeFile(modes) {
   return normalized;
 }
 
-async function getState() {
-  const modes = await readModeFile();
-  const resolved = {};
-  for (const provider of Object.keys(DEFAULT_MODES)) {
-    resolved[provider] = resolveMode(provider, modes[provider]);
+/**
+ * 问路由代理"你认识哪些前缀、当前什么模式、auto 测出了什么"。
+ *
+ * 只用 loopback HTTP，超时 1.2s；拿不到就返回 null（面板降级显示"未判定"），
+ * **不能因为代理没起来就让面板白屏**。
+ */
+async function routerState() {
+  try {
+    const res = await fetch(ROUTER_STATE_URL, { signal: AbortSignal.timeout(1200) });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
   }
-  return { modes, resolved, defaults: { ...DEFAULT_MODES } };
+}
+
+/**
+ * 让路由代理**当场实测**某一个供应商（direct vs SSR）。
+ *
+ * 注意这是"用户点一下才测"的重操作：两次探活最多各 3s。不在请求路径上自动跑。
+ */
+async function measureViaRouter(provider) {
+  const url = new URL(ROUTER_MEASURE_URL);
+  url.searchParams.set('provider', provider);
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(12000) });
+    const json = await res.json();
+    if (!res.ok) return { ok: false, error: json?.error ?? `HTTP ${res.status}`, known: json?.known };
+    return { ok: true, ...json };
+  } catch (err) {
+    return { ok: false, error: String((err && err.message) || err) };
+  }
+}
+
+/**
+ * 自适应状态：供应商目录 + 模式 + 实测。
+ *
+ * 目录三源合并（live / configurable / 内置兜底），control 由 **profile 里的真实
+ * baseURL** 决定（见 auto-mode.buildProviderCatalog），而不是靠 id 猜。
+ *
+ * @param {object} [ctx] - Cordis context；拿得到就向 llm 服务要 live 目录
+ */
+async function getState(ctx) {
+  const modes = await readModeFile();
+  const router = await routerState();
+  const dshHome = process.env.DSH_HOME || `${process.env.HOME || ''}/dsh`;
+
+  let live = [];
+  let configurable = [];
+  try {
+    live = ctx?.get?.('llm')?.listProviders?.() ?? [];
+  } catch {
+    live = [];
+  }
+  try {
+    configurable = ctx?.get?.('llm')?.listConfigurableProviders?.() ?? [];
+  } catch {
+    configurable = [];
+  }
+  const endpoints = await readProviderEndpoints(dshHome);
+
+  const providers = buildProviderCatalog({
+    live,
+    configurable,
+    defaults: DEFAULT_MODES,
+    routerPrefixes: router?.prefixes ?? [],
+    endpoints: endpoints ?? {},
+  });
+
+  const measurements = router?.measurements ?? {};
+  const resolved = {};
+  for (const row of providers) {
+    const decision = resolveModePolicy(modes[row.id], row.id, measurements);
+    resolved[row.id] = decision;
+  }
+
+  return {
+    apiVersion: HOST_API_VERSION,
+    providers,
+    modes,
+    resolved,
+    defaults: { ...DEFAULT_MODES },
+    measurements,
+    router: router === null
+      ? { reachable: false, note: '路由代理没响应（8318）—— 下面这些开关可能不会生效' }
+      : { reachable: true, prefixes: router.prefixes, upstreams: router.upstreams, ssr: router.ssr },
+    endpointsKnown: endpoints !== null,
+  };
 }
 
 async function setMode(provider, mode) {
@@ -123,7 +210,7 @@ async function setMode(provider, mode) {
   const modes = await readModeFile();
   modes[provider] = mode;
   await writeModeFile(modes);
-  return { provider, mode, resolved: resolveMode(provider, mode) };
+  return { provider, mode };
 }
 
 async function resetModes() {
@@ -226,6 +313,9 @@ function sameAuthority(a, b) {
  */
 export const inject = ['webServer', 'connection'];
 
+/** 导出以便自检直接驱动（不需要起 Cordis / 起浏览器）。 */
+export { getState, measureViaRouter, HOST_API_VERSION };
+
 export function apply(ctx) {
   // 挂在 effect 上：`webServer.register()` 返回 disposer，不登记的话插件重挂
   // （Plugin Manager 禁用再启用、配置变更 re-apply）会留下旧路由 —— 再注册直接抛
@@ -271,8 +361,17 @@ export function apply(ctx) {
         let result;
         switch (endpoint) {
           case 'getState':
-            result = { ok: true, value: await getState() };
+            result = { ok: true, value: await getState(ctx) };
             break;
+          case 'measure': {
+            const provider = body.payload && body.payload.provider;
+            if (typeof provider !== 'string' || provider === '') {
+              result = failure('provider-router/bad-request', 'provider is required');
+              break;
+            }
+            result = { ok: true, value: await measureViaRouter(provider) };
+            break;
+          }
           case 'setMode':
             result = {
               ok: true,
@@ -335,7 +434,11 @@ export function apply(ctx) {
   }), 'dsh-provider-router: route');
 
   // Seed mode.json so the routing proxy and the Client agree from the start.
+  // 只补**缺失**的键：用户显式选过 auto/direct/ssr 的不能被启动时覆盖
+  // （以前是整表重写，理论上会把 auto 冲掉）。
   ctx.effect(() => {
-    getState().then((state) => writeModeFile(state.modes)).catch(() => {});
+    readModeFile()
+      .then((modes) => writeModeFile(modes))
+      .catch(() => {});
   }, 'dsh-provider-router: seed mode.json');
 }

@@ -40,7 +40,22 @@ window.__ModuleLoader__.load({
         router: '由路由代理控制',
         bridge: '由本地桥接控制（读同一 mode.json）',
         external: '由外部工具控制 · 开关不可用',
+        direct: '不经过本代理（直连上游）',
+        unknown: '未判定（读不到 baseURL）',
+        'router-missing-upstream': '上游表缺这一条 → 会 404',
       },
+      modeLabel: { direct: '直连', ssr: '经 SSR', auto: '自动实测' },
+      auto: '自动',
+      measured: '已实测',
+      measureNow: '实测',
+      measuring: '测试中…',
+      measuredWhy: '依据',
+      routerDown: '路由代理没响应（8318）—— 下面这些开关可能不会生效',
+      staleHost: '宿主插件是旧版本，面板展示的供应商可能不完整。请重启一次 DSH：~/dsh/restart-dsh.sh',
+      hintCycle: '点按钮循环：直连 → 经 SSR → 自动实测',
+      hintMeasure: '「自动」会在每次决策前实测两条路，取更快的那条（带 10 分钟缓存）。',
+      dormant: '未注册',
+      unset: '未设置（按内置默认；点按钮可选「自动实测」）',
       provider: {
         'xiaomi-token-plan-cn': '小米 MiMo（国内）',
         'opencode-go': 'DeepSeek via opencode-go',
@@ -58,13 +73,15 @@ window.__ModuleLoader__.load({
      *   external — a third-party tool (antigravity-tools on :8045) owns the
      *              egress; this plugin cannot change it, so no switch is shown.
      */
-    var PROVIDERS = [
-      { id: 'xiaomi-token-plan-cn', domestic: true, control: 'router' },
-      { id: 'opencode-go', domestic: false, control: 'router' },
-      { id: 'antigravity', domestic: false, control: 'external' },
-      { id: 'agentrouter', domestic: false, control: 'router' },
-      { id: 'commandcode', domestic: false, control: 'bridge' },
-    ];
+    /**
+     * 供应商目录**不再写死**。
+     *
+     * 以前这里是 5 条硬编码，而 profile 里已经有 7 家 —— 新供应商永远不出现在面板、
+     * `auto` 静默回落 direct（实测漂移）。现在目录来自 host：`ctx.llm.listProviders()`
+     * ∪ `listConfigurableProviders()` ∪ 内置兜底，control 由 profile 里真实 baseURL 推导。
+     *
+     * 这里只保留**友好名覆盖**：显示名是产品文案，不是事实，放在客户端最合适。
+     */
 
     function randomId() {
       return 'pr-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
@@ -113,11 +130,39 @@ window.__ModuleLoader__.load({
         return function () { alive = false; };
       }, []);
 
-      function toggle(providerId, current) {
-        var next = current === 'ssr' ? 'direct' : 'ssr';
+      var busyPair = React.useState(null);
+      var busy = busyPair[0];
+      var setBusy = busyPair[1];
+
+      /**
+       * 三态循环：direct → ssr → auto。
+       *
+       * `auto` 不是"再一种固定值"，而是**每次决策前实测两条路**（见 host 的
+       * measureProvider）。把它放进循环而不是单独一个开关，是因为它和
+       * direct/ssr 是互斥的三选一语义。
+       */
+      function cycle(providerId, requested) {
+        var order = ['direct', 'ssr', 'auto'];
+        var idx = order.indexOf(requested);
+        var next = order[(idx + 1) % order.length];
+        setErr(null);
         callHost('setMode', { provider: providerId, mode: next })
           .then(reload)
           .catch(function (e) { setErr(e); });
+      }
+
+      /** 让路由代理当场实测该家（direct vs SSR），并把结果写进缓存。 */
+      function measureNow(providerId) {
+        if (busy) return;
+        setBusy(providerId);
+        setErr(null);
+        callHost('measure', { provider: providerId })
+          .then(function (r) {
+            if (r && r.ok === false) throw new Error(r.error || 'measure failed');
+            return reload();
+          })
+          .catch(function (e) { setErr(e); })
+          .then(function () { setBusy(null); });
       }
 
       var rowStyle = {
@@ -141,30 +186,72 @@ window.__ModuleLoader__.load({
         children.push(h('div', { key: 'loading', style: { fontSize: 12, opacity: 0.55, padding: '12px 0' } }, LABELS.loading));
       } else {
         var resolved = state.resolved || {};
-        var rows = PROVIDERS.map(function (p) {
-          var mode = resolved[p.id];
-          var name = LABELS.provider[p.id] || p.id;
-          var category = p.domestic ? LABELS.categoryDomestic : LABELS.categoryForeign;
-          var isSsr = mode === 'ssr';
-          var locked = p.control === 'external';
+        var measurements = state.measurements || {};
+        var providers = state.providers || [];
+
+        // 版本握手：host 没到 v2 说明它还是旧版（client 走 HMR 会先更新）
+        if (typeof state.apiVersion !== 'number' || state.apiVersion < 2) {
+          children.push(h('div', {
+            key: 'stale',
+            style: { color: 'var(--dsw-alias-state-warning-primary, #f5a524)', fontSize: 12, margin: '6px 0', lineHeight: 1.5 },
+          }, LABELS.staleHost));
+        }
+        if (state.router && state.router.reachable === false) {
+          children.push(h('div', {
+            key: 'rdown',
+            style: { color: 'var(--dsw-alias-state-warning-primary, #f5a524)', fontSize: 12, margin: '6px 0' },
+          }, LABELS.routerDown));
+        }
+
+        var rows = providers.map(function (p) {
+          var decision = resolved[p.id] || {};
+          var effective = decision.resolved || 'direct';
+          var requested = decision.requested || effective;
+          var name = LABELS.provider[p.id] || p.name || p.id;
+          var isSsr = effective === 'ssr';
+          var isAuto = requested === 'auto';
+          var locked = p.control === 'external' || p.control === 'direct' || p.control === 'unknown';
           var controlText = LABELS.control[p.control] || '';
 
-          var trailing = locked
-            ? h('div', {
-                key: 'locked',
-                title: controlText,
+          var meta = [];
+          if (decision.reason === 'default') meta.push(LABELS.unset);
+          if (p.control !== 'router' && p.control !== 'bridge') meta.push(controlText);
+          if (p.note) meta.push(p.note);
+          var hit = measurements[p.id];
+          if (hit && hit.direct && hit.ssr) {
+            meta.push(LABELS.measuredWhy + '：' + (hit.reason || ''));
+          }
+
+          var trailing;
+          if (locked) {
+            trailing = h('div', {
+              key: 'locked',
+              title: controlText,
+              style: { flex: 'none', fontSize: 11, opacity: 0.5, textAlign: 'right', maxWidth: 160, lineHeight: 1.4 },
+            }, (LABELS.modeLabel[effective] || effective) + '｜' + controlText);
+          } else {
+            var label = isAuto
+              ? LABELS.auto + '（' + (LABELS.modeLabel[effective] || effective) + '）'
+              : (LABELS.modeLabel[requested] || requested);
+            trailing = h('div', { key: 'ctl', style: { flex: 'none', display: 'flex', gap: 6, alignItems: 'center' } }, [
+              p.control === 'router' ? h('button', {
+                key: 'm', type: 'button',
+                disabled: busy === p.id,
+                title: LABELS.hintMeasure,
+                onClick: function () { measureNow(p.id); },
                 style: {
-                  flex: 'none', fontSize: 11, opacity: 0.5, textAlign: 'right',
-                  maxWidth: 150, lineHeight: 1.4,
+                  cursor: 'pointer', fontSize: 11, padding: '4px 8px', borderRadius: 6,
+                  border: '1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.25))',
+                  background: 'transparent', color: 'inherit', opacity: busy === p.id ? 0.5 : 0.85,
                 },
-              }, (isSsr ? LABELS.ssr : LABELS.direct) + '｜' + controlText)
-            : h('button', {
+              }, busy === p.id ? LABELS.measuring : LABELS.measureNow) : null,
+              h('button', {
                 key: 'btn', type: 'button',
-                onClick: function () { toggle(p.id, mode); },
+                onClick: function () { cycle(p.id, requested); },
                 'aria-pressed': isSsr,
-                title: controlText,
+                title: LABELS.hintCycle,
                 style: {
-                  flex: 'none', cursor: 'pointer', borderRadius: 999,
+                  cursor: 'pointer', borderRadius: 999,
                   border: '1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.25))',
                   background: isSsr
                     ? 'var(--dsw-alias-state-business-tertiary, rgba(0,240,255,0.12))'
@@ -174,12 +261,20 @@ window.__ModuleLoader__.load({
                     : 'var(--dsw-alias-label-secondary, inherit)',
                   fontSize: 12, padding: '4px 12px',
                 },
-              }, isSsr ? LABELS.ssr : LABELS.direct);
+              }, label),
+            ]);
+          }
 
           return h('div', { key: p.id, style: rowStyle }, [
             h('div', { key: 'info', style: { minWidth: 0 } }, [
-              h('div', { key: 'n', style: { fontSize: 13, fontWeight: 500 } }, name),
-              h('div', { key: 'c', style: { fontSize: 11, opacity: 0.55, marginTop: 2 } }, category),
+              h('div', { key: 'n', style: { fontSize: 13, fontWeight: 500 } }, [
+                name,
+                p.live === false ? h('span', {
+                  key: 'dormant',
+                  style: { fontSize: 10, opacity: 0.55, marginLeft: 6, fontWeight: 400 },
+                }, LABELS.dormant) : null,
+              ]),
+              h('div', { key: 'c', style: { fontSize: 11, opacity: 0.55, marginTop: 2, lineHeight: 1.5 } }, meta.join('；')),
             ]),
             trailing,
           ]);

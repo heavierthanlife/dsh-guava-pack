@@ -44,6 +44,8 @@ window.__ModuleLoader__.load({
       keySaved: '已保存（本机）',
       keyClear: '清除',
       keyHint: '没 key 时切到 Tavily 会报 CREDENTIAL_MISSING。填在这里可以立刻生效，不用改 .bashrc / 不用重启。',
+      fallback: '上次搜索已回落官方后端：',
+      fallbackWhy: '原因：',
       hostStale: '宿主端插件是旧版本，无法保存 key（点了不会有反应）。请重启一次 DSH：~/dsh/restart-dsh.sh',
       loaded: '已刷新',
       pinWarning: '注意：web.searchProvider 没有钉在 switch 上，切换不会生效（需要重启 DSH 让 profile 生效）。',
@@ -173,6 +175,11 @@ window.__ModuleLoader__.load({
         })));
 
       if (error) children.push(h('div', { key: 'err', className: 'wsw_err' }, error));
+      if (state.lastFallback) {
+        children.push(h('div', { key: 'fb', className: 'wsw_hint' },
+          T.fallback + state.lastFallback.from + ' → ' + state.lastFallback.to +
+          '（' + T.fallbackWhy + state.lastFallback.reason + '）'));
+      }
 
       // 版本错位：宿主还没升级到支持保存 key。这不是用户的操作问题，必须直说。
       var hostApi = typeof state.apiVersion === 'number' ? state.apiVersion : 0;

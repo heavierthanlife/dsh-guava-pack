@@ -156,7 +156,7 @@ if (existsSync(modeFile)) {
 
 /* ── 6. provider key 可得性（只报有没有，绝不打印值）──────────────────── */
 
-const NEEDED_KEYS = ['COMMANDCODE_API_KEY', 'AGENTROUTER_API_KEY', 'XIAOMI_TOKEN_PLAN_CN_API_KEY', 'DEEPSEEK_API_KEY'];
+const NEEDED_KEYS = ['COMMANDCODE_API_KEY', 'AGENTROUTER_API_KEY', 'XIAOMI_TOKEN_PLAN_CN_API_KEY', 'DEEPSEEK_API_KEY', 'TAVILY_API_KEY'];
 const fromEnv = new Set(NEEDED_KEYS.filter((k) => process.env[k]));
 const fromBashrc = new Set();
 try {
@@ -220,9 +220,11 @@ try {
         warn('search', '偏好是 Tavily 但 searchProvider 没钉到 switch → 实际仍在走官方',
           `npm run search -- tavily`);
       }
-      if (backend === 'tavily' && !process.env.TAVILY_API_KEY) {
-        warn('search', '偏好是 Tavily 但环境里没有 TAVILY_API_KEY',
-          '写进 ~/.bashrc 或 DSH 凭证库；否则每次搜索都会报 CREDENTIAL_MISSING');
+      // key 可能只写在 ~/.bashrc（启动器会载入），也可能存在 DSH 凭证库 ——
+      // 只看 process.env 会**误报**（体检脚本自己的 shell 并不载入 .bashrc）。
+      if (backend === 'tavily' && !process.env.TAVILY_API_KEY && !fromBashrc.has('TAVILY_API_KEY')) {
+        warn('search', '偏好是 Tavily 但环境与 ~/.bashrc 里都没有 TAVILY_API_KEY',
+          '写进 ~/.bashrc（改完重启 DSH）或在 设置 → 搜索后端 里粘贴');
       }
     } catch {
       warn('search', '偏好文件存在但解析不了（搜索会回落 official）', preferFile);

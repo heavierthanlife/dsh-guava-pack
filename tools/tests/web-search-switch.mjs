@@ -193,6 +193,40 @@ mod.writeBackend('official');
 const stateFileBody = readFileSync(join(scratch, 'storages', 'web-search-switch.json'), 'utf8');
 check('key 不会出现在 backend 切换前的残留里（当前已清空）', !stateFileBody.includes('tvly-test-123'));
 
+// ── 6b2. 可用性回落（缺 key 时不要整挂搜索）──────────────────────────────
+// 原则：**只回落"配置缺失"，不吞真实故障**。后者静默换后端会让人以为 Tavily 有效。
+console.log('\n可用性回落');
+const okOfficial = { async search() { return { sources: [{ url: 'https://official' }], truncated: false }; } };
+const failMissing = async () => { throw Object.assign(new Error('no key'), { code: 'WEB_PROVIDER_CREDENTIAL_MISSING' }); };
+const failUpstream = async () => { throw Object.assign(new Error('502'), { code: 'WEB_PROVIDER_ERROR' }); };
+
+const notes = [];
+const fbProvider = mod.createSwitchProvider({
+  official: okOfficial,
+  tavily: failMissing,
+  getBackend: () => 'tavily',
+  canFallback: async () => true,
+  onFallback: (info) => notes.push(info),
+});
+const fbResult = await fbProvider.search({ query: 'q' });
+check('缺 key 且官方可用 → 回落官方并返回结果', fbResult.sources[0].url === 'https://official');
+check('回落被记账（面板可见）', notes.length === 1 && notes[0].from === 'tavily' && notes[0].to === 'official');
+check('回落原因里带原始提示', /no key/.test(notes[0].reason));
+
+const noFb = mod.createSwitchProvider({
+  official: okOfficial, tavily: failMissing, getBackend: () => 'tavily', canFallback: async () => false,
+});
+let threwMissing = false;
+try { await noFb.search({ query: 'q' }); } catch { threwMissing = true; }
+check('官方也不可用时不回落，照实报错', threwMissing);
+
+const upProvider = mod.createSwitchProvider({
+  official: okOfficial, tavily: failUpstream, getBackend: () => 'tavily', canFallback: async () => true,
+});
+let threwUpstream = false;
+try { await upProvider.search({ query: 'q' }); } catch (e) { threwUpstream = e.code === 'WEB_PROVIDER_ERROR'; }
+check('上游故障**不**回落（不能假装 Tavily 成功）', threwUpstream);
+
 // ── 6c. 挂载标记（CLI 靠它判断"运行中的 DSH 是否真的加载了插件"）──────────
 // 踩过：bundles 列表里有插件 ≠ 进程已加载它。在"装好没重启"的窗口里钉 switch，
 // 搜索会立刻 configured provider not registered。

@@ -412,6 +412,26 @@ key 输入框，填完点保存毫无反应且不报错），插件会用 `state
 取舍（如实记录）：官方后端走 **API key**，没有复刻官方插件的
 「DeepSeek 账号登录态优先」路径；需要账号态时用 `bypass` 回到官方。
 
+## 供应商路由是自适应的
+
+`provider-router` 面板的供应商列表**不再写死**：
+
+```sh
+# 面板行 = live 路由 ∪ 可配置路由 ∪ 内置兜底（去重、live 优先）
+curl -s http://127.0.0.1:8318/_router/state | python3 -m json.tool | head -20
+```
+
+- **新供应商自动出现**（不用改插件代码），已配置但未注册的会标「未注册」；
+- **每家的开关到底生不生效**由 profile 里真实的 `baseURL` 判定
+  （`router` 真生效 / `bridge` 真生效 / `external`、`direct` 标灰并说明原因）；
+- 指向本代理但上游表缺前缀的，直接标成"会 404，请补 `providers.json`"；
+- **`auto` 模式**：每次决策前实测 direct 与 SSR，取更快那条（带 10 分钟缓存），
+  面板里点「实测」可以看到两边的毫秒数 —— 依据可见，不是黑盒。
+
+只在你显式选 `auto` 时才测；`direct`/`ssr` 的请求路径上零额外延迟。
+详见 [plugins/provider-router/README.md](dsh-guava-pack/plugins/provider-router/README.md)
+与 [ADAPTIVE-PLAN.md](dsh-guava-pack/ADAPTIVE-PLAN.md)。
+
 ## 一条命令体检（出问题先跑它）
 
 ```sh

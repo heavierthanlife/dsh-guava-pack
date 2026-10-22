@@ -75,6 +75,9 @@ function stateFile() {
 
 let cached = { key: '', state: { backend: 'official', tavilyApiKey: undefined } };
 
+/** 最近一次"首选后端不可用 → 回落"的记录（只在本进程内存里，不落盘）。 */
+let lastFallback;
+
 /**
  * 读当前偏好的后端。
  *
@@ -356,7 +359,15 @@ async function createOfficialBackend(ctx) {
  * 造 `ctx.web` 的 search provider。导出是为了自检能在不挂载 Cordis 的情况下
  * 验证"按偏好转发"这条核心行为。
  */
-export function createSwitchProvider({ official, tavily, getBackend = readBackend }) {
+export function createSwitchProvider({
+  official,
+  tavily,
+  getBackend = readBackend,
+  /** 首选后端"配置缺失"时，另一个后端是否可用（异步判断，例如查 key）。 */
+  canFallback = async () => false,
+  /** 记录一次回落，供面板显示（`{ from, to, reason, at }`）。 */
+  onFallback = () => {},
+}) {
   return {
     id: PROVIDER_ID,
     /* 自身永远"可用"：真正不可用的情况由后端在 search() 里报结构化错误，
@@ -364,7 +375,26 @@ export function createSwitchProvider({ official, tavily, getBackend = readBacken
     available: () => true,
     async search(request, signal) {
       const backend = getBackend();
-      if (backend === 'tavily') return tavily(request, signal);
+      if (backend === 'tavily') {
+        try {
+          return await tavily(request, signal);
+        } catch (error) {
+          // **只在"配置缺失"时回落**，不吞真实故障：
+          //   · CREDENTIAL_MISSING（没填 key）→ 官方还能用就先用官方，别让搜索整个挂掉；
+          //   · 上游 4xx/5xx/网络错 → 原样抛出。静默换后端会让用户以为 Tavily 有效。
+          const missing = error?.code === 'WEB_PROVIDER_CREDENTIAL_MISSING';
+          if (missing && (await canFallback())) {
+            onFallback({
+              from: 'tavily',
+              to: 'official',
+              reason: String(error?.message ?? error).slice(0, 200),
+              at: new Date().toISOString(),
+            });
+            return official.search(request, signal);
+          }
+          throw error;
+        }
+      }
       return official.search(request, signal);
     },
   };
@@ -415,6 +445,7 @@ async function readState(ctx) {
     backend: readBackend(),
     // 面板据此决定是否显示"已保存（本机）"，以及要不要让用户填。
     tavilyKeyFromPanel: typeof ownTavilyKey === 'string' && ownTavilyKey.length > 0,
+    lastFallback: lastFallback ?? null,
     backends: [
       {
         id: 'official',
@@ -466,6 +497,12 @@ async function apply(ctx) {
   const provider = createSwitchProvider({
     official,
     tavily: (request, signal) => tavilySearch(ctx, request, signal),
+    // 首选 Tavily 但没 key 时：只要官方 key 在，就回落官方（并记账，面板可见）
+    canFallback: async () => (await resolveSecret(ctx, 'DEEPSEEK_API_KEY')) !== undefined,
+    onFallback: (info) => {
+      lastFallback = info;
+      ctx?.logger?.warn?.(`[web-search-switch] Tavily 缺 key，本次回落官方后端：${info.reason}`);
+    },
   });
 
   ctx.effect(() => ctx.web.registerSearchProvider(provider), 'web-search-switch provider');
