@@ -35,6 +35,7 @@
   "scripts": {
     "check": "node install.mjs --check",
     "preflight": "node tools/preflight.mjs",
+    "search": "node tools/set-search-provider.mjs",
     "test": "node tools/tests/model-policy.mjs && node tools/tests/web-search-switch.mjs",
     "model-policy": "node tools/sync-model-policy.mjs",
     "model-policy:probe": "node tools/sync-model-policy.mjs --probe",

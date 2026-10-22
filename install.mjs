@@ -73,6 +73,7 @@ const REQUIRED = [
   'plugins/dsh-web-search-switch/cordis.patch.yml',
   'plugins/dsh-web-search-switch/lib/index.js',
   'plugins/dsh-web-search-switch/lib/client.js',
+  'plugins/dsh-web-search-switch/lib/pin.mjs',
   'services/commandcode-bridge/server.mjs',
   'services/commandcode-bridge/start.sh',
   'services/commandcode-bridge/stop.sh',
@@ -86,6 +87,7 @@ const REQUIRED = [
   'tools/lib/yaml.mjs',
   'tools/tests/model-policy.mjs',
   'tools/tests/web-search-switch.mjs',
+  'tools/set-search-provider.mjs',
   // 一条命令体检（补丁 / pack 位置 / 端口 / mode.json / key / 模型引用）
   'tools/preflight.mjs',
   // 定时任务入口：补 provider key 与每台机器的 DSH_* 环境
@@ -119,6 +121,7 @@ const MIN_BYTES = {
   'plugins/dsh-code-theme/tools/check-contrast.mjs': 500,
   'plugins/dsh-web-search-switch/lib/index.js': 3000,
   'plugins/dsh-web-search-switch/lib/client.js': 2000,
+  'plugins/dsh-web-search-switch/lib/pin.mjs': 2000,
   'services/commandcode-bridge/server.mjs': 2000,
   'services/commandcode-bridge/start.sh': 300,
   'services/commandcode-bridge/stop.sh': 100,
@@ -130,6 +133,7 @@ const MIN_BYTES = {
   'tools/lib/yaml.mjs': 500,
   'tools/tests/model-policy.mjs': 2000,
   'tools/tests/web-search-switch.mjs': 2000,
+  'tools/set-search-provider.mjs': 2000,
   'tools/preflight.mjs': 2000,
   'tools/run-model-policy.sh': 300,
   'tools/export-provider-keys.mjs': 500,

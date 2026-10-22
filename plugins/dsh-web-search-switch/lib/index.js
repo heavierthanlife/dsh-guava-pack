@@ -39,6 +39,8 @@
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
+import { currentSearchProvider, pinSearchProvider, SWITCH_PROVIDER_ID } from './pin.mjs';
+
 /** Cordis 插件名（loader 诊断用）。 */
 const name = 'web-search-switch';
 
@@ -104,6 +106,33 @@ function writeBackend(backend) {
   });
   cached = { key: '', backend };
   return backend;
+}
+
+/**
+ * 确保 profile 的 `web.searchProvider` 钉在 `switch`。
+ *
+ * 调用时机很关键：**只有插件已经挂载时**才可以钉 —— 否则 seam 会立刻报
+ * `configured provider "switch" is not registered`，搜索直接坏掉（真踩过）。
+ * 所以这里只在两种安全时机调用：
+ *   1. 插件 apply() 期间（此时 provider 已注册）；
+ *   2. 面板/命令里用户明确点了"切换"（provider 显然已注册）。
+ *
+ * 失败不抛：pin 是"让切换生效"的辅助动作，写坏 profile 的代价远大于功能不可用。
+ */
+function ensurePinnedToSwitch(ctx) {
+  try {
+    const result = pinSearchProvider(DSH_HOME, SWITCH_PROVIDER_ID);
+    if (result.changed) {
+      ctx?.logger?.info?.(
+        `[web-search-switch] 已把 web.searchProvider 钉到 switch（${result.how}）` +
+        (result.backup ? `，备份 ${result.backup}` : ''),
+      );
+    }
+    return result;
+  } catch (error) {
+    ctx?.logger?.warn?.(`[web-search-switch] 钉住 searchProvider 失败：${String(error?.message ?? error)}`);
+    return { changed: false, error: String(error?.message ?? error) };
+  }
 }
 
 /* ------------------------------------------------------------------ *
@@ -361,7 +390,10 @@ async function readState(ctx) {
     // 误报"没钉住"。只有确定读到且不等于 switch 才判 false。
     pinned: (() => {
       const pinnedId = ctx.get('web')?.searchProviderId;
-      return typeof pinnedId === 'string' ? pinnedId === PROVIDER_ID : undefined;
+      if (typeof pinnedId === 'string') return pinnedId === PROVIDER_ID;
+      // 退路：直接读 profile（private 字段改名也能用）
+      const fromProfile = currentSearchProvider(DSH_HOME).value;
+      return fromProfile === undefined ? undefined : fromProfile === PROVIDER_ID;
     })(),
   };
 }
@@ -391,6 +423,12 @@ async function apply(ctx) {
   });
 
   ctx.effect(() => ctx.web.registerSearchProvider(provider), 'web-search-switch provider');
+
+  // 自愈：如果上次已经选了 Tavily，但 pin 还没钉住（例如刚重启、或 pin 被改回官方），
+  // 这里补上。provider 已经在上面注册过，所以此刻钉住是安全的。
+  if (readBackend() === 'tavily' && currentSearchProvider(DSH_HOME).value !== SWITCH_PROVIDER_ID) {
+    ensurePinnedToSwitch(ctx);
+  }
 
   // ── `/search-backend` 命令：不打开设置页也能切 ──────────────────────
   ctx.inject(['commands'], (cctx) => {
@@ -471,6 +509,8 @@ async function apply(ctx) {
               return;
             }
             writeBackend(backend);
+            // 只有插件已挂载时才走到这里 → 钉住是安全的，且切 Tavily 必须钉住才生效。
+            ensurePinnedToSwitch(cctx);
             sendRpc(res, rpcId, { ok: true, value: await readState(cctx) });
             return;
           }

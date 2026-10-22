@@ -201,17 +201,25 @@ try {
   const pinned = webEntry?.config?.searchProvider;
   if (pinned === 'switch') {
     ok('search', 'web.searchProvider = switch（可在 设置 → 搜索后端 里切官方/Tavily）');
+  } else if (pinned === 'deepseek-official') {
+    // 这是**健康**状态：就是官方默认后端。只有在"偏好已经选了 Tavily 但 pin 还是官方"
+    // 时才是不一致 —— 那种情况下面单独判。
+    info('search', 'web.searchProvider = deepseek-official（当前走官方；切换：npm run search -- tavily）');
   } else if (pinned === undefined) {
-    warn('search', 'web.searchProvider 未钉住 → base 默认用 deepseek-official，切换插件不会生效',
-      `在 ${patchFile} 加：- id: web / config: { searchProvider: switch, fetchProvider: http }`);
+    info('search', 'web.searchProvider 未显式写（base 默认 deepseek-official）；切换插件需要先钉住',
+      'npm run search -- tavily（会自动写 pin；插件已挂载时热生效）');
   } else {
-    warn('search', `web.searchProvider = ${pinned}（不是 switch）→ 搜索后端切换不生效`, '改成 switch 后重启 DSH');
+    warn('search', `web.searchProvider = ${pinned}（既不是 switch 也不是 deepseek-official）`, '改回 switch 或 deepseek-official');
   }
   const preferFile = join(DSH_HOME, 'storages', 'web-search-switch.json');
   if (existsSync(preferFile)) {
     try {
       const backend = JSON.parse(readFileSync(preferFile, 'utf8'))?.backend;
       ok('search', `当前偏好后端：${backend}（${preferFile}）`);
+      if (backend === 'tavily' && pinned !== 'switch') {
+        warn('search', '偏好是 Tavily 但 searchProvider 没钉到 switch → 实际仍在走官方',
+          `npm run search -- tavily`);
+      }
       if (backend === 'tavily' && !process.env.TAVILY_API_KEY) {
         warn('search', '偏好是 Tavily 但环境里没有 TAVILY_API_KEY',
           '写进 ~/.bashrc 或 DSH 凭证库；否则每次搜索都会报 CREDENTIAL_MISSING');

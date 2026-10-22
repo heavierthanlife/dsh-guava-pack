@@ -348,30 +348,54 @@ services/commandcode-bridge/start.sh
 
 ## 联网搜索后端：官方 ↔ Tavily 一键切换
 
-DSH 的搜索是可插拔的（`ctx.web` seam）。官方**只发布了三个** provider：
-`deepseek-official` / `exa` / `perplexity` —— **没有 Tavily**
-（`@deepseek-ai/dsh-web-search-tavily` 在 npm 上 404，brave / serper / firecrawl 同样没有）。
+### 现状（2026-10-22 实测）
 
-而且选了 provider 之后**改起来要重启**：`searchProvider` 是插件构造时读的，且两个
-provider 同时可用时 seam 会报 `WEB_PROVIDER_AMBIGUOUS`。所以本包加了一个
-**转发式 provider**：`web.searchProvider` 钉成 `switch`，由它按运行时偏好转发到
-官方或 Tavily —— 切换只是改一个 JSON，**下一次搜索立即生效**。
+DSH 的搜索是可插拔的（`ctx.web` seam）。**官方**只发布了三个 provider：
+
+| 包 | provider id |
+|---|---|
+| `@deepseek-ai/dsh-web-search-deepseek` | `deepseek-official`（一次 Messages 调用 + 原生 `web_search_20250305`） |
+| `@deepseek-ai/dsh-web-search-exa` | `exa` |
+| `@deepseek-ai/dsh-web-search-perplexity` | `perplexity` |
+
+**官方没有 Tavily**（`@deepseek-ai/dsh-web-search-tavily` 在 npm 上 404）。
+**社区有**（第三方包，装之前请自行评估代码信任）：
+`dsh-tavily-cxykyw`（纯 Tavily provider）、`dsh-web-search-multi`
+（SearXNG/Brave/Tavily/Gemini/Wikipedia）、`@lemoncat7/dsh-web-search`（多 provider）。
+
+但**它们都没有"一键切换"**：seam 只认一个 `searchProvider`，而它是插件**构造时**
+读的，且两个 provider 同时可用会直接 `WEB_PROVIDER_AMBIGUOUS`。
+
+### 本包的方案：转发式 provider（id = `switch`）
+
+`web.searchProvider` 钉成 `switch`，由它按**运行时偏好**转发到官方或 Tavily ——
+切换只是改一个 JSON，**下一次搜索立即生效**：
 
 ```sh
-# 看状态 / 切换（也可以在 设置 → 搜索后端 里点按钮）
-/search-backend
-/search-backend tavily
-/search-backend official
+npm run search -- status          # 看当前实际生效的后端
+npm run search -- tavily          # 切 Tavily（顺手把 pin 钉好）
+npm run search -- official
+npm run search -- bypass          # pin 写回 deepseek-official（绕过本插件）
 ```
+
+也可以在 **设置 → 搜索后端** 点按钮，或聊天里 `/search-backend tavily`。
 
 Tavily 的 key 引用名固定为 `TAVILY_API_KEY`（`~/.bashrc` 或 DSH 凭证库）。
 没配 key 时切过去不会崩：搜索会回一条结构化错误，直接说明缺哪个变量。
 
 偏好文件：`<DSH_HOME>/storages/web-search-switch.json`（0600，热读，坏了回落官方）。
 
+### ⚠️ 两个必须知道的顺序/语义事实（都实测踩过）
+
+1. **pin 必须在插件已挂载之后才能指向 `switch`。** 否则搜索立刻变成
+   `configured web provider "switch" is not registered`。
+   所以第一次要**先重启 DSH**（让插件挂上），再切换；面板按钮天然安全。
+2. **profile patch 的"删除"不能可靠热回滚。** 实测删掉 `- id: web` 覆盖后 seam
+   仍用旧值。回滚必须**显式写回** `searchProvider: deepseek-official`
+   （`npm run search -- bypass` 就是干这个的）。
+
 取舍（如实记录）：官方后端走 **API key**，没有复刻官方插件的
-「DeepSeek 账号登录态优先」那条路径；需要账号态时把 `searchProvider` 改回
-`deepseek-official`（要重启）。详见 `plugins/dsh-web-search-switch/README.md`。
+「DeepSeek 账号登录态优先」路径；需要账号态时用 `bypass` 回到官方。
 
 ## 一条命令体检（出问题先跑它）
 

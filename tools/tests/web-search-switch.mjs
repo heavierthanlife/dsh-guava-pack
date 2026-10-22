@@ -134,6 +134,60 @@ check('client 半边走 window.__ModuleLoader__（不是 ESM import）',
   /__ModuleLoader__\.load/.test(clientSrc) && !/^\s*import\s/m.test(clientSrc));
 check('client 注册 settings.section 槽', /slots\.register\(\{[\s\S]{0,120}settings\.section/.test(clientSrc));
 
+// ── 6. searchProvider 钉住（pin.mjs）────────────────────────────────────
+// 踩过的两个真实坑：
+//   · profile patch 里"删除"一条覆盖不会可靠热回滚 → 回滚必须写目标值；
+//   · 插件还没挂载就钉 switch → seam 立刻报 configured provider not registered。
+console.log('\nsearchProvider 钉住');
+const pinMod = await import('../../plugins/dsh-web-search-switch/lib/pin.mjs');
+
+const t1 = pinMod.pinText('- id: agent-default-model\n  config:\n    provider: x\n', 'switch');
+check('没有 web 块时追加', t1.how === 'appended' && /- id: web/.test(t1.text));
+check('追加时带上 searchProvider 与 fetchProvider',
+  /searchProvider: switch/.test(t1.text) && /fetchProvider: http/.test(t1.text));
+check('追加后能读回 switch', pinMod.readSearchProvider(t1.text).value === 'switch');
+
+const t2 = pinMod.pinText('- id: web\n  config:\n    searchProvider: deepseek-official\n    fetchProvider: http\n', 'switch');
+check('已有块时只改值（rewritten）', t2.how === 'rewritten');
+check('fetchProvider 保持不变', /fetchProvider: http/.test(t2.text));
+check('改完读回 switch', pinMod.readSearchProvider(t2.text).value === 'switch');
+check('目标值已满足时 no-op', pinMod.pinText(t2.text, 'switch').changed === false);
+
+const t3 = pinMod.pinText('- id: web\n  config:\n    fetchProvider: http\n', 'switch');
+check('有 web 块但缺 searchProvider 时补上', pinMod.readSearchProvider(t3.text).value === 'switch', t3.text);
+
+// 真实文件操作（临时 DSH_HOME）
+const fakeHome = mkdtempSync(join(tmpdir(), 'wsw-home-'));
+mkdirSync(join(fakeHome, 'profiles', 'web'), { recursive: true });
+const profileFile = join(fakeHome, 'profiles', 'web', 'cordis.patch.yml');
+writeFileSync(profileFile, '- id: agent-default-model\n  config:\n    provider: x\n');
+const pinResult = pinMod.pinSearchProvider(fakeHome, 'switch');
+check('写入返回 changed + 备份', pinResult.changed === true && typeof pinResult.backup === 'string');
+check('备份文件真实存在', existsSync(pinResult.backup));
+check('写后文件能读回 switch', pinMod.currentSearchProvider(fakeHome).value === 'switch');
+const again = pinMod.pinSearchProvider(fakeHome, 'switch');
+check('第二次调用是幂等的（不重复备份）', again.changed === false);
+const back = pinMod.pinSearchProvider(fakeHome, pinMod.OFFICIAL_PROVIDER_ID);
+check('可以写回 deepseek-official（回滚靠写值，不靠删块）',
+  back.changed === true && pinMod.currentSearchProvider(fakeHome).value === 'deepseek-official');
+check('OFFICIAL/SWITCH 常量正确',
+  pinMod.OFFICIAL_PROVIDER_ID === 'deepseek-official' && pinMod.SWITCH_PROVIDER_ID === 'switch');
+rmSync(fakeHome, { recursive: true, force: true });
+
+// ── 7. CLI 与接线 ───────────────────────────────────────────────────────
+console.log('\nCLI 与接线');
+const cliSrc = readFileSync(join(PACK, 'tools', 'set-search-provider.mjs'), 'utf8');
+check('CLI 支持 status / official / tavily / switch / bypass',
+  ['status', 'official', 'tavily', 'switch', 'bypass'].every((c) => cliSrc.includes(c)));
+check('CLI 在插件未装时会拒绝直接钉 switch（防把搜索弄坏）',
+  /插件还没装进 profile/.test(cliSrc));
+check('CLI 复用 pin.mjs（不重复实现）', /from '\.\.\/plugins\/dsh-web-search-switch\/lib\/pin\.mjs'/.test(cliSrc));
+const hostSrc = readFileSync(join(PACK, 'plugins', 'dsh-web-search-switch', 'lib', 'index.js'), 'utf8');
+check('面板 set 会顺手钉住 pin', /ensurePinnedToSwitch\(cctx\)/.test(hostSrc));
+check('apply 时对已有的 tavily 偏好自愈 pin',
+  /readBackend\(\) === 'tavily' && currentSearchProvider/.test(hostSrc));
+check('provider id 与 pin 常量同源', /import \{[^}]*SWITCH_PROVIDER_ID/.test(hostSrc));
+
 rmSync(scratch, { recursive: true, force: true });
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);
