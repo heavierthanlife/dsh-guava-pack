@@ -208,6 +208,20 @@ check('未挂载时 CLI 拒绝钉 switch（return 1）',
 check('未挂载时切后端只记偏好、不动 pin',
   /pin 先保持不动/.test(cliForMounted));
 
+// ── 6d. 客户端/宿主版本握手 ─────────────────────────────────────────────
+// 踩过的真实体验：client 走软链+HMR，改文件刷新就是新版；host 必须重启才换。
+// 于是"面板上有输入框、点了毫无反应"——旧宿主静默忽略 tavilyApiKey。
+// 现在宿主报 apiVersion，客户端低于它就直接说"要重启"，不再假装成功。
+console.log('\n客户端/宿主版本握手');
+check('宿主声明 apiVersion', typeof mod.HOST_API_VERSION === 'number' && mod.HOST_API_VERSION >= 2);
+const clientSrc2 = readFileSync(join(PACK, 'plugins', 'dsh-web-search-switch', 'lib', 'client.js'), 'utf8');
+check('客户端声明期望的宿主版本', /EXPECTED_HOST_API\s*=\s*2/.test(clientSrc2));
+check('客户端在版本不足时给出"重启 DSH"的明确提示', /宿主端插件是旧版本/.test(clientSrc2) && /restart-dsh\.sh/.test(clientSrc2));
+check('客户端在版本不足时禁用输入与保存按钮',
+  /disabled: busy \|\| hostStale/.test(clientSrc2) && /hostStale \|\| !keyDraft\.trim\(\)/.test(clientSrc2));
+check('保存逻辑里也有拦截（不只靠 disabled）',
+  /state\.apiVersion < EXPECTED_HOST_API/.test(clientSrc2));
+
 // ── 7. CLI 与接线 ───────────────────────────────────────────────────────
 console.log('\nCLI 与接线');
 const cliSrc = readFileSync(join(PACK, 'tools', 'set-search-provider.mjs'), 'utf8');

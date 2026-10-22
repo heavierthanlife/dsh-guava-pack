@@ -55,6 +55,13 @@ const STATE_FILE_NAME = 'web-search-switch.json';
 
 const BACKENDS = ['official', 'tavily'];
 
+/**
+ * 宿主能力版本（客户端会比对）。
+ *   1 = 只有后端切换
+ *   2 = 支持在面板里保存 Tavily key
+ */
+const HOST_API_VERSION = 2;
+
 const DSH_HOME = process.env.DSH_HOME || join(process.env.HOME || '', 'dsh');
 
 /** 偏好文件绝对路径。 */
@@ -395,6 +402,16 @@ async function readState(ctx) {
   const tavilyKey = await resolveSecret(ctx, TAVILY_API_KEY_ENV);
   const ownTavilyKey = readStateFile().tavilyApiKey;
   return {
+    /**
+     * 宿主能力版本。客户端据此**判断自己是不是在跟一个旧宿主说话**。
+     *
+     * 为什么必须有：client 半边走软链 + HMR，改文件刷新页面就是新版；
+     * 而 host 半边必须重启才换。于是会出现"面板上有输入框、点了却毫无反应"
+     * 的组合 —— 旧宿主不认识 `tavilyApiKey` 字段，静默忽略、返回的 state 里
+     * 也没有 tavilyKeyFromPanel，看起来就像按钮坏了（真踩过）。
+     * 版本号让这种错位变成一句明确的提示，而不是让人猜。
+     */
+    apiVersion: HOST_API_VERSION,
     backend: readBackend(),
     // 面板据此决定是否显示"已保存（本机）"，以及要不要让用户填。
     tavilyKeyFromPanel: typeof ownTavilyKey === 'string' && ownTavilyKey.length > 0,
@@ -573,6 +590,6 @@ async function apply(ctx) {
 
 export {
   apply, inject, name, PROVIDER_ID, ROUTE_PATH, BACKENDS,
-  readBackend, writeBackend, readStateFile, writeStateFile, stateFile,
+  readBackend, writeBackend, readStateFile, writeStateFile, stateFile, HOST_API_VERSION,
 };
 export default { apply, inject, name };

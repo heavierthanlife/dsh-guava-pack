@@ -23,6 +23,13 @@ window.__ModuleLoader__.load({
 
     const ROUTE = '/web-search-switch';
 
+    /**
+     * 客户端期望的宿主能力版本。
+     * 宿主 `state` 里没有这个字段（= 旧宿主）或版本更低时，**不要假装保存成功** ——
+     * 旧宿主不认识 `tavilyApiKey`，会静默忽略，用户看到的就是"点了没反应"。
+     */
+    const EXPECTED_HOST_API = 2;
+
     const T = {
       title: '搜索后端',
       desc: '模型调用 web_search 时走哪个后端。切换立即生效，无需重启 DSH。',
@@ -37,6 +44,8 @@ window.__ModuleLoader__.load({
       keySaved: '已保存（本机）',
       keyClear: '清除',
       keyHint: '没 key 时切到 Tavily 会报 CREDENTIAL_MISSING。填在这里可以立刻生效，不用改 .bashrc / 不用重启。',
+      hostStale: '宿主端插件是旧版本，无法保存 key（点了不会有反应）。请重启一次 DSH：~/dsh/restart-dsh.sh',
+      loaded: '已刷新',
       pinWarning: '注意：web.searchProvider 没有钉在 switch 上，切换不会生效（需要重启 DSH 让 profile 生效）。',
     };
 
@@ -120,6 +129,11 @@ window.__ModuleLoader__.load({
       /** 保存/清除 Tavily key：走同一个 set 接口（顺带保持当前后端不变）。 */
       function saveKey(value) {
         if (busy) return;
+        // 旧宿主会静默忽略这个字段 —— 与其"点了没反应"，不如当场说明。
+        if (!state || typeof state.apiVersion !== 'number' || state.apiVersion < EXPECTED_HOST_API) {
+          setError(T.hostStale);
+          return;
+        }
         setBusy(true);
         setError('');
         call('set', { backend: state ? state.backend : 'official', tavilyApiKey: value })
@@ -160,6 +174,13 @@ window.__ModuleLoader__.load({
 
       if (error) children.push(h('div', { key: 'err', className: 'wsw_err' }, error));
 
+      // 版本错位：宿主还没升级到支持保存 key。这不是用户的操作问题，必须直说。
+      var hostApi = typeof state.apiVersion === 'number' ? state.apiVersion : 0;
+      var hostStale = hostApi < EXPECTED_HOST_API;
+      if (hostStale) {
+        children.push(h('div', { key: 'stale', className: 'wsw_err' }, T.hostStale));
+      }
+
       children.push(h('div', { key: 'key', className: 'wsw_key' }, [
         h('label', { key: 'l' }, T.keyLabel + (state.tavilyKeyFromPanel ? '（' + T.keySaved + '）' : '')),
         h('div', { key: 'row', className: 'row' }, [
@@ -168,19 +189,19 @@ window.__ModuleLoader__.load({
             type: 'password',
             value: keyDraft,
             placeholder: T.keyPlaceholder,
-            disabled: busy,
+            disabled: busy || hostStale,
             onChange: function (e) { setKeyDraft(e.target.value); },
           }),
           h('button', {
             key: 's',
             type: 'button',
-            disabled: busy || !keyDraft.trim(),
+            disabled: busy || hostStale || !keyDraft.trim(),
             onClick: function () { saveKey(keyDraft); },
           }, T.keySave),
           state.tavilyKeyFromPanel ? h('button', {
             key: 'c',
             type: 'button',
-            disabled: busy,
+            disabled: busy || hostStale,
             onClick: function () { saveKey(''); },
           }, T.keyClear) : null,
         ]),

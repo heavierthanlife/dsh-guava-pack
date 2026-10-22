@@ -390,6 +390,10 @@ DSH 凭证库 → 进程环境（`~/.bashrc`，**改完要重启**）→ **设�
 
 没配 key 时切过去不会崩：搜索会回一条结构化错误，直接说明缺哪个变量。
 
+⚠️ **client 半边刷新即生效，host 半边必须重启**。两者错位时（典型症状：面板上有
+key 输入框，填完点保存毫无反应且不报错），插件会用 `state.apiVersion` 识别出来并
+在面板上提示"请重启 DSH"，不再静默失败。
+
 ⚠️ CLI 会先确认"运行中的 DSH 真的挂载了插件"（比对 `storages/web-search-switch.mounted.json`
 的 pid 与监听 3080 的进程）。**装好但没重启**时它拒绝直接钉 `switch`，只记偏好 ——
 否则搜索会立刻 `configured provider "switch" is not registered`（踩过）。

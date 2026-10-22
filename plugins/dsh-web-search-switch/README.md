@@ -56,6 +56,18 @@ brave / serper / firecrawl 也都 404）。
 
 没配 key 时切到 Tavily **不会崩**：搜索会返回一条结构化错误，直接告诉你缺哪个变量。
 
+## ⚠️ client / host 版本错位（踩过的真实体验）
+
+client 半边是**软链 + HMR**：改文件刷新页面就是新版。
+host 半边**必须重启**才换。所以会出现这种组合：
+
+> 面板上有 Tavily key 输入框（新 client）→ 填好点保存 → **毫无反应、也不报错**。
+
+因为旧宿主不认识 `tavilyApiKey` 字段，静默忽略，返回的 state 里也没有
+`tavilyKeyFromPanel`。现在修了：宿主在 `state.apiVersion` 里声明能力版本
+（`2` = 支持保存 key），客户端拿不到或版本不够时，**直接把"请重启 DSH"打在面板上**
+并禁用输入框，而不是假装保存成功。
+
 ## 偏好文件
 
 ```
