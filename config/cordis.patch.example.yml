@@ -164,6 +164,13 @@
               low: low
               medium: medium
               high: high
+          - id: gpt-6.1-sol
+            name: GPT 6.1 Sol
+            contextWindow: 1050000
+            maxTokens: 64000
+            input:
+              - text
+              - image
       commandcode:
         apiKeyEnv: COMMANDCODE_API_KEY
         displayName: CommandCode (本地桥接 / Go 套餐)

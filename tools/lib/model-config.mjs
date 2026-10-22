@@ -156,6 +156,7 @@ export async function fetchModels(url, apiKey, api, timeoutMs = 20000) {
 // 之后每次同步都保留手工值（见 parseModels 的「保留原始文本」设计）。
 export const FAMILIES = [
   { test: /^gpt-oss/, contextWindow: 131072, maxTokens: 32768, input: ['text'] },
+  { test: /^gpt-6/, contextWindow: 1050000, maxTokens: 64000, input: ['text', 'image'] },
   { test: /^gemini-/, contextWindow: 1000000, maxTokens: 65536, input: ['text', 'image'] },
   { test: /^claude-/, contextWindow: 200000, maxTokens: 64000, input: ['text', 'image'] },
   { test: /^gpt-/, contextWindow: 200000, maxTokens: 64000, input: ['text'] },

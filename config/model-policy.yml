@@ -87,14 +87,14 @@ providers:
       on_missing: keep
 
   # ── agentrouter ───────────────────────────────────────────────────────────
-  # 意图：要**最新的可用 ds**。
+  # 意图：最新的可用 ds + gpt-6.1-sol
   agentrouter:
-    intent: 最新的可用 deepseek
+    intent: 最新的可用 deepseek 与 gpt-6.1-sol
     pick:
-      family: '^deepseek'
-      exclude: []          # 该家只有 4 个模型，没有非对话噪音
-      # take: latest = 取版本号最高的一个
-      take: latest
+      explicit:
+        - deepseek-v4-flash
+        - gpt-6.1-sol
+      on_missing: keep
 
   # ── opencode-go / opencode / commandcode ──────────────────────────────────
   # 意图：除了 ds，只要**最新的可用的免费模型**。
