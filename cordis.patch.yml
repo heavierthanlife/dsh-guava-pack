@@ -24,3 +24,10 @@
 
     - id: code-theme
       name: ./plugins/dsh-code-theme/index.js
+
+    # 搜索后端一键切换：注册 ctx.web 的 provider（id = switch），按偏好转发到
+    # 「官方 DeepSeek」或「Tavily」。
+    # ⚠️ 必须同时把 `web` 条目的 searchProvider 钉成 `switch`（见 config 模板），
+    #    否则 seam 仍用 deepseek-official，本插件的切换不生效。
+    - id: web-search-switch
+      name: ./plugins/dsh-web-search-switch/lib/index.js

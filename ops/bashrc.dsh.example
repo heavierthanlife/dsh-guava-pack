@@ -42,3 +42,6 @@ export OPENCODE_GO_API_KEY=
 export COMMANDCODE_API_KEY=
 export ANTIGRAVITY_API_KEY=
 export AGENTROUTER_API_KEY=
+# Tavily 联网搜索（可选）：dsh-web-search-switch 插件切到 Tavily 时用这个 key。
+# 也可以填在 DSH 凭证库（设置 → 搜索后端会显示"已配置/未配置"）。
+export TAVILY_API_KEY=

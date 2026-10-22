@@ -346,6 +346,33 @@ services/commandcode-bridge/start.sh
 **不装也行的部分是安全的**：`provider-router` 没启动时，只有那些把 baseURL 指向它的供应商会失败；
 其余供应商不受影响。所以云端可以先只装不启用。
 
+## 联网搜索后端：官方 ↔ Tavily 一键切换
+
+DSH 的搜索是可插拔的（`ctx.web` seam）。官方**只发布了三个** provider：
+`deepseek-official` / `exa` / `perplexity` —— **没有 Tavily**
+（`@deepseek-ai/dsh-web-search-tavily` 在 npm 上 404，brave / serper / firecrawl 同样没有）。
+
+而且选了 provider 之后**改起来要重启**：`searchProvider` 是插件构造时读的，且两个
+provider 同时可用时 seam 会报 `WEB_PROVIDER_AMBIGUOUS`。所以本包加了一个
+**转发式 provider**：`web.searchProvider` 钉成 `switch`，由它按运行时偏好转发到
+官方或 Tavily —— 切换只是改一个 JSON，**下一次搜索立即生效**。
+
+```sh
+# 看状态 / 切换（也可以在 设置 → 搜索后端 里点按钮）
+/search-backend
+/search-backend tavily
+/search-backend official
+```
+
+Tavily 的 key 引用名固定为 `TAVILY_API_KEY`（`~/.bashrc` 或 DSH 凭证库）。
+没配 key 时切过去不会崩：搜索会回一条结构化错误，直接说明缺哪个变量。
+
+偏好文件：`<DSH_HOME>/storages/web-search-switch.json`（0600，热读，坏了回落官方）。
+
+取舍（如实记录）：官方后端走 **API key**，没有复刻官方插件的
+「DeepSeek 账号登录态优先」那条路径；需要账号态时把 `searchProvider` 改回
+`deepseek-official`（要重启）。详见 `plugins/dsh-web-search-switch/README.md`。
+
 ## 一条命令体检（出问题先跑它）
 
 ```sh
@@ -426,6 +453,48 @@ node tools/preflight.mjs
 
 浏览器里应看到设置页多出 **5 项**：「移动端显示 / 主题管理 / 供应商路由 / 连接信息 / **代码配色**」，
 主题列表里多出「Cyberpunk 2077」；侧栏还会多一行「清理归档会话」（在「设置」之上）。
+
+## DSH 版本与升级评估
+
+**当前安装**：`0.2.1-alpha.3`（2026-10-14）。
+
+**registry 上更新的**（2026-10-22 查询）：
+
+| dist-tag | 版本 | 发布时间 |
+|---|---|---|
+| `alpha` | **0.2.1-alpha.5** | 2026-10-16 |
+| `latest` / `next` | **0.2.1-rc.2** | 2026-10-17 |
+
+所以有 2 个 alpha 之后的版本可选。**升级兼容性实测**（不是猜的）：
+
+| 风险点 | 结论 |
+|---|---|
+| `dsh-tools` 的 `required` 补丁锚点 | ✅ `0.2.1-rc.2` 里锚点原样存在 |
+| `pi-ai` Anthropic 两处补丁锚点 | ✅ `1.3.0` / `1.4.0` 三处锚点全部命中（latest 是 1.4.0，rc.2 只要求 `^1.1.0`） |
+| base 组合的**条目 id**（profile 靠 id 打补丁） | ✅ 95 → 96，**零改名、零删除**，只新增 `web-deepseek-api` |
+| 本包用到的 6 个 seam 的 `.d.ts`（slots / webServer / theme / locale / commands / connection） | ✅ 与 alpha.3 **逐字节相同** |
+| 新增能力 | `web-deepseek-api`：**DeepSeek 专用的 Search / Fetch API**（不再用一次模型回合换一次搜索） |
+
+结论：**可以升**，风险集中在"升级后必须重打两个补丁"这一步（脚本自带锚点断言，
+锚点没了会直接报错而不是改坏代码）。
+
+建议步骤（两条命令都要跑，别只用 `start`）：
+
+```sh
+cd ~/dsh
+git -C playground/themes/dsh-guava-pack pull          # 先拿到最新补丁脚本
+pnpm update @deepseek-ai/dsh@0.2.1-rc.2               # 或 0.2.1-alpha.5
+node playground/themes/dsh-guava-pack/install.mjs --check   # 先看补丁状态
+node playground/themes/dsh-guava-pack/install.mjs --patch   # 重打补丁（幂等）
+node playground/themes/dsh-guava-pack/tools/preflight.mjs   # 体检
+systemctl --user restart dsh.service                  # 必须 restart
+```
+
+若想留在 stable 一些的轨道：`0.2.1-rc.2` 是当前 `latest`，比 `alpha.5` 更新；
+两个都跨过了 alpha.3。
+
+**我没做的**：没有实际执行升级（会中断当前会话，且需要在真机上验证 UI）。
+上面是**静态兼容性证据 + 风险清单**，不是升级承诺。
 
 ## 已知边界
 

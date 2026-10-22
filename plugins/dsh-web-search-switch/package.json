@@ -1,0 +1,49 @@
+{
+  "name": "dsh-web-search-switch",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "在官方 DeepSeek 联网搜索与 Tavily 之间一键切换（ctx.web 搜索 provider + 设置面板 + /search-backend 命令）。",
+  "meta": {
+    "title": "Web Search Switch",
+    "description": "把 ctx.web 的搜索后端钉到一个可切换的 provider，在官方与 Tavily 之间即时切换，无需重启。"
+  },
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-web": "*",
+    "@deepseek-ai/dsh-web-search-deepseek": "*"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-web": { "optional": true },
+    "@deepseek-ai/dsh-web-search-deepseek": { "optional": true }
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "web-search",
+    "tavily"
+  ],
+  "license": "MIT"
+}

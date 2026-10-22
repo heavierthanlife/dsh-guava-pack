@@ -1,0 +1,15 @@
+# dsh-web-search-switch — bundle patch layer。
+#
+# 挂载一个 host 插件：它注册 `ctx.web` 的搜索 provider（id = `switch`），
+# 并按运行时偏好转发到「官方 DeepSeek」或「Tavily」。
+#
+# ⚠️ 必须同时把 `web` 条目的 `searchProvider` 钉成 `switch`，否则 seam 会继续
+# 用 `deepseek-official`，本插件的切换就不生效。profile 里那段长这样：
+#
+#   - id: web
+#     config:
+#       searchProvider: switch
+#       fetchProvider: http
+- insert:
+    - id: web-search-switch
+      name: 'dsh-web-search-switch'

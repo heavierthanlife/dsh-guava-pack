@@ -297,6 +297,14 @@
   config:
     default: standard
     selectedDefault: cordis
+# ── 联网搜索后端：钉到可切换的 provider ─────────────────────────────
+# dsh-base 默认 `searchProvider: deepseek-official`（写死官方）。钉成 `switch`
+# 之后，可在 设置 → 搜索后端 里一键在「官方 DeepSeek / Tavily」之间切换，
+# 无需重启（偏好存 <DSH_HOME>/storages/web-search-switch.json，每次搜索热读）。
+- id: web
+  config:
+    searchProvider: switch
+    fetchProvider: http
 # ── 主题插件开关 ────────────────────────────────────────────────
 # 只保留赛博朋克主题；dsh-bloom-theme / dsh-theme-plugin（中国传统颜色）已卸载，
 # 对应的孤儿条目已删除。dsh-catppuccin / dsh-theme-endfield 依赖 0.1.7 已移除的

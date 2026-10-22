@@ -44,6 +44,8 @@ const results = [];
 const ok = (area, msg) => results.push({ level: 'ok', area, msg });
 const warn = (area, msg, fix) => results.push({ level: 'warn', area, msg, fix });
 const fail = (area, msg, fix) => results.push({ level: 'fail', area, msg, fix });
+/** 纯信息项：既不告警也不失败，只是让报告完整（例如"还没切过搜后端"）。 */
+const info = (area, msg) => results.push({ level: 'info', area, msg });
 
 /** 跑一条命令，返回 { code, out }；不抛错（我们要自己判退出码）。 */
 function run(cmd, args, opts = {}) {
@@ -188,6 +190,42 @@ if (refs.code === 0) {
   warn('models', `--check-refs 退出码 ${refs.code}`, refsOut.split('\n').slice(-3).join(' ; '));
 }
 
+/* ── 8. 搜索后端接线（官方 ↔ Tavily 一键切换）────────────────────────── */
+
+try {
+  const { loadYaml } = await import('./lib/yaml.mjs');
+  const yaml = await loadYaml();
+  const patchFile = join(DSH_HOME, 'profiles', 'web', 'cordis.patch.yml');
+  const doc = yaml.load(readFileSync(patchFile, 'utf8'));
+  const webEntry = (Array.isArray(doc) ? doc : []).find((e) => e?.id === 'web');
+  const pinned = webEntry?.config?.searchProvider;
+  if (pinned === 'switch') {
+    ok('search', 'web.searchProvider = switch（可在 设置 → 搜索后端 里切官方/Tavily）');
+  } else if (pinned === undefined) {
+    warn('search', 'web.searchProvider 未钉住 → base 默认用 deepseek-official，切换插件不会生效',
+      `在 ${patchFile} 加：- id: web / config: { searchProvider: switch, fetchProvider: http }`);
+  } else {
+    warn('search', `web.searchProvider = ${pinned}（不是 switch）→ 搜索后端切换不生效`, '改成 switch 后重启 DSH');
+  }
+  const preferFile = join(DSH_HOME, 'storages', 'web-search-switch.json');
+  if (existsSync(preferFile)) {
+    try {
+      const backend = JSON.parse(readFileSync(preferFile, 'utf8'))?.backend;
+      ok('search', `当前偏好后端：${backend}（${preferFile}）`);
+      if (backend === 'tavily' && !process.env.TAVILY_API_KEY) {
+        warn('search', '偏好是 Tavily 但环境里没有 TAVILY_API_KEY',
+          '写进 ~/.bashrc 或 DSH 凭证库；否则每次搜索都会报 CREDENTIAL_MISSING');
+      }
+    } catch {
+      warn('search', '偏好文件存在但解析不了（搜索会回落 official）', preferFile);
+    }
+  } else {
+    info('search', '还没有偏好文件 → 搜索走 official（切换一次就会生成）');
+  }
+} catch (err) {
+  warn('search', `读不到搜索后端配置：${String(err?.message ?? err)}`, '');
+}
+
 /* ── 输出 ─────────────────────────────────────────────────────────────── */
 
 const failures = results.filter((r) => r.level === 'fail');
@@ -196,9 +234,9 @@ const warnings = results.filter((r) => r.level === 'warn');
 if (JSON_MODE) {
   console.log(JSON.stringify({ ok: results.filter((r) => r.level === 'ok'), warn: warnings, fail: failures }, null, 2));
 } else {
-  const icon = { ok: '✅', warn: '⚠️ ', fail: '❌' };
+  const icon = { ok: '✅', warn: '⚠️ ', fail: '❌', info: 'ℹ️ ' };
   const label = { runtime: '运行环境', pack: 'pack 位置', patches: '依赖补丁', service: '本地服务',
-    mode: '路由模式', keys: '凭证', models: '模型引用' };
+    mode: '路由模式', keys: '凭证', models: '模型引用', search: '搜索后端' };
   let area = null;
   for (const r of results) {
     if (r.area !== area) { area = r.area; console.log(`\n── ${label[area] ?? area} ──`); }
