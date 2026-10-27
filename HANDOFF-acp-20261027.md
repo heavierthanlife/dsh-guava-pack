@@ -89,6 +89,37 @@ tools/tests/acp-*.mjs    门禁（mount/engine/ledger/nudge/e2e/client）
 tools/tests/lib/acp-driver.mjs  进程内 e2e 驱动（只在隔离 profile 里经 --patch 挂载）
 ```
 
+## 4.5 追加（同日）：合并 dsh-context-guard，两个药丸合成一个
+
+用户决策：**方案乙**（彻底合并，而不是把 guard 阈值调到 85% 留双 owner），
+并且 **handoff 搬过来**、兜底条件 = **连续 2 次 nudge 未响应 且 ≥75%**。
+
+新增：
+
+| 文件 | 作用 |
+|---|---|
+| `lib/fallback.mjs` | 兜底纯逻辑：`countUnansweredNudges`（从日志数，模型一压自动归零）+ `decideFallback` |
+| `lib/handoff.mjs` | 交接文档（从 guard 迁移）：日志重建统计 → `HANDOFF-context-acp-*.md` |
+| `engine.compactByFallback()` | 调父类 pressure 压缩；阈值由生成器写入引擎行 `basic.thresholdRatio`（与面板同源） |
+| `nudge` 的 `attemptFallback()` | 在 `next()` **之前**执行（先压后组装请求，与 compaction-basic 同序） |
+| `settings.mjs` | 面板 v2：`lastFallback` / `handoff` / `fallbackAfterNudges` + 两个新 stepper（兜底阈值、压满几次） |
+| `client.js` | 一个药丸里显示：块数/占比/上次 nudge/**上次兜底**/**交接文档** |
+
+改动的原因（实测）：两个药丸数的是**同一个** `compaction/summary` 事件
+（用户看到「压缩 1 次」+「ACP 1 块」= 同一件事）；且 guard 到 65% 会抢在模型决定前
+用引擎 LLM 摘要压一次，破坏 ACP 语义。
+
+profile 变更：`profiles/web/package.json` 的 `dsh.profile.bundles` 删除
+`dsh-context-guard`（`dependencies` 保留，回滚加回一行 + 重启）。
+
+门禁：`npm test` exit 0 —— 原有 4 套 + ACP 7 套（engine/ledger/nudge/**fallback 37**/
+**handoff 37**/mount/e2e/client）+ `gen-acp-preset --check`；`install --check` 0、`preflight` 0。
+
+验收（重启后）：只剩一个 composer dock 药丸；面板多出「兜底自动压缩 75%·连续2次」、
+「上次兜底」、「交接文档」；跑满 2 次压缩后会话目录出现 `HANDOFF-context-acp-*.md`。
+
+---
+
 ## 5. 未做/待观察（人工项）
 
 - 面板 pill 的**视觉与交互**未人工验收（自动门禁只证明客户端模块进 boot 清单且

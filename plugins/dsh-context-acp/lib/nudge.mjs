@@ -41,9 +41,10 @@
  */
 
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
+import { countUnansweredNudges, decideFallback, makeFallbackRecord } from './fallback.mjs';
 
 import { buildLedger } from './ledger.mjs';
-import { markArmed, recordError, recordNudge, recordSkip, resetTurn, stateOf } from './state.mjs';
+import { markArmed, recordError, recordNudge, recordSkip, resetTurn, stateOf, recordFallback } from './state.mjs';
 
 /** runtime.nudge 缺项时的兜底（与 config/acp.json 保持一致）。 */
 const DEFAULT_NUDGE = Object.freeze({
@@ -328,7 +329,89 @@ export function createNudgeHandler(deps) {
   /** 同一 agent 的内部错误只 warn 一次（recordError 每次都记，面板仍可见）。 */
   const warned = new WeakSet();
 
+  /**
+   * 兜底自动压缩：**连续 N 次 nudge 未被响应 且 占用 ≥ 阈值**时自己动手。
+   *
+   * 时机要求：必须在 `next()` **之前**。`next()` 会组装本轮请求；压缩会改变
+   * surface（折叠节点），先组装再压会让本轮请求引用已被折叠的节点。
+   * 内置 `compaction-basic` 也是先压后 next，这里保持一致。
+   *
+   * 失败不抛：记进 state（面板可见）并放行 —— 兜底失败不该让整个 turn 失败。
+   * @param {object} payload `agent/pre-step` 的 payload
+   */
+  async function attemptFallback(payload) {
+    const fallbackCfg = deps.runtime?.fallback;
+    if (fallbackCfg?.enabled === false) return;
+    if (payload?.signal?.aborted === true) return;
+    const agent = payload?.agent;
+    if (agent === null || typeof agent !== 'object') return;
+
+    const engine = deps.resolveEngine?.(agent);
+    if (typeof engine?.compactByFallback !== 'function') return;
+
+    const step = typeof payload.step === 'number' ? payload.step : -1;
+    const live = stateOf(agent);
+    const retryCooldown = Math.max(1, Math.round(fallbackCfg?.retryCooldownSteps ?? 3));
+    // 节流：上次兜底后的 N 个 step 内不再试。没有可压区间时每步重试会把
+    // meter 测量与区间选择变成热路径。
+    if (live.lastFallbackStep >= 0 && step >= 0 && step - live.lastFallbackStep < retryCooldown) return;
+
+    let pressure = readTestPressure();
+    if (pressure === undefined) pressure = readProjectionPressure(deps, agent);
+    if (pressure === undefined) pressure = await readMeterPressure(deps, agent, windowCache);
+    if (pressure === undefined) return;
+
+    let unanswered = 0;
+    try {
+      unanswered = countUnansweredNudges(agent.session?.snapshotEvents?.() ?? []);
+    } catch {
+      unanswered = 0; // 读日志失败按"没提醒过"处理：宁可不动手，也不要误压。
+    }
+    const fb = decideFallback({
+      used: pressure.usedTokens,
+      window: pressure.contextWindow,
+      unansweredNudges: unanswered,
+      cfg: fallbackCfg,
+    });
+    if (!fb.compact) return;
+
+    let detail = '';
+    try {
+      const fbResult = await engine.compactByFallback(agent, payload.signal);
+      detail = fbResult === null || fbResult === undefined ? 'no-range' : 'compacted';
+    } catch (error) {
+      detail = `error: ${String(error?.message ?? error)}`.slice(0, 200);
+      try {
+        recordError(agent, error);
+      } catch {
+        /* state 层不再抛 */
+      }
+    }
+    try {
+      recordFallback(agent, {
+        ...makeFallbackRecord({
+          at: Date.now(),
+          sessionId: agent.session?.id,
+          reason: fb.reason,
+          compact: true,
+          ratio: fb.ratio,
+          detail,
+        }),
+        step,
+      });
+    } catch {
+      /* 面板记录失败不影响本轮 */
+    }
+    deps.logger?.info?.(`[acp] 兜底自动压缩：${detail}（${fb.reason}, ${Math.round((fb.ratio ?? 0) * 100)}%）`);
+  }
+
   return async (payload, next) => {
+    // 兜底压缩放在 next() 之前（见 attemptFallback 注释）；它自己吞掉失败。
+    try {
+      await attemptFallback(payload);
+    } catch {
+      /* 兜底绝不影响本轮请求 */
+    }
     // 契约：先跑完下游，拿到最终 decision 再决定要不要改 messages。
     const result = await next();
     if (result === null || typeof result !== 'object' || result.kind !== 'enter') return result;

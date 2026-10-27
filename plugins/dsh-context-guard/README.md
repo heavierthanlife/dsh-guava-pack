@@ -1,3 +1,6 @@
+> **已合并进 `dsh-context-acp`（2026-10-27）**：自动压缩 → ACP 的兜底压缩（连续 2 次 nudge 未响应且 ≥75%）；handoff → ACP 的交接文档。
+> 本插件已从 profile `bundles` 移除，代码保留用于回滚（加回一行 + 重启）。
+
 # dsh-context-guard
 
 在 DSH 自带的上下文占用显示（composer 里那个环形 `ContextMeter`）之外，

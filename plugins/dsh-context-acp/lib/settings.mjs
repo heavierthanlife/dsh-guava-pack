@@ -35,7 +35,8 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { latestNudgeOf } from './state.mjs';
+import { latestFallbackOf, latestNudgeOf } from './state.mjs';
+import { DEFAULT_FALLBACK } from './fallback.mjs';
 
 import { z } from 'zod';
 
@@ -43,7 +44,14 @@ import { z } from 'zod';
 export const ROUTE_PATH = '/context-acp';
 
 /** 可从面板修改的字段白名单（其余一律忽略，避免客户端写坏配置）。 */
-export const TUNABLE_KEYS = Object.freeze(['nudge.pressureRatio', 'nudge.growthTokens', 'retain.decompressPageSize', 'retain.searchLimit']);
+export const TUNABLE_KEYS = Object.freeze([
+  'nudge.pressureRatio',
+  'nudge.growthTokens',
+  'retain.decompressPageSize',
+  'retain.searchLimit',
+  'fallback.ratio',
+  'handoff.afterCompactions',
+]);
 
 /** 与 config/acp.json 一致的兜底值（settings 不能 import 根 index，避免循环）。 */
 const DEFAULTS = Object.freeze({
@@ -51,6 +59,8 @@ const DEFAULTS = Object.freeze({
   growthTokens: 12000,
   decompressPageSize: 8,
   searchLimit: 20,
+  fallbackRatio: 0.75,
+  handoffAfter: 2,
 });
 
 /** 投影 wire 字段（客户端只看到这七个）。 */
@@ -130,6 +140,12 @@ function tunablesOf(runtime) {
     growthTokens: isFiniteNumber(runtime?.nudge?.growthTokens) ? runtime.nudge.growthTokens : DEFAULTS.growthTokens,
     decompressPageSize: isFiniteNumber(runtime?.retain?.decompressPageSize) ? runtime.retain.decompressPageSize : DEFAULTS.decompressPageSize,
     searchLimit: isFiniteNumber(runtime?.retain?.searchLimit) ? runtime.retain.searchLimit : DEFAULTS.searchLimit,
+    // 兜底自动压缩的阈值（与 nudge.pressureRatio 独立：提醒早，兜底晚）。
+    fallbackRatio: isFiniteNumber(runtime?.fallback?.ratio) ? runtime.fallback.ratio : DEFAULTS.fallbackRatio,
+    // 压缩达到几次后写交接文档。
+    handoffAfter: isFiniteNumber(runtime?.handoff?.afterCompactions)
+      ? runtime.handoff.afterCompactions
+      : DEFAULTS.handoffAfter,
   };
 }
 
@@ -156,10 +172,14 @@ export function applyTunables(runtime, payload) {
   const nextGrowth = clampInteger(readTunable(payload, 'nudge', 'growthTokens'), 1000, 100000);
   const nextPageSize = clampInteger(readTunable(payload, 'retain', 'decompressPageSize'), 1, 50);
   const nextSearchLimit = clampInteger(readTunable(payload, 'retain', 'searchLimit'), 1, 50);
+  const nextFallbackRatio = clampRatio(readTunable(payload, 'fallback', 'ratio'));
+  const nextHandoffAfter = clampInteger(readTunable(payload, 'handoff', 'afterCompactions'), 1, 5);
 
   const changed = {};
   const nudgePatch = {};
   const retainPatch = {};
+  const fallbackPatch = {};
+  const handoffPatch = {};
 
   if (nextRatio !== undefined && nextRatio !== nudge.pressureRatio) {
     nudgePatch.pressureRatio = nextRatio;
@@ -178,11 +198,24 @@ export function applyTunables(runtime, payload) {
     changed.searchLimit = nextSearchLimit;
   }
 
+  const fallback = base.fallback !== null && typeof base.fallback === 'object' ? base.fallback : {};
+  const handoff = base.handoff !== null && typeof base.handoff === 'object' ? base.handoff : {};
+  if (nextFallbackRatio !== undefined && nextFallbackRatio !== fallback.ratio) {
+    fallbackPatch.ratio = nextFallbackRatio;
+    changed.fallbackRatio = nextFallbackRatio;
+  }
+  if (nextHandoffAfter !== undefined && nextHandoffAfter !== handoff.afterCompactions) {
+    handoffPatch.afterCompactions = nextHandoffAfter;
+    changed.handoffAfter = nextHandoffAfter;
+  }
+
   return {
     runtime: {
       ...base,
       ...(Object.keys(nudgePatch).length > 0 ? { nudge: { ...nudge, ...nudgePatch } } : {}),
       ...(Object.keys(retainPatch).length > 0 ? { retain: { ...retain, ...retainPatch } } : {}),
+      ...(Object.keys(fallbackPatch).length > 0 ? { fallback: { ...fallback, ...fallbackPatch } } : {}),
+      ...(Object.keys(handoffPatch).length > 0 ? { handoff: { ...handoff, ...handoffPatch } } : {}),
     },
     changed,
   };
@@ -204,14 +237,14 @@ export async function loadSavedSettings(runtime) {
     if (saved === null || typeof saved !== 'object' || Array.isArray(saved)) return runtime;
 
     const merged = { ...runtime };
-    for (const section of ['nudge', 'retain', 'engine']) {
+    for (const section of ['nudge', 'retain', 'engine', 'fallback', 'handoff']) {
       const patch = saved[section];
       if (patch === null || typeof patch !== 'object' || Array.isArray(patch)) continue;
       const base = runtime?.[section];
       merged[section] = { ...(base !== null && typeof base === 'object' ? base : {}), ...patch };
     }
     for (const [key, value] of Object.entries(saved)) {
-      if (key === 'nudge' || key === 'retain' || key === 'engine') continue;
+      if (key === 'nudge' || key === 'retain' || key === 'engine' || key === 'fallback' || key === 'handoff') continue;
       merged[key] = value;
     }
     // 落盘值也可能被手改坏：用与面板相同的夹取路径兜底。
@@ -380,13 +413,19 @@ export function installPanel(deps) {
             sendRpc(res, rpcId, {
               ok: true,
               value: {
-                version: 1,
+                version: 2,
                 backend: deps.runtime?.backend ?? 'acp',
                 // 根插件已挂载（backend=acp）才注册本路由；引擎实例的能力由
                 // nudge 在 pre-step 里用 markArmed 另行验证。
                 armed: true,
                 tunables: tunablesOf(deps.runtime),
                 lastNudge: typeof latestNudgeOf === 'function' ? latestNudgeOf() : null,
+                // 兜底（原 context-guard 的自动压缩）最近一次尝试：为什么动手 / 为什么没动。
+                lastFallback: typeof latestFallbackOf === 'function' ? latestFallbackOf() : null,
+                // 交接文档最近一次真实结果（写没写、写到哪、为什么没写）。
+                handoff: deps.handoff?.last?.() ?? null,
+                handoffAfter: tunablesOf(deps.runtime).handoffAfter,
+                fallbackAfterNudges: deps.runtime?.fallback?.afterUnansweredNudges ?? DEFAULT_FALLBACK.afterUnansweredNudges,
               },
             });
             return;
@@ -404,6 +443,8 @@ export function installPanel(deps) {
                 `${JSON.stringify({
                   nudge: { pressureRatio: tunables.pressureRatio, growthTokens: tunables.growthTokens },
                   retain: { decompressPageSize: tunables.decompressPageSize, searchLimit: tunables.searchLimit },
+                  fallback: { ratio: tunables.fallbackRatio },
+                  handoff: { afterCompactions: tunables.handoffAfter },
                 }, null, 2)}\n`,
                 'utf8',
               );

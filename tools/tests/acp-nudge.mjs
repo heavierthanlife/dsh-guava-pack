@@ -807,7 +807,8 @@ test('installPanel 路由：getSettings 信封 + setSettings 夹取并落盘', a
     eq(got.type, 'server-response', '信封 type');
     eq(got.rpcId, 'r1', 'rpcId 回显');
     eq(got.result.ok, true, 'result.ok');
-    eq(got.result.value.version, 1, 'version');
+    // v2：新增 lastFallback / handoff / handoffAfter / fallbackAfterNudges（合并 context-guard）
+    eq(got.result.value.version, 2, 'version');
     eq(got.result.value.backend, 'acp', 'backend');
     eq(got.result.value.armed, true, 'armed');
     eq(got.result.value.tunables.pressureRatio, 0.65, 'tunables.pressureRatio');

@@ -19,6 +19,18 @@
   "engine": {
     "fallbackToLlmSummary": true
   },
+  "fallback": {
+    "enabled": true,
+    "ratio": 0.75,
+    "afterUnansweredNudges": 2,
+    "retryCooldownSteps": 3
+  },
+  "handoff": {
+    "enabled": true,
+    "afterCompactions": 2,
+    "prefix": "HANDOFF-context-acp",
+    "maxRecentUserMessages": 8
+  },
   "$generated": {
     "upstream": "@deepseek-ai/dsh-web-app@0.2.1-alpha.3",
     "upstreamSha256": "1c4730cc707e1596c9909e20920eadab8c9d35c2f4d63396512712054ae08ef9"

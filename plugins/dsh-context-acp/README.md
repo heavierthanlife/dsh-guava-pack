@@ -65,6 +65,8 @@ ctx.compaction（preset realm，4 个 preset 各一份）
 | `lib/command.mjs` | `/acp` 子命令 |
 | `lib/settings.mjs` | 面板数据：projection `contextAcp` + `/context-acp` 路由 + 设置落盘 |
 | `lib/state.mjs` | 每 agent 瞬时状态（WeakMap；只放「日志里没有也不该进日志」的东西） |
+| `lib/fallback.mjs` | **兜底自动压缩**的纯逻辑：数「未被响应的 nudge」+ 决策（≥75% 且连续 2 次） |
+| `lib/handoff.mjs` | **交接文档**（从 context-guard 迁移）：从日志重建统计 → 写 `HANDOFF-context-acp-*.md` |
 | `client.js` | 面板 pill（composer dock，沿用 context-guard 样式） |
 | `config/acp.json` | **唯一人工配置源**（backend / nudge / retain / engine） |
 | `config/preset-override.generated.yml` | 生成物：4 个 preset 的 `config.plugins` 覆盖 |
@@ -102,7 +104,44 @@ node tools/gen-acp-preset.mjs --write --backend basic
 | `retain.decompressPageSize` | 8 | `decompress` 默认每页条数 |
 | `retain.searchLimit` | 20 | `search_context` 默认命中数 |
 | `retain.protect*` | true | 三类注入行屏障开关（system 恒保护） |
+| `fallback.enabled` | true | 兜底自动压缩开关（关掉 = 纯模型驱动，无安全网） |
+| `fallback.ratio` | 0.75 | 兜底阈值（生成器同时写进引擎行 `basic.thresholdRatio`，两处同源） |
+| `fallback.afterUnansweredNudges` | 2 | 连续几次 nudge 没被响应才动手 |
+| `fallback.retryCooldownSteps` | 3 | 兜底失败（无可压区间）后的节流步数 |
+| `handoff.enabled` | true | 交接文档开关 |
+| `handoff.afterCompactions` | 2 | 压缩满几次写一份（每个会话一份） |
+| `handoff.prefix` | `HANDOFF-context-acp` | 文件名前缀 |
 | `backend` | `"acp"` | `"basic"` = 回滚到内置压缩 |
+
+## 兜底自动压缩 + 交接文档（2026-10-27 合并 `dsh-context-guard`）
+
+合并前有两个插件、两个药丸、两套压缩触发：ACP（模型决定）和 context-guard（到 65%
+**无条件**自己压）。二者会**抢同一件事**，而且 UI 上重复统计同一个
+`compaction/summary` 事件（用户实际看到「压缩 1 次」+「ACP 1 块」是同一件事）。
+
+合并后的退化链是**一条**：
+
+```
+nudge（提醒模型）──模型响应──> 模型自己 compress（模型写的摘要，零额外 LLM 调用）
+        │
+        └──连续 2 次没响应 且 占用 ≥75%──> 兜底自动压缩（引擎 LLM 摘要，父类 pressure 策略）
+                                              │
+                                              └── provider 确认超窗 ──> context-overflow 抢救
+```
+
+为什么兜底走父类而不是新写：区间选择、tool-pair 平衡、`compaction/summary` 记账必须由
+**唯一 token meter** 完成（ACP #54/#103 的教训）。阈值通过生成器写进引擎行的
+`basic.thresholdRatio`，与面板上的兜底阈值是同一个数（改 `acp.json` 后必须重跑
+`gen-acp-preset --write`，否则面板显示 75% 而引擎按旧值动手）。
+
+**交接文档**：从 `dsh-context-guard` 迁移的 `HANDOFF-context-acp-<sid8>-c<N>-<时间>.md`，
+在每轮 `turn/end` 检查一次；统计（轮/步/压缩次数/释放 token/路由）全部从
+`session.snapshotEvents()` **现场重建**，所以同一份日志永远生成同一份文档。
+面板显示「写没写、写在哪、为什么没写」。
+
+**移除 context-guard**：profile `dsh.profile.bundles` 已删掉 `dsh-context-guard`
+（依赖仍保留，回滚时加回一行 + 重启即可）。旧文件 `HANDOFF-context-guard-*.md`
+不会被新插件认领，但内容仍可读。
 
 ## nudge 的真实语义（一条重要偏离，别按旧文档理解）
 

@@ -33,6 +33,10 @@ function emptyState() {
     lastSkipReason: null,
     /** 引擎/工具层最近一次错误（面板「失败可见」）。 */
     lastError: null,
+    /** 最近一次兜底尝试：`{ at, attempted, reason, percent, detail }`（面板可见）。 */
+    lastFallback: null,
+    /** 上次尝试兜底的 step 号（节流，避免每个 step 都试）。 */
+    lastFallbackStep: -1,
     /** 本 agent 的压缩引擎解析到了吗（armed 能力灯）。 */
     armed: false,
   };
@@ -51,6 +55,9 @@ const states = new WeakMap();
  * 账本永远从 session 日志重建。
  */
 let latestNudge = null;
+
+/** 进程内最近一次兜底尝试（同 latestNudge 的理由：面板路由没有 sessionId）。 */
+let latestFallback = null;
 
 /** 取（必要时创建）一个 agent 的状态对象。调用方拿到的是**活引用**，可直接改字段。 */
 export function stateOf(agent) {
@@ -93,6 +100,25 @@ export function recordSkip(agent, reason) {
 export function resetTurn(agent) {
   const state = stateOf(agent);
   state.turnNudges = 0;
+}
+
+/** 记录一次兜底尝试（nudge 模块调用；面板据此说清"兜底为什么动手/没动手"）。 */
+export function recordFallback(agent, record) {
+  const state = stateOf(agent);
+  state.lastFallback = record ?? null;
+  if (typeof record?.step === 'number') state.lastFallbackStep = record.step;
+  latestFallback = record === null || record === undefined ? null : { ...record };
+}
+
+/** 读进程内最近一次兜底（面板路由用；没有则 null，绝不伪造）。 */
+export function latestFallbackOf() {
+  return latestFallback === null ? null : { ...latestFallback };
+}
+
+/** 最近一次兜底尝试（只读快照）。 */
+export function lastFallbackOf(agent) {
+  const value = stateOf(agent).lastFallback;
+  return value === null || value === undefined ? null : { ...value };
 }
 
 /** 记录错误（任何模块都可以调；面板据此显示「失败必须可见」）。 */

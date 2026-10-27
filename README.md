@@ -14,8 +14,8 @@
 | `plugins/provider-router` | 供应商直连 / 经 SSR 路由 + 状态面板（**可配置**） | 自研 |
 | `plugins/dsh-theme-cyberpunk2077` | 赛博朋克 2077 主题（**改装版**） | ⚠️ 原作者 Tommy00748，MIT |
 | `plugins/dsh-opencode-session-header` | 修 OpenCode 的 `400 MissingSessionID` | ⚠️ 原作者 beihzb，MIT |
-| `plugins/dsh-context-guard` | 轮次结束后按阈值自动压缩、统计压缩次数、达上限写 handoff | 自研 |
-| `plugins/dsh-context-acp` | **模型驱动压缩（ACP 全套）**：nudge 提醒 → 模型自己选区间/写摘要（零额外 LLM 调用）→ 账本/`decompress`/`search_context` 找回原文；替换 4 个 agent preset 的 `compaction-basic` 后端 | 自研 |
+| `plugins/dsh-context-guard` | **已合并进 `dsh-context-acp`（2026-10-27）**：自动压缩→兜底压缩、handoff→ACP 内；代码保留用于回滚，不再从 profile 加载 | 自研 |
+| `plugins/dsh-context-acp` | **模型驱动压缩（ACP 全套）**：nudge 提醒 → 模型自己选区间/写摘要（零额外 LLM 调用）→ 账本/`decompress`/`search_context` 找回原文；**兜底自动压缩**（连续 2 次 nudge 未响应且 ≥75%）+ **交接文档**（压满 2 次写 handoff）；替换 4 个 agent preset 的 `compaction-basic` 后端 | 自研 |
 | `plugins/dsh-session-purge` | 清理已归档会话记录（保留产出并写清单），侧栏入口在设置上方一行 | 自研 |
 | `plugins/dsh-code-theme` | 只给代码上色（Monokai Pro / Material / One Dark / GitHub / **OpenCode 官方色值**，共 5 套），自动跟随明暗 + 可强制代码区明暗；附 WCAG 对比度自检 | 自研 |
 | `config/cordis.patch.example.yml` | provider / 模型目录示例（6 家、24 个模型，全走本机路由） | 自研 |

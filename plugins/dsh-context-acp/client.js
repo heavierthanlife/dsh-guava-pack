@@ -34,6 +34,8 @@ window.__ModuleLoader__.load({
     const RATIO_MIN = 20;
     const RATIO_MAX = 95;
     const RATIO_STEP = 5;
+    const HANDOFF_MIN = 1;
+    const HANDOFF_MAX = 5;
     const GROWTH_MIN = 1000;
     const GROWTH_MAX = 100000;
     const GROWTH_STEP = 1000;
@@ -49,6 +51,17 @@ window.__ModuleLoader__.load({
         'panel.used': '上下文占用',
         'panel.lastNudge': '上次 nudge',
         'panel.noNudge': '本进程暂无记录',
+        'panel.lastFallback': '上次兜底',
+        'panel.noFallback': '未触发过（模型都在自己压）',
+        'panel.fallback': '兜底自动压缩',
+        'panel.fallbackValue': '≥{percent}% · 连续 {n} 次 nudge 未响应',
+        'panel.handoff': '交接文档',
+        'panel.handoffValue': '压满 {n} 次后写一份',
+        'panel.handoffNone': '本会话还没写',
+        'panel.handoffWritten': '已写出 · {file}',
+        'panel.handoffNotWritten': '未写出（{reason}）',
+        'panel.handoffAfter': '压满几次',
+        'panel.handoffStatus': '状态',
         'panel.threshold': 'nudge 阈值',
         'panel.growth': '增长 tokens',
         'panel.note': 'nudge 在每步模型调用前检查压力；ACP 不会自动压缩，压哪段由模型决定。',
@@ -69,6 +82,17 @@ window.__ModuleLoader__.load({
         'panel.used': 'Context used',
         'panel.lastNudge': 'Last nudge',
         'panel.noNudge': 'no record in this process',
+        'panel.lastFallback': 'Last fallback',
+        'panel.noFallback': 'never (the model compacts on its own)',
+        'panel.fallback': 'Fallback auto-compact',
+        'panel.fallbackValue': '≥{percent}% · after {n} unanswered nudges',
+        'panel.handoff': 'Handoff doc',
+        'panel.handoffValue': 'written after {n} compactions',
+        'panel.handoffNone': 'not written for this session yet',
+        'panel.handoffWritten': 'written · {file}',
+        'panel.handoffNotWritten': 'not written ({reason})',
+        'panel.handoffAfter': 'compactions before write',
+        'panel.handoffStatus': 'status',
         'panel.threshold': 'Nudge threshold',
         'panel.growth': 'Growth tokens',
         'panel.note': 'Nudges check pressure before every model step; ACP never compacts automatically — the model decides what to compact.',
@@ -277,6 +301,8 @@ window.__ModuleLoader__.load({
 
       const infoRatio = num(info?.tunables?.pressureRatio);
       const infoGrowth = num(info?.tunables?.growthTokens);
+      const infoFallback = num(info?.tunables?.fallbackRatio);
+      const infoHandoff = num(info?.tunables?.handoffAfter);
       const shownPercent =
         num(draft?.pressurePercent)
         ?? num(saved?.pressurePercent)
@@ -287,6 +313,16 @@ window.__ModuleLoader__.load({
         ?? num(saved?.growthTokens)
         ?? (infoGrowth !== undefined && infoGrowth > 0 ? infoGrowth : undefined)
         ?? 12000;
+      const shownFallbackPercent =
+        num(draft?.fallbackPercent)
+        ?? num(saved?.fallbackPercent)
+        ?? (infoFallback === undefined ? undefined : Math.round(infoFallback * 100))
+        ?? 75;
+      const shownHandoff =
+        num(draft?.handoffAfter)
+        ?? num(saved?.handoffAfter)
+        ?? (infoHandoff !== undefined && infoHandoff > 0 ? infoHandoff : undefined)
+        ?? 2;
 
       /**
        * 改一个设置：draft → 250ms 去抖 → POST setSettings → 成功保留权威值。
@@ -298,6 +334,8 @@ window.__ModuleLoader__.load({
         const base = {
           pressurePercent: num(draftRef.current?.pressurePercent) ?? shownPercent,
           growthTokens: num(draftRef.current?.growthTokens) ?? shownGrowth,
+          fallbackPercent: num(draftRef.current?.fallbackPercent) ?? shownFallbackPercent,
+          handoffAfter: num(draftRef.current?.handoffAfter) ?? shownHandoff,
         };
         const next = Object.assign({}, base, patch(base));
         draftRef.current = next;
@@ -309,15 +347,22 @@ window.__ModuleLoader__.load({
             const value = await rpc('setSettings', {
               pressureRatio: next.pressurePercent / 100,
               growthTokens: next.growthTokens,
+              fallbackRatio: next.fallbackPercent / 100,
+              handoffAfter: next.handoffAfter,
             });
             if (value?.saved !== true) throw new Error(value?.saveError ?? 'not saved');
             const confirmedRatio = num(value?.tunables?.pressureRatio);
             const confirmedGrowth = num(value?.tunables?.growthTokens);
+            const confirmedFallback = num(value?.tunables?.fallbackRatio);
+            const confirmedHandoff = num(value?.tunables?.handoffAfter);
             draftRef.current = null;
             setDraft(null);
             setSaved({
               pressurePercent: confirmedRatio === undefined ? next.pressurePercent : Math.round(confirmedRatio * 100),
               growthTokens: confirmedGrowth === undefined ? next.growthTokens : confirmedGrowth,
+              fallbackPercent:
+                confirmedFallback === undefined ? next.fallbackPercent : Math.round(confirmedFallback * 100),
+              handoffAfter: confirmedHandoff === undefined ? next.handoffAfter : confirmedHandoff,
             });
             setSavedFlash(true);
             if (flashTimer.current !== undefined) clearTimeout(flashTimer.current);
@@ -360,6 +405,37 @@ window.__ModuleLoader__.load({
         percent === undefined
           ? tr('value.unknown')
           : `${percent}% (${compact(used)} / ${compact(contextWindow)})`;
+
+      // 上次兜底：模型连续不理提醒之后，插件自己动手的痕迹。没有就是没有。
+      const lastFallback = info?.lastFallback ?? null;
+      let fallbackText;
+      if (info === null) {
+        fallbackText = tr('value.unknown');
+      } else if (lastFallback === null || typeof lastFallback !== 'object') {
+        fallbackText = tr('panel.noFallback');
+      } else {
+        const at = num(lastFallback.at);
+        const when = at === undefined || at <= 0 ? '' : new Date(at).toLocaleTimeString();
+        const pct = num(lastFallback.percent);
+        fallbackText = [when, typeof lastFallback.reason === 'string' ? lastFallback.reason : '',
+          pct === undefined ? '' : `${pct}%`, typeof lastFallback.detail === 'string' ? lastFallback.detail : '']
+          .filter((part) => part !== '')
+          .join(' · ');
+      }
+
+      // 交接文档：写没写、写在哪、为什么没写（和 context-guard 时期一样的诚实口径）。
+      const handoffInfo = info?.handoff ?? null;
+      let handoffText;
+      if (info === null) {
+        handoffText = tr('value.unknown');
+      } else if (handoffInfo === null || typeof handoffInfo !== 'object') {
+        handoffText = tr('panel.handoffNone');
+      } else if (handoffInfo.written === true) {
+        const file = typeof handoffInfo.file === 'string' ? handoffInfo.file.split('/').pop() : '';
+        handoffText = tr('panel.handoffWritten', { file });
+      } else {
+        handoffText = tr('panel.handoffNotWritten', { reason: String(handoffInfo.reason ?? '?') });
+      }
 
       /** 一行「标签 … [−] 值 [+]」，返回 [dt, dd]。 */
       const stepperRow = (term, value, unit, min, max, onDelta) => [
@@ -409,6 +485,20 @@ window.__ModuleLoader__.load({
         stepperRow(tr('panel.growth'), shownGrowth, '', GROWTH_MIN, GROWTH_MAX, (delta) =>
           push((base) => ({ growthTokens: clamp(base.growthTokens + delta, GROWTH_MIN, GROWTH_MAX) })),
         ),
+        // ── 合并自 dsh-context-guard 的能力（2026-10-27）───────────────────
+        [tr('panel.fallback'), tr('panel.fallbackValue', {
+          percent: shownFallbackPercent,
+          n: num(info?.fallbackAfterNudges) ?? 2,
+        })],
+        stepperRow(tr('panel.fallback') + '：' + tr('panel.threshold'), shownFallbackPercent, '%', RATIO_MIN, RATIO_MAX, (delta) =>
+          push((base) => ({ fallbackPercent: clamp(base.fallbackPercent + delta, RATIO_MIN, RATIO_MAX) })),
+        ),
+        [tr('panel.lastFallback'), fallbackText],
+        [tr('panel.handoff'), tr('panel.handoffValue', { n: shownHandoff })],
+        stepperRow(tr('panel.handoff') + '：' + tr('panel.handoffAfter'), shownHandoff, '×', HANDOFF_MIN, HANDOFF_MAX, (delta) =>
+          push((base) => ({ handoffAfter: clamp(base.handoffAfter + delta, HANDOFF_MIN, HANDOFF_MAX) })),
+        ),
+        [tr('panel.handoff') + '：' + tr('panel.handoffStatus'), handoffText],
       ];
 
       return h(

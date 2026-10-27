@@ -12,6 +12,8 @@
  *      取不到才回落 `super.summarize()`（自动/手动压缩仍可工作）。
  *   2. `compactIfNeeded()`：常规压力返回 `null` —— **不自动压**，只让 nudge 提醒模型；
  *      `context-overflow` 仍然走父类抢救（溢出是硬失败，必须保留兜底）。
+ *      另有一个 `compactByFallback()`：连续多次 nudge 未被响应、且占用超阈值时，
+ *      由根插件主动调用一次父类 pressure 压缩（"先提醒，再兜底"）。
  *   3. `compactRegion()` 全盘继承：模型指定区间的压缩由工具调用。
  *
  * ## 待用摘要通道（并发安全）
@@ -189,6 +191,29 @@ export class AcpEngine extends BasicCompactionEngine {
       return null;
     }
     return super.compactIfNeeded(agent, trigger, signal);
+  }
+
+  /**
+   * 兜底自动压缩：**连续 N 次 nudge 未被响应且占用 ≥ 阈值**时由根插件调用。
+   *
+   * 与 `compactIfNeeded` 的区别：那个是宿主在每步自动问"你要不要压"（ACP 回答
+   * "不要"）；这个是 ACP 自己判断"模型就是不响应"，主动要求父类按 pressure 策略压一次。
+   *
+   * 仍然走父类路径的好处：
+   *   · 区间选择（tool-pair 平衡、retainTail）与记账全部由唯一 token meter 完成；
+   *   · 摘要由 `summarize()` 产出 → 没有 staged 摘要时回落 LLM 摘要（这正是兜底该用的）；
+   *   · 失败照常抛 `ManualCompactionError`，由调用方记录，不静默。
+   *
+   * 阈值来自本行配置 `basic.thresholdRatio`（生成器从 acp.json 的
+   * `fallback.ratio` 写入），所以"何时算够高"与面板上的兜底阈值是同一个数。
+   *
+   * @param {object} agent
+   * @param {AbortSignal} signal
+   * @returns {Promise<object|null>}
+   */
+  async compactByFallback(agent, signal) {
+    if (this.backend !== 'acp') return null;
+    return super.compactIfNeeded(agent, 'pressure', signal);
   }
 }
 

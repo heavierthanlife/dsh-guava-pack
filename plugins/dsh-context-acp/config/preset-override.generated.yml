@@ -101,6 +101,8 @@
             name: dsh-context-acp/engine
             config:
               backend: acp
+              basic:
+                thresholdRatio: 0.75
           - id: command-compact
             name: "@deepseek-ai/dsh-command-compact"
           - id: tool-result-pruner
@@ -191,6 +193,8 @@
             name: dsh-context-acp/engine
             config:
               backend: acp
+              basic:
+                thresholdRatio: 0.75
           - id: command-compact
             name: "@deepseek-ai/dsh-command-compact"
       - id: persistent-shell
@@ -349,6 +353,8 @@
             name: dsh-context-acp/engine
             config:
               backend: acp
+              basic:
+                thresholdRatio: 0.75
           - id: command-compact
             name: "@deepseek-ai/dsh-command-compact"
           - id: tool-result-pruner
@@ -502,6 +508,8 @@
             name: dsh-context-acp/engine
             config:
               backend: acp
+              basic:
+                thresholdRatio: 0.75
           - id: command-compact
             name: "@deepseek-ai/dsh-command-compact"
           - id: tool-result-pruner

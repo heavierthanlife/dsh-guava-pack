@@ -18,5 +18,17 @@
   },
   "engine": {
     "fallbackToLlmSummary": true
+  },
+  "fallback": {
+    "enabled": true,
+    "ratio": 0.75,
+    "afterUnansweredNudges": 2,
+    "retryCooldownSteps": 3
+  },
+  "handoff": {
+    "enabled": true,
+    "afterCompactions": 2,
+    "prefix": "HANDOFF-context-acp",
+    "maxRecentUserMessages": 8
   }
 }

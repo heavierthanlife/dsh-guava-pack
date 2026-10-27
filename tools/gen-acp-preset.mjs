@@ -178,9 +178,10 @@ function cloneValue(value) {
  * @param {object} config preset 行的 config（已深拷贝）
  * @param {'acp'|'basic'} backend
  * @param {string} presetLabel 仅用于错误消息
+ * @param {number|undefined} fallbackRatio 兜底自动压缩阈值（写到引擎行的 basic.thresholdRatio）
  * @returns {{ config: object, replaced: boolean }}
  */
-function transformPresetConfig(config, backend, presetLabel) {
+function transformPresetConfig(config, backend, presetLabel, fallbackRatio) {
   const plugins = config?.plugins;
   if (!Array.isArray(plugins)) throw new Error(`${presetLabel}: config.plugins 不是数组，上游结构变了`);
   const group = plugins.find((row) => row !== null && typeof row === 'object' && row.id === 'compaction' && row.group === true);
@@ -196,7 +197,14 @@ function transformPresetConfig(config, backend, presetLabel) {
   const droppedKeys = Object.keys(upstream).filter((key) => !['id', 'name', 'config'].includes(key));
   // 只保留 id/name/config：行上的其它字段（例如 disabled）属于上游行为，
   // 原样带进引擎行会污染引擎配置；丢弃时在摘要里报告，不静默。
-  group.config[index] = { id: 'compaction-basic', name: ENGINE_MODULE, config: { backend: 'acp' } };
+  // 引擎行带上兜底阈值：`compactByFallback()` 调的是父类 pressure 策略，
+  // 而父类的阈值来自这里（不是 acp.json 直接读得到的地方）。两处必须是同一个数，
+  // 否则面板显示 75% 而引擎在 80% 才动手。
+  const engineConfig = { backend: 'acp' };
+  if (typeof fallbackRatio === 'number' && Number.isFinite(fallbackRatio) && fallbackRatio > 0) {
+    engineConfig.basic = { thresholdRatio: fallbackRatio };
+  }
+  group.config[index] = { id: 'compaction-basic', name: ENGINE_MODULE, config: engineConfig };
   return { config, replaced: true, droppedKeys };
 }
 
@@ -267,7 +275,8 @@ function generate({ explicitPresetsDir, backendOverride }) {
       const entry = Array.isArray(parsed) ? parsed.find((item) => item?.insert?.[0]?.config?.id !== undefined)?.insert?.[0] : undefined;
       if (entry === undefined) throw new Error(`${file.name}: 找不到 preset 声明行，上游结构变了`);
       const config = cloneValue(entry.config);
-      const result = transformPresetConfig(config, backend, label);
+      const fallbackRatio = Number(source?.fallback?.ratio);
+      const result = transformPresetConfig(config, backend, label, fallbackRatio);
       if (result.replaced) replaced.push(entry.id);
       if ((result.droppedKeys ?? []).length > 0) info(`${label}: 上游 compaction-basic 行的额外字段被丢弃：${result.droppedKeys.join(', ')}`);
       // 只覆盖 config，不重复 insert（行已由上游 layer 创建；重复 insert 会撞 id）。
