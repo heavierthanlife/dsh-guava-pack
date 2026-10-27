@@ -54,6 +54,17 @@ import { z } from 'zod';
 import { readFile, writeFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
+import {
+  ACTION,
+  REASON,
+  OUTCOME,
+  classifyResult,
+  decideAttempt,
+  failureKey,
+  makeAttempt,
+} from './lib/trigger.mjs';
+import { createIdleScheduler } from './lib/scheduler.mjs';
+
 /** Cordis 插件名。 */
 const name = 'context-guard';
 
@@ -441,34 +452,147 @@ function apply(ctx, rawConfig) {
    * 监听器 await 它，而 `compactNow()` 自己带 idle admission —— agent 不空闲会抛
    * `ManualCompactionError('busy')`。让 service 当权威，比我们自己判"忙不忙"可靠。
    */
+  /**
+   * 一次轮末检查的完整记录（**可见性**的核心）。
+   *
+   * 事故教训：原实现把压缩失败压成 `logger.debug`，于是"每轮都 busy"对外完全
+   * 不可见 —— 用户只看到上下文涨到 75%，日志里什么都没有。现在每次尝试
+   * （成功/无区间/失败/跳过）都会覆盖这一条，并通过 `getSettings` 送到面板。
+   */
+  let lastAttempt = null;
+
+  /** 同一个「会话 + 结论 + code」只 warn 一次，之后降 debug，避免刷屏。 */
+  const reportedFailures = new Set();
+
+  /**
+   * 失败必须可见：首次出现用 warn（进日志），重复出现降 debug。
+   * 键里带会话与 code，所以"换了错误类型"仍会被看见。
+   */
+  function reportFailure(stage, sessionId, error) {
+    const key = failureKey(sessionId, stage, error);
+    const line = `context-guard: ${stage} failed (${describeError(error)}) [session=${sessionId ?? '?'}]`;
+    if (reportedFailures.has(key)) {
+      ctx.logger?.debug?.(line);
+      return;
+    }
+    if (reportedFailures.size > 200) reportedFailures.clear(); // 长跑进程别无界增长
+    reportedFailures.add(key);
+    ctx.logger?.warn?.(`${line}（同类错误本会话只报一次；之后降为 debug）`);
+  }
+
+  /** 记录一次尝试，供面板显示。 */
+  function recordAttempt(session, outcome, { reason, ratio, detail, event } = {}) {
+    lastAttempt = makeAttempt({
+      at: Date.now(),
+      sessionId: session?.id,
+      turn: event?.data?.turn,
+      outcome,
+      reason,
+      ratio,
+      detail,
+    });
+  }
+
+  /**
+   * 「轮末登记 → 空闲执行」调度器。
+   *
+   * 为什么需要它：`turn/end` 在 turn runner 的 `finally` 里 append，此刻 agent 的
+   * `phase.kind` 仍是 `running`，而 `compactNow` 内部走 `agent.runMaintenance()`，
+   * 准入是 `phase.kind === 'idle'`（`dsh-agent-loop`）。直接调用必然抛
+   * "already has active work"（被包成 `ManualCompactionError('busy')`）——
+   * 这正是长期静默失效的根因。
+   *
+   * 不变量（有自检钉住）：`turn/end` 监听器里**不出现** `compactNow` 调用；
+   * 执行只发生在 `agent/status: idle`。
+   */
+  const scheduler = createIdleScheduler({
+    afterTurnEnd: (agent, compaction, session, event) => afterTurnEnd(agent, compaction, session, event),
+    resolveCompaction,
+    onArmed: () => {
+      armed = true;
+    },
+    onError: (error, job) => {
+      reportFailure('turn-end handler', job.session?.id, error);
+      recordAttempt(job.session, OUTCOME.ERROR, {
+        reason: 'handler-failed',
+        detail: describeError(error),
+        event: job.event,
+      });
+    },
+  });
+
+  /**
+   * 一次轮末检查（**必须**在 agent idle 时调用）。
+   *
+   * 两条路独立：
+   *   1. 压缩（可选，失败不影响 handoff）；
+   *   2. handoff（只看"已压缩次数"，与压缩成败无关）。
+   */
   async function afterTurnEnd(agent, compaction, session, event) {
     const reasonKind = event.data?.reason?.kind;
-    if (!cfg.triggerOn.includes(reasonKind)) return;
-    if (inFlight.has(session.id)) return;
+    // 保留旧语义：不是"自然结束"（interrupted / error）的轮次既不复压也不写 handoff。
+    // 但仍要留下一条可见记录 —— 否则"为什么这一轮没检查"又成了黑盒。
+    if (!cfg.triggerOn.includes(reasonKind)) {
+      recordAttempt(session, OUTCOME.SKIPPED, { reason: REASON.TRIGGER_MISMATCH, event });
+      return;
+    }
+    if (inFlight.has(session.id)) {
+      recordAttempt(session, OUTCOME.SKIPPED, { reason: REASON.IN_FLIGHT, event });
+      return;
+    }
 
     // ── 1. 压缩（可选；失败不影响 handoff）────────────────────────────────
     const pressure = readPressure(session);
     const own = ctx.sessionProjections.stateOf(session, 'contextGuard');
     const window = num(pressure?.contextWindow) ?? num(own?.contextWindow);
     const used = num(pressure?.projectedTokens) ?? num(pressure?.pressureTokens);
-    const overThreshold =
-      window !== undefined && window > 0 && used !== undefined && used / window >= settings.thresholdRatio;
 
-    if (overThreshold && compaction !== undefined) {
+    const decision = decideAttempt({
+      triggerMatched: cfg.triggerOn.includes(reasonKind),
+      inFlight: inFlight.has(session.id),
+      used,
+      window,
+      thresholdRatio: settings.thresholdRatio,
+      armed: compaction !== undefined,
+      status: agent.status,
+    });
+
+    if (decision.action === ACTION.WAIT) {
+      // 条件满足但 agent 又忙起来了 → 重新挂起，等下一次 idle。
+      // 用 scheduler.queueTurnEnd 而不是直接写 Map：保持"只登记"的唯一入口。
+      scheduler.queueTurnEnd(agent, session, event);
+      recordAttempt(session, OUTCOME.SKIPPED, { reason: decision.reason, ratio: decision.ratio, event });
+    } else if (decision.action === ACTION.SKIP) {
+      recordAttempt(session, OUTCOME.SKIPPED, { reason: decision.reason, ratio: decision.ratio, event });
+    } else if (compaction !== undefined) {
       inFlight.add(session.id);
       try {
-        await compaction.compactNow(agent, new AbortController().signal);
+        const result = await compaction.compactNow(agent, new AbortController().signal);
+        const outcome = classifyResult(result);
+        recordAttempt(session, outcome, {
+          reason: REASON.OVER_THRESHOLD,
+          ratio: decision.ratio,
+          detail: outcome === OUTCOME.NOTHING_TO_COMPACT ? 'compactNow 返回 null：没有安全可压的区间' : undefined,
+          event,
+        });
+        if (outcome === OUTCOME.NOTHING_TO_COMPACT) {
+          ctx.logger?.debug?.(`context-guard: nothing to compact (${describeError(new Error('no safe range'))})`);
+        }
       } catch (error) {
-        // 预期失败，只记一条（以前是 `void error`，导致"没写出来"无从排查）。
-        ctx.logger?.debug?.(`context-guard: compaction skipped (${describeError(error)})`);
+        // **失败必须可见**：首次 warn，之后 debug（见 reportFailure）。
+        reportFailure('compaction', session.id, error);
+        recordAttempt(session, OUTCOME.ERROR, {
+          reason: REASON.OVER_THRESHOLD,
+          ratio: decision.ratio,
+          detail: describeError(error),
+          event,
+        });
       } finally {
         inFlight.delete(session.id);
       }
     }
 
     // ── 2. handoff（独立判定：只看「已压缩次数」）──────────────────────────
-    // 结果留着给面板看：{written, file?, reason}。以前算完就丢，于是面板只能
-    // 显示"已达阈值"，说不清到底写没写、写到哪、为什么失败。
     const handoff = await maybeHandoff(session);
     lastHandoff = { ...handoff, sessionId: session.id, at: Date.now() };
   }
@@ -619,14 +743,10 @@ function apply(ctx, rawConfig) {
     const dispose = agent.ctx.effect(function* () {
       yield agent.ctx.on('session/event', (session, event) => {
         if (event.type !== 'turn/end') return;
-        const compaction = resolveCompaction(agent);
-        if (compaction !== undefined) armed = true;
-        // 解析不到 compaction 也要继续：压缩是可选步骤，handoff 不依赖它。
-        // 必须 .catch：事件监听器的返回值没人 await，漏出去的 rejection 在 Node 里
-        // 会变成 unhandledRejection（默认直接终止进程）。
-        void afterTurnEnd(agent, compaction, session, event).catch((error) => {
-          ctx.logger?.warn?.(`context-guard: turn-end handler failed (${describeError(error)})`);
-        });
+        // **只登记，不在这里压缩**：此刻 agent 的 phase 仍是 `running`
+        // （turn/end 在 runner 的 finally 里 append），而 compactNow 需要 idle。
+        // 直接调用会 100% 抛 busy 并被静默吞掉 —— 这就是长期失效的根因。
+        scheduler.queueTurnEnd(agent, session, event);
       });
     }, 'context-guard/agent');
     perAgent.set(agent, dispose);
@@ -646,11 +766,17 @@ function apply(ctx, rawConfig) {
     });
     // 之后新出现的 agent。
     yield ctx.on('agent/created', ({ agent }) => attach(agent));
+    // **真正的压缩时机**：agent 进入 idle（`kick()` 的 finally 把 phase 切成 idle
+    // 之后才会发这个事件）。turn/end 只是"登记"，这里才是"执行"。
+    yield ctx.on('agent/status', ({ agent, status }) => {
+      scheduler.notifyStatus(agent, status);
+    });
     // agent 销毁：连它作用域上的 disposer 一起从表里删掉。少了这一步，
     // 每个创建过的 agent 对象和它的闭包都会被永久保留（长跑进程无界增长）。
     // agent 的 fiber 销毁时这个 effect 已经跑过一遍；cordis 的 disposer 幂等，
     // 所以这里再调一次是安全的。
     yield ctx.on('agent/disposed', ({ agent }) => {
+      scheduler.forget(agent);
       const dispose = perAgent.get(agent);
       if (dispose === undefined) return;
       perAgent.delete(agent);
@@ -743,13 +869,26 @@ function apply(ctx, rawConfig) {
       },
     }), 'context-guard: route');
 
-    /** 面板读的权威值（含 armed 与最近一次 handoff 的真实结果）。 */
+    /**
+     * 面板读的权威值：
+     *   · 阈值 / handoff 次数（可调）
+     *   · armed（能力指示灯）
+     *   · handoff 的真实结果
+     *   · **lastAttempt**：最近一次轮末检查的结论 —— 失败必须可见
+     *   · pending：当前挂起等 idle 的检查数（>0 说明"该压但还没轮到"）
+     *
+     * `version` 是宿主能力握手：客户端靠它区分"宿主还没重启"与"字段确实为空"，
+     * 避免再出现"面板少了一行、看不出是旧宿主"的困惑。
+     */
     function publicSettings() {
       return {
+        version: 2,
         thresholdPercent: Math.round(settings.thresholdRatio * 100),
         handoffAfter: settings.handoffAfterCompactions,
         armed,
         handoff: lastHandoff,
+        lastAttempt,
+        pending: scheduler.size(),
       };
     }
   });

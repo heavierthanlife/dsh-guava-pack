@@ -61,6 +61,23 @@ window.__ModuleLoader__.load({
         'panel.hold': '按住上下键可连续调整',
         'panel.saved': '已保存',
         'panel.saveFailed': '保存失败：{message}',
+        'panel.lastAttempt': '上次检查',
+        'panel.attempt.never': '本会话暂无记录',
+        'panel.attempt.at': '{time} · ',
+        'panel.attempt.ok': '已压缩',
+        'panel.attempt.nothing-to-compact': '没有可压的区间（不报错）',
+        'panel.attempt.error': '失败：{detail}',
+        'panel.attempt.skipped': '跳过（{reason}）',
+        'panel.attempt.reason.below-threshold': '未达阈值',
+        'panel.attempt.reason.wait-idle': '该压，等空闲',
+        'panel.attempt.reason.not-armed': '找不到 compaction 服务',
+        'panel.attempt.reason.no-pressure': '拿不到上下文用量',
+        'panel.attempt.reason.in-flight': '已有压缩在进行',
+        'panel.attempt.reason.trigger-mismatch': '本轮不是自然结束',
+        'panel.attempt.reason.handler-failed': '处理过程出错',
+        'panel.attempt.reason.over-threshold': '已达阈值',
+        'panel.pending': '等空闲中的检查：{count} 个',
+        'panel.hostStale': '宿主是旧版本（还没重启 DSH）：上次检查/失败原因暂时看不到',
         'value.unknown': '—',
         'dec': '减小',
         'inc': '增大',
@@ -91,6 +108,23 @@ window.__ModuleLoader__.load({
         'panel.hold': 'hold the arrows to repeat',
         'panel.saved': 'saved',
         'panel.saveFailed': 'save failed: {message}',
+        'panel.lastAttempt': 'Last check',
+        'panel.attempt.never': 'no record for this session yet',
+        'panel.attempt.at': '{time} · ',
+        'panel.attempt.ok': 'compacted',
+        'panel.attempt.nothing-to-compact': 'nothing to compact (not an error)',
+        'panel.attempt.error': 'failed: {detail}',
+        'panel.attempt.skipped': 'skipped ({reason})',
+        'panel.attempt.reason.below-threshold': 'below threshold',
+        'panel.attempt.reason.wait-idle': 'due, waiting for idle',
+        'panel.attempt.reason.not-armed': 'no compaction service',
+        'panel.attempt.reason.no-pressure': 'no context pressure available',
+        'panel.attempt.reason.in-flight': 'a compaction is already running',
+        'panel.attempt.reason.trigger-mismatch': 'turn did not end naturally',
+        'panel.attempt.reason.handler-failed': 'handler error',
+        'panel.attempt.reason.over-threshold': 'over threshold',
+        'panel.pending': 'checks waiting for idle: {count}',
+        'panel.hostStale': 'host is an older build (DSH not restarted): last-check details are unavailable',
         'value.unknown': '—',
         'dec': 'Decrease',
         'inc': 'Increase',
@@ -117,6 +151,8 @@ window.__ModuleLoader__.load({
   display:inline-flex;cursor:pointer}
 .cguard_pill:hover{color:var(--dsw-alias-label-secondary)}
 .cguard_pill[data-open="true"]{color:var(--dsw-alias-label-primary)}
+.cguard_pill[data-fail="true"]{color:var(--dsw-alias-state-error-primary,#e5484d)}
+.cguard_rows dd [data-attempt="error"]{color:var(--dsw-alias-state-error-primary,#e5484d)}
 .cguard_pill[data-due="true"]{color:var(--dsw-alias-state-warn-primary)}
 .cguard_icon{width:13px;height:13px;flex:none;display:block}
 .cguard_panel{position:absolute;bottom:calc(100% + 8px);right:0;left:auto;z-index:1100;
@@ -396,6 +432,10 @@ window.__ModuleLoader__.load({
       // 投影里的 `handoffDue` 只是「压缩次数达阈值」，说明不了写没写 —— 那个信息只有
       // host 侧知道，所以单独问一次。
       const [handoff, setHandoff] = React.useState(null);
+      // 宿主返回的完整快照：{version, thresholdPercent, armed, handoff,
+      // lastAttempt, pending, ...}。lastAttempt 是这次的**核心可见性**：
+      // 上一次轮末检查到底做了什么、失败在哪，面板必须能说清。
+      const [info, setInfo] = React.useState(null);
       // 提前声明：下面的 dock 标记 effect 要用它（否则 TDZ 报错，整个药丸会崩）。
       const rootRef = React.useRef(null);
 
@@ -571,10 +611,14 @@ window.__ModuleLoader__.load({
             const json = await response.json();
             if (!alive) return;
             const value = json?.result?.ok === true ? json.result.value : null;
+            setInfo(value);
             setHandoff(value?.handoff ?? null);
           } catch {
             // 面板不该因为这一条附加信息报错。
-            if (alive) setHandoff(null);
+            if (alive) {
+              setHandoff(null);
+              setInfo(null);
+            }
           }
         })();
         return () => {
@@ -606,6 +650,32 @@ window.__ModuleLoader__.load({
           ),
         ),
       ];
+
+      /**
+       * 「上次检查」的文案。
+       *
+       * 这一行存在的原因（2026-10-27 事故）：旧实现把压缩失败压成 debug 日志，
+       * 面板只显示"已就绪"，于是"每轮都 busy、一次都没压成"在界面上完全看不出来。
+       * 现在把 lastAttempt 直接摊开：时间 + 结论 + 原因/错误。
+       */
+      const lastAttempt = info?.lastAttempt ?? null;
+      const attemptText = (() => {
+        if (info === null) return null;
+        if (info.version !== 2) return tr('panel.hostStale');
+        if (lastAttempt === null) return tr('panel.attempt.never');
+        const when = Number.isFinite(lastAttempt.at) ? new Date(lastAttempt.at).toLocaleTimeString() : '';
+        const pct =
+          typeof lastAttempt.percent === 'number' ? ` (${lastAttempt.percent}%)` : '';
+        let detail;
+        if (lastAttempt.outcome === 'ok') detail = tr('panel.attempt.ok');
+        else if (lastAttempt.outcome === 'nothing-to-compact') detail = tr('panel.attempt.nothing-to-compact');
+        else if (lastAttempt.outcome === 'error') detail = tr('panel.attempt.error', { detail: lastAttempt.detail ?? '' });
+        else {
+          const reasonKey = `panel.attempt.reason.${lastAttempt.reason}`;
+          detail = tr('panel.attempt.skipped', { reason: tr(reasonKey) === reasonKey ? lastAttempt.reason : tr(reasonKey) });
+        }
+        return (when === '' ? '' : tr('panel.attempt.at', { time: when })) + detail + pct;
+      })();
 
       const rows = [
         [tr('panel.used'), percent === undefined ? tr('value.unknown') : `${percent}%`],
@@ -639,6 +709,21 @@ window.__ModuleLoader__.load({
               ? h('span', { title: handoff.file ?? '' }, tr('panel.handoffWritten', { file: shortPath(handoff.file) }))
               : tr('panel.handoffNotWritten', { reason: String(handoff.reason ?? '?') }),
         ],
+        // **失败必须可见**：上次检查做了什么、为什么没压。
+        [
+          tr('panel.lastAttempt'),
+          attemptText === null
+            ? tr('value.unknown')
+            : h(
+                'span',
+                {
+                  title: lastAttempt?.detail ?? '',
+                  'data-attempt': lastAttempt?.outcome ?? 'none',
+                },
+                attemptText,
+              ),
+        ],
+        ...(info?.pending > 0 ? [[tr('panel.pending'), String(info.pending)]] : []),
       ];
 
       return h(
@@ -653,6 +738,7 @@ window.__ModuleLoader__.load({
             className: 'cguard_pill',
             'data-open': open ? 'true' : 'false',
             'data-due': due ? 'true' : 'false',
+            'data-fail': info?.lastAttempt?.outcome === 'error' ? 'true' : 'false',
             'aria-label': aria,
             'aria-haspopup': 'dialog',
             'aria-expanded': open,

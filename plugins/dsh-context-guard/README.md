@@ -7,7 +7,7 @@
 |---|---|
 | 看到**已压缩次数** | 面板里的「已压缩次数」+「上次释放 tokens」，来自本插件注册的 `contextGuard` 投影 |
 | 超过 **60%** 自动压缩 | 阈值在 `contextPressure`（token-meter）上判断，默认 `0.6` |
-| **不能在任务运行中压缩** | 只在 `turn/end`（默认仅 `completed`）之后动手；且调用 `ctx.compaction.compactNow()`，它带 **idle admission**，agent 不空闲直接抛 `busy` —— 由 service 强制，不靠自觉 |
+| **不能在任务运行中压缩** | `turn/end`（默认仅 `completed`）只**登记**检查；真正调用 `compactNow()` 是在 **agent 进入 `idle`** 之后。`compactNow` 带 idle admission，agent 不空闲会抛 `busy` —— 由 service 强制，不靠自觉 |
 | 压缩 **2 次后**自动写详细 handoff | 写 `<会话 cwd>/HANDOFF-context-guard-<sid8>-c<N>-<时间>.md` |
 | 提示开新 session | pill 变警示色并写明「已写出，建议开新会话」 |
 
@@ -127,11 +127,46 @@ standing key, so the mount is **not under the agent's fiber**"，被 `isolate` �
 4. 最近 N 条用户消息
 5. 「下一步」模板位
 
+## 触发时机（2026-10-27 修复的静默失效）
+
+**旧实现**：在 `turn/end` 事件里直接调 `compaction.compactNow()`。
+
+**为什么必然失败**（代码级）：
+
+1. `turn/end` 是在 turn runner 的 `finally` 里 `session.append()` 的
+   （`dsh-agent-loop`）；此刻 agent 的 `phase.kind` 仍是 `running`。
+2. `compactNow()` 内部走 `agent.runMaintenance()`，准入是
+   `if (this.phase.kind !== "idle") throw new Error("... already has active work")`。
+3. 于是每次轮末都抛 `ManualCompactionError('busy')`；旧代码 catch 后只
+   `logger.debug` 一行 —— **对外完全不可见**。
+4. 表现：阈值 65%，压力一路涨到 79%，`compactions` 始终 0，面板还显示"已就绪"。
+
+**现在的时序**：
+
+```
+turn/end  → pendingChecks.set(agent, {session, event})      // 只登记
+agent/status: idle → runPendingCheck(agent)                 // 才执行
+                   → decideAttempt(...)                     // 纯函数决策
+                   → compactNow() → 记录 lastAttempt
+```
+
+`lib/trigger.mjs` 是决策的单一来源（纯函数、可离线自检）：
+`trigger-mismatch / in-flight / no-pressure / below-threshold / not-armed / wait-idle / over-threshold`。
+
+顺带修掉的另一个盲点：`compactNow` 返回 `null` 表示"没有安全可压区间"，
+以前和"成功"混在一起、什么都不显示；现在单独记为 `nothing-to-compact`。
+
 ## 已知限制
 
 - 面板百分比来自 token-meter 的 `contextPressure`；该投影缺失时显示 `—`，
   且**不会**触发自动压缩（没有容量信息就不动手）。
-- 压缩失败（busy / cancelled / changed / summary / commit / persistence）不写任何东西，
-  等下一次对话自然结束再试。
+- 压缩失败（busy / cancelled / changed / summary / commit / persistence）**不会静默**：
+  首次出现打 `warn`（同类错误同会话只报一次，之后降 debug），并把
+  `lastAttempt {at, outcome, reason, percent, detail}` 送到面板「上次检查」一行；
+  下一次对话自然结束会再试。
+- `compactNow` 返回 `null`（没有安全可压区间）**不是失败**，面板会显示
+  「没有可压的区间（不报错）」，与真正的错误分开。
+- 面板接口带 `version: 2` 握手：宿主未重启时面板会直说「宿主是旧版本」，
+  而不是悄悄少一行 / 显示旧数据。
 - **改这个插件的 `index.js` 后需要重启 DSH 才会加载新的模块代**（安装新 bundle 可以
   热激活行，但替换已加载模块需要重启）。
