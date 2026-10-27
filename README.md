@@ -1,7 +1,8 @@
 # dsh-guava-pack — 一个包带走全部插件
 
 把本机这套 DSH 定制（手机 UI、供应商路由、主题管理、改装赛博主题、OpenCode 会话头修复、
-上下文守卫、已归档会话清理）连同 CommandCode 桥接服务，打成一个**可离线分发**的包。
+上下文守卫、已归档会话清理、**模型驱动的上下文压缩 ACP**）连同 CommandCode 桥接服务，
+打成一个**可离线分发**的包。
 换台机器（含云端）**git clone 一次就能用**。
 
 ## 里面有什么
@@ -14,6 +15,7 @@
 | `plugins/dsh-theme-cyberpunk2077` | 赛博朋克 2077 主题（**改装版**） | ⚠️ 原作者 Tommy00748，MIT |
 | `plugins/dsh-opencode-session-header` | 修 OpenCode 的 `400 MissingSessionID` | ⚠️ 原作者 beihzb，MIT |
 | `plugins/dsh-context-guard` | 轮次结束后按阈值自动压缩、统计压缩次数、达上限写 handoff | 自研 |
+| `plugins/dsh-context-acp` | **模型驱动压缩（ACP 全套）**：nudge 提醒 → 模型自己选区间/写摘要（零额外 LLM 调用）→ 账本/`decompress`/`search_context` 找回原文；替换 4 个 agent preset 的 `compaction-basic` 后端 | 自研 |
 | `plugins/dsh-session-purge` | 清理已归档会话记录（保留产出并写清单），侧栏入口在设置上方一行 | 自研 |
 | `plugins/dsh-code-theme` | 只给代码上色（Monokai Pro / Material / One Dark / GitHub / **OpenCode 官方色值**，共 5 套），自动跟随明暗 + 可强制代码区明暗；附 WCAG 对比度自检 | 自研 |
 | `config/cordis.patch.example.yml` | provider / 模型目录示例（6 家、24 个模型，全走本机路由） | 自研 |
@@ -68,6 +70,26 @@ systemctl --user restart dsh.service      # 或你原来的启动方式
 > 或清一次该站点存储。**host 侧（`index.js`）改动才需要重启。**
 
 ## 安装后配置（重要）
+
+### 模型驱动的上下文压缩（ACP）—— 装完必须做的一步
+
+`plugins/dsh-context-acp` 替换的是 **agent preset 里**的压缩后端（preset 是
+`dsh-web-app` 声明的，profile patch 只能整棵覆盖它的 `config.plugins`）。
+所以 preset 覆盖层由生成器从上游 preset 文件**确定性生成**，不允许手写：
+
+```sh
+node tools/gen-acp-preset.mjs --check   # 校验与上游 preset 一致（升级 DSH 后必跑）
+node tools/gen-acp-preset.mjs --write   # 上游升级后重生成，然后重启 DSH
+```
+
+- 回滚内置压缩：`node tools/gen-acp-preset.mjs --write --backend basic`（重启生效）。
+- 配置：`plugins/dsh-context-acp/config/acp.json`（唯一人工配置源），改完重新 `--write`。
+- 生成物 `config/preset-override.generated.yml` + `config/runtime.json` **要提交**；
+  `install.mjs --check` 与 `npm test` 都会跑 `--check` 拦上游漂移。
+- ⚠️ 引擎行是裸说明符 `dsh-context-acp/engine`：本插件必须能从 profile 的
+  `node_modules` 解析（pack 已声明 `file:./plugins/dsh-context-acp` 依赖；
+  单独安装时要把插件包本身加进 profile）。
+- 完整设计/安全边界/门禁见 [`plugins/dsh-context-acp/README.md`](plugins/dsh-context-acp/README.md)。
 
 ### provider-router 是可配置的 —— 云端不需要改代码
 

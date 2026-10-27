@@ -1,0 +1,22 @@
+# dsh-context-acp — bundle patch 层（根平面装配 + preset 引擎替换）。
+#
+# 两个 patch 文件分工：
+#   1. 本文件：根平面挂载 `context-acp`（工具 / nudge / 命令 / 面板总装）。
+#   2. `config/preset-override.generated.yml`：由 `tools/gen-acp-preset.mjs`
+#      从上游 `@deepseek-ai/dsh-web-app/presets/*.patch.yml` 确定性生成，
+#      把四个 preset 的 `compaction` group 里的 `compaction-basic` 行换成
+#      `dsh-context-acp/engine`。**不要在 profile patch 里按 id 覆盖
+#      `preset-*` 的 config.plugins** —— 那是整棵数组替换，上游升级会失配；
+#      生成器 + `--check` 是唯一入口。
+#
+# 为什么根平面要单独一行：`ctx.compaction` 住在 preset realm（web-app 把根平面
+# 的 `compaction-basic` 显式 disabled），所以根插件必须用
+# `ctx.agentPresets.serviceFor(agent, 'compaction')` 取实例，而不是注入服务。
+
+- insert:
+    - id: context-acp
+      name: 'dsh-context-acp'
+      config:
+        # `backend` 的权威值在 config/runtime.json（生成器从 config/acp.json 写出）；
+        # 这里不重复声明，避免两处漂移。
+        enabled: true

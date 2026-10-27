@@ -1,0 +1,36 @@
+{
+  "name": "dsh-context-acp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "模型驱动的上下文压缩（ACP 全套能力）：引擎替换 compaction-basic、模型自写摘要的 compress 工具、decompress/search_context/acp_status、nudge、/acp 命令与面板。零新增依赖。",
+  "meta": {
+    "title": "Context ACP",
+    "description": "把「到阈值就压」换成「模型决定何时压、压哪段、摘要自己写」：compress / decompress / search_context / acp_status + nudge + 面板。"
+  },
+  "exports": {
+    ".": "./lib/index.js",
+    "./engine": "./lib/engine.mjs",
+    "./client": "./client.js"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": [
+        "./cordis.patch.yml",
+        "./config/preset-override.generated.yml"
+      ]
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ]
+    }
+  },
+  "scripts": {
+    "gen-preset": "node tools/gen-acp-preset.mjs --write",
+    "gen-preset:check": "node tools/gen-acp-preset.mjs --check"
+  },
+  "dependencies": {}
+}

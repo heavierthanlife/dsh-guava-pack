@@ -1,0 +1,161 @@
+# dsh-context-acp — 模型驱动的上下文压缩（ACP 全套能力）
+
+> 目标：把 `dsh-compaction-basic` 的「到阈值就自动压」换成 ACP 式**模型驱动压缩**：
+> 模型决定何时压、压哪一段、摘要自己写（零额外 LLM 调用），并能检索/恢复被压原文。
+> 这是在本机 DSH `0.2.1-alpha.3` 上的**第一方重写**，不是安装
+> `billion-context-dsh`（那个包 peer 锁 `0.2.0-rc.2`，装不上）。
+
+## 为什么需要它
+
+内置压缩只有一条策略：`agent/pre-step` 时压力过阈值 → 引擎自己选区间 → 引擎**再调一次 LLM**
+写摘要。三个问题：
+
+1. **什么时候压不由模型决定**：模型可能正处在需要原始细节的阶段，却被自动压掉。
+2. **压哪段不由模型决定**：引擎按 `retainRatio` 机械保留尾部，可能压掉刚读过的关键证据。
+3. **摘要要额外调一次 LLM**：花一次完整请求的钱和时间；而且摘要质量取决于通用提示词，
+   不是当前任务的上下文。
+
+ACP 的做法是把这三件事交还给模型：nudge 提醒压力、`acp_status` 给账本、
+`compress` 让模型指定区间并**自己写摘要**、`decompress` / `search_context` 找回原文。
+本插件就是这套能力的完整实现。
+
+## 架构（为什么这样拆）
+
+```
+ctx.compaction（preset realm，4 个 preset 各一份）
+└── dsh-context-acp/engine  ← 行名替换了 compaction-basic
+    └── AcpEngine extends BasicCompactionEngine
+        ├── summarize()         ：优先用 compress 工具投递的模型自写摘要（零 LLM 调用）
+        ├── compactIfNeeded()   ：常规压力返回 null（只 nudge）；overflow 保留父类抢救
+        └── compactRegion()     ：全盘继承（surface 替换事务/记账/锁都在父类，绝不重写）
+
+根平面（host）
+└── dsh-context-acp（lib/index.js 装配）
+    ├── tools：compress / decompress / search_context / acp_status
+    ├── agent/pre-step：nudge（只提醒，不自动压；提醒本身是一条 logged user 消息，见下）
+    ├── systemPrompt section：压缩规则与哲学
+    ├── /acp 命令（status / blocks / nudge）
+    └── 面板：session projection `contextAcp` + /context-acp 路由 + composer pill
+```
+
+关键事实（踩过坑，写下来）：
+
+- **`ctx.compaction` 住在 agent preset realm**：`dsh-web-app` 把根平面的
+  `compaction-basic` 显式 disabled。根插件**不能** `inject(['compaction'])`，
+  必须用 `ctx.get('agentPresets').serviceFor(agent, 'compaction')` 取实例
+  （浏览器 RPC 也走这条路）。headless 这类 preset-free 组合才回落到根平面 `ctx.compaction`。
+- **Cordis 会把 service 包进 traceable Proxy**：类里的 JS `#private` 字段经 proxy
+  调用会抛 `Cannot read private member`。本插件的引擎用模块私有 Symbol 键代替 `#`。
+- **preset 覆盖只能整棵 `config.plugins` 替换**：手写必失配，所以由
+  `tools/gen-acp-preset.mjs` 从上游 `@deepseek-ai/dsh-web-app/presets/*.patch.yml`
+  确定性生成，并校验上游 sha256；`--check` 进 `npm test` 与 `install.mjs --check`。
+
+## 文件
+
+| 文件 | 作用 |
+|---|---|
+| `lib/engine.mjs` | `AcpEngine`（三个覆写点）+ 待用摘要通道 + backend 切换包装 |
+| `lib/barriers.mjs` | 注入行屏障（纯函数）：活动用户消息 / AGENTS.md 当前副本 / skill 目录 / system |
+| `lib/tools-compress.mjs` | `compress`：`planCompress`（纯校验）+ 事务投递 |
+| `lib/ledger.mjs` | 从会话日志重建块账本（b1..bN / tier / seq 映射 / 统计） |
+| `lib/tools-restore.mjs` | `decompress`（分页取回原文）+ `search_context`（零依赖混合检索） |
+| `lib/tools-status.mjs` | `acp_status`（账本/占用/上次 nudge/checkpoint 映射） |
+| `lib/nudge.mjs` | `decideNudge` 纯策略 + `agent/pre-step` 注入壳 |
+| `lib/prompt.mjs` | 系统提示段（稳定文本，保 KV cache） |
+| `lib/command.mjs` | `/acp` 子命令 |
+| `lib/settings.mjs` | 面板数据：projection `contextAcp` + `/context-acp` 路由 + 设置落盘 |
+| `lib/state.mjs` | 每 agent 瞬时状态（WeakMap；只放「日志里没有也不该进日志」的东西） |
+| `client.js` | 面板 pill（composer dock，沿用 context-guard 样式） |
+| `config/acp.json` | **唯一人工配置源**（backend / nudge / retain / engine） |
+| `config/preset-override.generated.yml` | 生成物：4 个 preset 的 `config.plugins` 覆盖 |
+| `config/runtime.json` | 生成物：根插件读的运行时配置 |
+| `cordis.patch.yml` | bundle patch：根平面挂载 `context-acp` |
+| `../../tools/gen-acp-preset.mjs` | preset 覆盖层生成器（`--write` / `--check` / `--backend basic`） |
+
+## 配置与回滚
+
+配置只改 `config/acp.json`，然后：
+
+```sh
+node tools/gen-acp-preset.mjs --write   # 重生成 preset 覆盖层 + runtime.json
+# 重启 DSH（host 插件改动需要重启）
+```
+
+**回滚到内置压缩**（重启生效，代码路径会切回上游 `BasicCompactionEngine` 类本身）：
+
+```sh
+node tools/gen-acp-preset.mjs --write --backend basic
+# 或者把 config/acp.json 的 backend 改成 "basic" 再跑 --write
+```
+
+回滚后根插件保持惰性：不注册工具、不挂 nudge、不留提示段；preset 行原样保留
+`@deepseek-ai/dsh-compaction-basic`。切回 `--write --backend acp` 即恢复。
+
+主要旋钮（`config/acp.json`）：
+
+| 键 | 默认 | 含义 |
+|---|---|---|
+| `nudge.pressureRatio` | 0.65 | 超过这个占用比例才提醒模型（**不会**自动压） |
+| `nudge.growthTokens` | 12000 | 上次 nudge 后至少再涨这么多才重复提醒 |
+| `nudge.cooldownSteps` | 6 | 同一 turn 内的步数冷却 |
+| `nudge.maxPerTurn` | 2 | 每 turn 最多提醒几次 |
+| `retain.decompressPageSize` | 8 | `decompress` 默认每页条数 |
+| `retain.searchLimit` | 20 | `search_context` 默认命中数 |
+| `retain.protect*` | true | 三类注入行屏障开关（system 恒保护） |
+| `backend` | `"acp"` | `"basic"` = 回滚到内置压缩 |
+
+## nudge 的真实语义（一条重要偏离，别按旧文档理解）
+
+`agent/pre-step` 返回的 `messages` 在 DSH `0.2.1-alpha.3` 里会被 agent-loop **写进会话日志**
+（`dsh-agent-loop/lib/index.js`：除 `source.kind === 'runtime-context'` 外一律
+`session.append('user/message', message, {surfaceOp:'append'})`；而 `runtime-context`
+会被跳过 → 模型根本看不到提醒）。所以 nudge **不是**「只进本次请求投影」：
+
+- 每条提醒都是一条真实的 user 消息（`source: {kind:'context-acp', form:'notice'}`），
+  会出现在对话历史里、可回放、可被 `decompress` 找回；
+- 频率由 `pressureRatio` / `cooldownSteps` / `growthTokens` / `maxPerTurn` 四重限制，
+  不会变成刷屏；
+- 这对账本与屏障是**安全**的：它不是用户输入（不会触发活动用户消息保护），
+  旧提醒也可以被后续 compress 压掉（属于过时历史）。
+
+**注意**：`source.kind` 是合法的 MessageSource 形状（有单测直接用真实 `Session.append`
+钉住），不要改成 `runtime-context` —— 那会让提醒静默消失。
+
+## 安全边界（验收逐条查）
+
+1. **注入行屏障**：AGENTS.md 等策略文件的**当前副本**、`<available_skills>` 最新目录、
+   当前活动用户消息、surface 第 0 个 system 节点 → 拒绝压缩并点名 seq。
+   **被取代的旧副本允许压**（它们才是该进历史的部分）。
+2. **并发锁**：`compactRegion` 自带 `compaction/start` 持久化锁；工具层再加 per-agent
+   `inFlight` 防重入。
+3. **记账只用宿主 tokenMeter**：`shadowedTokenCount` / 收益判定都由宿主的固定启发价算，
+   插件不自己估算 —— 否则会把宿主账本扣成负数（ACP #54/#103 的教训）。
+4. **收益拒绝**：摘要（含 checkpoint 框架）不比原文短就拒绝（`no-gain`）。
+5. **零额外 LLM 调用**：模型 `compress` 路径的摘要来自工具投递，不设 `llmStreamCall`；
+   只有非模型发起的路径（overflow 抢救 / `/compact` / 自动）才回落父类 LLM 摘要。
+6. **失败可见**：工具错误带稳定 `code`；引擎/工具失败写 logger 与面板状态；屏障判不了就拒绝。
+
+## 门禁（全部在隔离 profile 里跑，不碰 live）
+
+```sh
+node tools/tests/acp-mount.mjs    # P0：preset 覆盖组合 + 引擎真实激活 + 工具可见 + 回滚
+node tools/tests/acp-engine.mjs   # P1：引擎/屏障/compress 规划（纯单测）
+node tools/tests/acp-ledger.mjs   # P2：账本/恢复/检索/status（纯单测）
+node tools/tests/acp-nudge.mjs    # P3：nudge/命令/设置/提示段（纯单测）
+node tools/tests/acp-e2e.mjs      # P1 级端到端（真实隔离 DSH 进程 + preset agent）
+node tools/tests/acp-e2e.mjs --strict   # P4 级：再加账本/tier2/恢复/检索硬断言
+node tools/tests/acp-client.mjs   # 面板客户端模块能进 boot 清单并编译出 bundle
+node tools/gen-acp-preset.mjs --check   # 上游漂移
+```
+
+## 已知限制
+
+- **需要重启 DSH**：preset 覆盖层与根插件都在 host 侧加载。
+- **面板 pill 的「上次 nudge」是进程级最新一条**：客户端 slot 拿不到 sessionId，
+  每会话数据走 projection，nudge 瞬时状态只能全局展示（面板有标注）。
+- **`compactRegion` 需要在 turn 内调用**：模型在 turn 中调 `compress` 天然满足；
+  没有 turn 的外部调用会被父类拒绝（这是父类的锁语义，不是本插件的限制）。
+- **上游升级会漂移**：升级 DSH 后必须重跑 `gen-acp-preset.mjs --write` 并跑
+  `--check`；`install.mjs --check` 会拦。
+- `protected-unreadable` / `protected-system-prompt` 是屏障内部的细分 code，
+  工具对外统一返回 `code:'protected'`，细分写在 message 里。

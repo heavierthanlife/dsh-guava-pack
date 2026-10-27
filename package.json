@@ -1,7 +1,7 @@
 {
   "name": "dsh-guava-pack",
   "version": "1.0.0",
-  "description": "One portable DSH bundle: phone UI, direct/SSR provider router, theme manager, a customized Cyberpunk 2077 theme, an OpenCode session-header fix, plus the CommandCode bridge service. Install once, works anywhere.",
+  "description": "One portable DSH bundle: phone UI, direct/SSR provider router, theme manager, a customized Cyberpunk 2077 theme, an OpenCode session-header fix, a model-driven context-compaction backend (ACP), plus the CommandCode bridge service. Install once, works anywhere.",
   "license": "MIT",
   "type": "module",
   "engines": {
@@ -29,22 +29,29 @@
   ],
   "dsh": {
     "bundle": {
-      "patch": "./cordis.patch.yml"
+      "patch": [
+        "./cordis.patch.yml",
+        "./plugins/dsh-context-acp/config/preset-override.generated.yml"
+      ]
     }
   },
   "scripts": {
     "check": "node install.mjs --check",
     "preflight": "node tools/preflight.mjs",
     "search": "node tools/set-search-provider.mjs",
-    "test": "node tools/tests/model-policy.mjs && node tools/tests/web-search-switch.mjs && node tools/tests/provider-router-adaptive.mjs && node tools/tests/context-guard-trigger.mjs",
+    "test": "node tools/tests/model-policy.mjs && node tools/tests/web-search-switch.mjs && node tools/tests/provider-router-adaptive.mjs && node tools/tests/context-guard-trigger.mjs && node tools/gen-acp-preset.mjs --check && node tools/tests/acp-engine.mjs && node tools/tests/acp-ledger.mjs && node tools/tests/acp-nudge.mjs && node tools/tests/acp-mount.mjs && node tools/tests/acp-e2e.mjs --strict && node tools/tests/acp-client.mjs",
     "model-policy": "node tools/sync-model-policy.mjs",
     "model-policy:probe": "node tools/sync-model-policy.mjs --probe",
     "model-policy:check": "node tools/sync-model-policy.mjs --check-refs",
     "sync-models": "node tools/sync-models.mjs",
-    "sync-models:write": "node tools/sync-models.mjs --write"
+    "sync-models:write": "node tools/sync-models.mjs --write",
+    "acp-preset": "node tools/gen-acp-preset.mjs --write",
+    "acp-preset:check": "node tools/gen-acp-preset.mjs --check",
+    "acp-rollback": "node tools/gen-acp-preset.mjs --write --backend basic"
   },
   "dependencies": {
     "undici": "^7.0.0",
-    "zod": "^4.6.7"
+    "zod": "^4.6.7",
+    "dsh-context-acp": "file:./plugins/dsh-context-acp"
   }
 }

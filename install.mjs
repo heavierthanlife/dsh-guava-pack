@@ -80,6 +80,34 @@ const REQUIRED = [
   'plugins/dsh-web-search-switch/lib/index.js',
   'plugins/dsh-web-search-switch/lib/client.js',
   'plugins/dsh-web-search-switch/lib/pin.mjs',
+  // 模型驱动的上下文压缩（ACP）：引擎/工具/账本/nudge/面板 + preset 覆盖生成器。
+  // 生成物（config/*.generated.yml、runtime.json）也必须提交 —— `--check` 会比对。
+  'plugins/dsh-context-acp/package.json',
+  'plugins/dsh-context-acp/cordis.patch.yml',
+  'plugins/dsh-context-acp/config/acp.json',
+  'plugins/dsh-context-acp/config/preset-override.generated.yml',
+  'plugins/dsh-context-acp/config/runtime.json',
+  'plugins/dsh-context-acp/lib/index.js',
+  'plugins/dsh-context-acp/lib/engine.mjs',
+  'plugins/dsh-context-acp/lib/barriers.mjs',
+  'plugins/dsh-context-acp/lib/tools-compress.mjs',
+  'plugins/dsh-context-acp/lib/ledger.mjs',
+  'plugins/dsh-context-acp/lib/tools-restore.mjs',
+  'plugins/dsh-context-acp/lib/tools-status.mjs',
+  'plugins/dsh-context-acp/lib/nudge.mjs',
+  'plugins/dsh-context-acp/lib/prompt.mjs',
+  'plugins/dsh-context-acp/lib/command.mjs',
+  'plugins/dsh-context-acp/lib/settings.mjs',
+  'plugins/dsh-context-acp/lib/state.mjs',
+  'plugins/dsh-context-acp/client.js',
+  'tools/gen-acp-preset.mjs',
+  'tools/tests/acp-engine.mjs',
+  'tools/tests/acp-ledger.mjs',
+  'tools/tests/acp-nudge.mjs',
+  'tools/tests/acp-mount.mjs',
+  'tools/tests/acp-e2e.mjs',
+  'tools/tests/acp-client.mjs',
+  'tools/tests/lib/acp-driver.mjs',
   'services/commandcode-bridge/server.mjs',
   'services/commandcode-bridge/start.sh',
   'services/commandcode-bridge/stop.sh',
@@ -136,6 +164,27 @@ const MIN_BYTES = {
   'plugins/dsh-web-search-switch/lib/index.js': 3000,
   'plugins/dsh-web-search-switch/lib/client.js': 2000,
   'plugins/dsh-web-search-switch/lib/pin.mjs': 2000,
+  'plugins/dsh-context-acp/config/acp.json': 200,
+  'plugins/dsh-context-acp/config/preset-override.generated.yml': 15000,
+  'plugins/dsh-context-acp/config/runtime.json': 200,
+  'plugins/dsh-context-acp/lib/index.js': 4000,
+  'plugins/dsh-context-acp/lib/engine.mjs': 8000,
+  'plugins/dsh-context-acp/lib/barriers.mjs': 5000,
+  'plugins/dsh-context-acp/lib/tools-compress.mjs': 8000,
+  'plugins/dsh-context-acp/lib/ledger.mjs': 6000,
+  'plugins/dsh-context-acp/lib/tools-restore.mjs': 6000,
+  'plugins/dsh-context-acp/lib/tools-status.mjs': 4000,
+  'plugins/dsh-context-acp/lib/nudge.mjs': 8000,
+  'plugins/dsh-context-acp/lib/settings.mjs': 8000,
+  'plugins/dsh-context-acp/client.js': 8000,
+  'tools/gen-acp-preset.mjs': 5000,
+  'tools/tests/acp-engine.mjs': 5000,
+  'tools/tests/acp-ledger.mjs': 5000,
+  'tools/tests/acp-nudge.mjs': 5000,
+  'tools/tests/acp-mount.mjs': 5000,
+  'tools/tests/acp-e2e.mjs': 5000,
+  'tools/tests/acp-client.mjs': 4000,
+  'tools/tests/lib/acp-driver.mjs': 5000,
   'services/commandcode-bridge/server.mjs': 2000,
   'services/commandcode-bridge/start.sh': 300,
   'services/commandcode-bridge/stop.sh': 100,
@@ -290,12 +339,19 @@ function check() {
   try {
     const pkg = JSON.parse(readFileSync(join(PACK_DIR, 'package.json'), 'utf8'));
     const patch = pkg?.dsh?.bundle?.patch;
-    if (typeof patch === 'string' && existsSync(join(PACK_DIR, patch))) {
-      ok(`dsh.bundle.patch = ${patch}`);
+    // patch 可以是单个字符串或数组（上游 dsh-web-app 就是数组）。
+    const patchList = typeof patch === 'string' ? [patch] : Array.isArray(patch) ? patch : [];
+    if (patchList.length > 0 && patchList.every((item) => typeof item === 'string' && existsSync(join(PACK_DIR, item)))) {
+      ok(`dsh.bundle.patch = ${patchList.join(', ')}`);
     } else {
-      bad('package.json \u7f3a dsh.bundle.patch\uff0cDSH \u4e0d\u4f1a\u628a\u5b83\u5f53 bundle \u52a0\u8f7d');
+      bad('package.json \u7f3a dsh.bundle.patch\uff08\u6216\u6307\u5411\u4e0d\u5b58\u5728\u7684\u6587\u4ef6\uff09\uff0cDSH \u4e0d\u4f1a\u628a\u5b83\u5f53 bundle \u52a0\u8f7d');
       failed++;
     }
+    // 模型驱动压缩要求：插件包必须能从 profile node_modules 解析（preset 里的
+    // `dsh-context-acp/engine` 是裸说明符），所以 pack 要把它声明成 file: 依赖。
+    const acpDep = pkg?.dependencies?.['dsh-context-acp'];
+    if (typeof acpDep === 'string' && acpDep.includes('./plugins/dsh-context-acp')) ok('dsh-context-acp \u5df2\u58f0\u660e\u4e3a file: \u4f9d\u8d56\uff08preset \u5f15\u64ce\u88f8\u8bf4\u660e\u7b26\u53ef\u89e3\u6790\uff09');
+    else { bad('package.json \u7f3a dsh-context-acp \u7684 file: \u4f9d\u8d56 \u2014\u2014 \u88c5\u6210 bundle \u540e preset \u91cc\u7684 dsh-context-acp/engine \u4f1a\u89e3\u6790\u5931\u8d25'); failed++; }
     if (pkg?.dsh?.client) {
       info('\u5305\u672c\u8eab\u6709 dsh.client\uff08\u4e0d\u5e94\u8be5\uff09\u2014\u2014 \u5ba2\u6237\u7aef\u7531\u5b50\u63d2\u4ef6\u63d0\u4f9b');
     }
@@ -315,15 +371,18 @@ function check() {
       failed++;
       continue;
     }
-    const subPatch = sub?.dsh?.bundle?.patch;
-    if (typeof subPatch !== 'string' || subPatch.trim() === '') {
+    const subPatchRaw = sub?.dsh?.bundle?.patch;
+    const subPatchList = typeof subPatchRaw === 'string' ? [subPatchRaw] : Array.isArray(subPatchRaw) ? subPatchRaw : [];
+    if (subPatchList.length === 0) {
       bad(`${pkgRel} \u7f3a dsh.bundle.patch\uff0cDSH \u4e0d\u4f1a\u52a0\u8f7d\u8fd9\u4e2a\u5b50\u63d2\u4ef6`);
       failed++;
       continue;
     }
-    const subTarget = join(PACK_DIR, 'plugins', dir, subPatch);
-    if (existsSync(subTarget)) ok(`${dir}: ${subPatch} \u2192 \u5b58\u5728`);
-    else { bad(`${dir}: dsh.bundle.patch=${subPatch} \u2192 \u76ee\u6807\u4e0d\u5b58\u5728`); failed++; }
+    for (const subPatch of subPatchList) {
+      const subTarget = join(PACK_DIR, 'plugins', dir, subPatch);
+      if (existsSync(subTarget)) ok(`${dir}: ${subPatch} \u2192 \u5b58\u5728`);
+      else { bad(`${dir}: dsh.bundle.patch=${subPatch} \u2192 \u76ee\u6807\u4e0d\u5b58\u5728`); failed++; }
+    }
   }
 
   console.log('\npatch \u884c\uff08\u76f8\u5bf9\u8def\u5f84\u5e94\u951a\u5728 patch \u65c1\u8fb9\uff09\uff1a');
@@ -373,6 +432,19 @@ function check() {
     bad('DSH_ROUTER_CAPTURE=1 \u2014\u2014 \u4f1a\u628a\u63d0\u793a\u8bcd\u660e\u6587\u843d\u76d8\uff0c\u9664\u975e\u6b63\u5728\u6392\u969c\u5426\u5219\u8bf7\u5173\u6389');
   } else {
     ok('DSH_ROUTER_CAPTURE \u672a\u5f00\uff08\u6b63\u5e38\uff09');
+  }
+
+  console.log('\nACP preset \u8986\u76d6\u5c42\uff08\u4e0a\u6e38\u6f02\u79fb\uff09\uff1a');
+  try {
+    // 生成物必须与上游 preset 一致：DSH 升级后不重跑生成器 = preset 静默失配
+    // （少挂一行工具不会报错），所以这条必须进安装自检。
+    execFileSync(process.execPath, [join(PACK_DIR, 'tools/gen-acp-preset.mjs'), '--check'], { cwd: PACK_DIR, stdio: 'pipe' });
+    ok('gen-acp-preset --check \u5e72\u51c0\uff08preset \u8986\u76d6\u5c42\u4e0e\u4e0a\u6e38\u4e00\u81f4\uff09');
+  } catch (err) {
+    bad('gen-acp-preset --check \u5931\u8d25\uff08\u4e0a\u6e38\u5347\u7ea7\u6216\u624b\u6539\u8fc7\u751f\u6210\u7269\uff09\u2014\u2014 \u8dd1 node tools/gen-acp-preset.mjs --write \u91cd\u751f\u6210');
+    const detail = String(err?.stdout ?? '') + String(err?.stderr ?? '');
+    if (detail.trim() !== '') info(detail.trim().split('\n').slice(-4).join(' | '));
+    failed++;
   }
 
   failed += reportPatches();

@@ -181,6 +181,9 @@ tools/tests/acp-*.mjs        # 各自负责自己的，Lead 补 e2e
 依赖：P1 → P2 → P3 串行（P2/P3 依赖 P1 的引擎 API）；A/B/C 的**文件互不重叠**，
 P2 的 `ledger.mjs` 纯函数部分可与 P1 并行起稿，但合并按 P1→P2 顺序。
 
+**执行状态（2026-10-27 完成，见 §11）**：P0 ✅ / P1 ✅ / P2 ✅ / P3 ✅ / P4 ✅ / P5 ✅。
+唯一验收口径变化：nudge 提醒是**一条 logged user 消息**（宿主 agent-loop 语义所迫，见 §11.3）。
+
 ---
 
 ## 6. 子代理协议（Lead 派发时按此写任务书）
@@ -204,23 +207,23 @@ Lead 在每阶段结束时：读 diff → 跑全量门禁 → 只由 Lead 接线
 ## 7. 验收清单（最终）
 
 **自动**
-- [ ] `npm test`：原有 4 套 + `acp-engine` / `acp-restore` / `acp-nudge` / `acp-e2e` 全过
-- [ ] `node install.mjs --check` = 0；`preflight` = 0；`sync-plugins --dry-run` 零差异
-- [ ] `tools/gen-acp-preset.mjs --check` = 0（preset 与上游一致，无漂移）
+- [x] `npm test`：原有 4 套 + `acp-engine`(25) / `acp-ledger`(18) / `acp-nudge`(27) / `acp-mount` / `acp-e2e --strict` / `acp-client` 全过
+- [x] `node install.mjs --check` = 0；`preflight` = 0；`sync-plugins --dry-run` 零差异
+- [x] `tools/gen-acp-preset.mjs --check` = 0（preset 与上游一致，无漂移）
 
 **功能（隔离 profile）**
-- [ ] nudge 出现但不自动压（`compactIfNeeded` 返回 null，日志无 `compaction/start`）
-- [ ] 模型 `compress` 后：`compaction/start` + `compaction/summary` 出现，摘要文本 == 模型写的
-- [ ] 摘要调用次数 = 0（不额外调 LLM）
-- [ ] `decompress` 取回原文（分页正确）；`search_context` 命中被压内容
-- [ ] `acp_status` 的块数/占比/checkpoint seq 与日志一致
-- [ ] **AGENTS.md 当前副本 / skill 目录 / 活动用户消息** 被拒绝（错误码 `protected`）
-- [ ] 二次压缩 checkpoint = tier 2
-- [ ] 回滚 `backend: basic` → 重启 → 内置压缩恢复
+- [x] nudge 出现但不自动压（`compactIfNeeded` 返回 null，nudge 前后 `compaction/summary` 数不变）
+- [x] 模型 `compress` 后：`compaction/start` + `compaction/summary` + `compaction/end` 出现，摘要文本 == 模型写的
+- [x] 摘要调用次数 = 0（不额外调 LLM；隔离 agent 的路由是不存在的 provider，任何真实调用都会失败，而 compress 成功）
+- [x] `decompress` 取回原文（分页正确）；`search_context` 命中被压内容（7 hits）
+- [x] `acp_status` 的块数/占比/checkpoint seq 与日志一致（b1/b2、tier2、checkpoints 映射）
+- [x] **AGENTS.md 当前副本 / skill 目录 / 活动用户消息** 被拒绝（错误码 `protected`，message 点名细分 code）
+- [x] 二次压缩 checkpoint = tier 2
+- [x] 回滚 `backend: basic` → 隔离进程验证 4 个 preset 挂回内置 `compaction-basic`、根插件惰性、生成物恢复 `--check` 干净
 
 **人工**
-- [ ] 面板 pill 显示块数/占比/上次 nudge；错误可见
-- [ ] 会话跑 1 小时无异常（无 unhandledRejection、无账本负数）
+- [ ] 面板 pill 显示块数/占比/上次 nudge；错误可见（自动门禁只验证客户端模块能进 boot 清单并编译出 bundle；视觉效果需装到 live 后人工看）
+- [ ] 会话跑 1 小时无异常（无 unhandledRejection、无账本负数）—— 需 live 装机后观察
 
 ---
 
@@ -243,8 +246,8 @@ Lead 在每阶段结束时：读 diff → 跑全量门禁 → 只由 Lead 接线
 
 - [x] `commandcode/deepseek/deepseek-v4.1-flash` 实测可用、工具调用正常
 - [x] 已加入 profile `subagent-model-selection-settings.allowedModels`（+ 分发包模板）
-- [ ] **需要新会话**：本会话 `allowedModels` 已冻结，子代理派不出去
-- [ ] P0 尖刀验证（Lead 在新会话第一步做）
+- [x] **新会话已开**：`commandcode/deepseek/deepseek-v4.1-flash` 子代理实测可派发
+- [x] P0 尖刀验证通过（隔离 DSH_HOME：preset 覆盖生效、引擎真实激活、工具可见、回滚可切）
 
 ## 10. 新会话开场指令（复制给新会话）
 
@@ -253,4 +256,61 @@ Lead 在每阶段结束时：读 diff → 跑全量门禁 → 只由 Lead 接线
 通过后用 subagent(provider=commandcode, model=deepseek/deepseek-v4.1-flash)
 按 P1/P2/P3 派发，每阶段回来跑门禁、接线 index.js、再进下一阶段；
 P4/P5 由你亲自做验收与提交，最后给我验收报告。
+```
+
+---
+
+## 11. 执行记录（2026-10-27，Lead）
+
+### 11.1 怎么做的（与计划的差异）
+
+- **全部验证都在隔离 DSH_HOME 里**（`mktemp` + 临时 profile + `--patch` overlay / `node_modules` 软链）：
+  live profile 与正在跑的会话一次都没动，也不需要重启。
+- 子代理按 P1/P2/P3 派发（`commandcode/deepseek/deepseek-v4.1-flash`），Lead 逐阶段：
+  读 diff → 跑门禁 → 做跨模块接线（tier 接线、nudge handler 工厂、e2e 驱动）→ 进下一阶段。
+- 新增了计划外的**进程内 e2e 驱动** `tools/tests/lib/acp-driver.mjs`：在隔离 web 进程里用
+  `ctx.agents.create({meta:{agentPreset}, setup: agentPresets.mount})` 建真实 preset agent，
+  再用真实工具定义执行 compress/decompress/search/status，并对 session 日志做契约断言。
+  它把「preset realm 里 serviceFor 能取到引擎」「模型自写摘要零 LLM 调用」这些无法从进程外
+  观察的事实变成了自动门禁。
+
+### 11.2 门禁证据（全绿）
+
+```
+node tools/gen-acp-preset.mjs --check                    ✅ 无上游漂移（sha256 1c4730cc…）
+node tools/tests/acp-mount.mjs                           ✅ 10/10（preset 覆盖 + preset realm 真实激活 + 回滚 basic）
+node tools/tests/acp-engine.mjs                          ✅ 25/25
+node tools/tests/acp-ledger.mjs                          ✅ 18/18
+node tools/tests/acp-nudge.mjs                           ✅ 27/27
+node tools/tests/acp-e2e.mjs --strict                    ✅ 全绿（compress/tier2/恢复/检索/三类屏障/nudge 不自动压/压力下降）
+node tools/tests/acp-e2e.mjs --rollback                  ✅ 回滚 basic 后 4 preset 挂回内置 + 根插件惰性；随后恢复生成物 --check 干净
+node tools/tests/acp-client.mjs                          ✅ 客户端模块进 boot 清单、bundle 编译 200
+node install.mjs --check                                 ✅ 0
+node tools/preflight.mjs                                 ✅ 0
+node tools/sync-plugins.mjs --dry-run                    ✅ 0 同步、8 个一致
+npm test                                                 ✅ 全过（原有 4 套 + 全部 ACP 门禁）
+```
+
+### 11.3 与计划的两处偏离（已验收，写进文档）
+
+1. **nudge 是 logged user 消息，不是「只进请求投影」**。
+   `dsh-agent-loop` 对 pre-step 返回的每条 message 硬读 `source.kind` 并 append 进日志
+   （只有 `runtime-context` 会被跳过 —— 但跳过意味着模型看不到提醒）。所以提醒带
+   `source:{kind:'context-acp', form:'notice'}` 落日志，受 cooldown/maxPerTurn 限制。
+   已用真实 `Session.append` 单测钉住 source 形状。
+2. **屏障细分 code 扩充**：`protected-system-prompt`（system 节点恒保护）与
+   `protected-unreadable`（判不了就拒绝）；工具对外统一 `code:'protected'`，细分写在 message。
+
+### 11.4 装到 live 的步骤（未执行，需人工）
+
+```sh
+cd ~/dsh/playground/themes/dsh-guava-pack
+node install.mjs --check                    # 应为 0
+node tools/gen-acp-preset.mjs --check       # 应为 0
+# 1) 把插件加进 profile（或让 pack 的 file: 依赖把它带进去）
+dsh plugin --profile web add ~/dsh/playground/themes/dsh-guava-pack/plugins/dsh-context-acp
+# 2) 重启 host 侧（preset 覆盖与根插件都要重启才加载）
+systemctl --user restart dsh.service
+# 3) 刷新浏览器；新建会话后看面板 pill 与 /acp status
+# 回滚：node tools/gen-acp-preset.mjs --write --backend basic && 重启
 ```

@@ -1,0 +1,22 @@
+{
+  "$comment": "dsh-context-acp 的唯一人工配置源。改完跑 `node tools/gen-acp-preset.mjs --write` 重生成 preset 覆盖层与 runtime.json，再重启 DSH。",
+  "backend": "acp",
+  "nudge": {
+    "pressureRatio": 0.65,
+    "growthTokens": 12000,
+    "cooldownSteps": 6,
+    "maxPerTurn": 2,
+    "minFreeTokens": 20000
+  },
+  "retain": {
+    "decompressPageSize": 8,
+    "searchLimit": 20,
+    "searchExcerptChars": 240,
+    "protectActiveUserMessage": true,
+    "protectAgentInstructions": true,
+    "protectSkillCatalog": true
+  },
+  "engine": {
+    "fallbackToLlmSummary": true
+  }
+}

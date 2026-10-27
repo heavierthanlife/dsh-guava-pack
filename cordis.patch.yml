@@ -31,3 +31,14 @@
     #    否则 seam 仍用 deepseek-official，本插件的切换不生效。
     - id: web-search-switch
       name: ./plugins/dsh-web-search-switch/lib/index.js
+
+    # 模型驱动的上下文压缩（ACP 全套能力）：根平面挂载工具/nudge/命令/面板，
+    # 引擎由 `config/preset-override.generated.yml` 替换四个 preset 的
+    # compaction-basic 行（生成器生成，禁止手改）。
+    # ⚠️ 安装形态要求：`dsh-context-acp` 必须能从 profile 的 node_modules 解析
+    #    （pack 的 package.json 已把它声明为 file: 依赖；独立安装时单独 add 该插件包），
+    #    否则 preset 里的 `dsh-context-acp/engine` 解析失败、preset realm 激活出错。
+    - id: context-acp
+      name: ./plugins/dsh-context-acp/lib/index.js
+      config:
+        enabled: true
