@@ -332,6 +332,9 @@
         model: gemini-3.8-flash-high
       - provider: antigravity
         model: claude-sonnet-4-6
+      # commandcode 的 DeepSeek V4.1 Flash（1M 窗口，工具调用实测可用）
+      - provider: commandcode
+        model: deepseek/deepseek-v4.1-flash
 - id: llm-deepseek
   name: "@deepseek-ai/dsh-llm-deepseek-api-key"
   config:
