@@ -539,6 +539,34 @@ node tools/sync-model-policy.mjs --probe     # 会额外探测一次"带 tools �
 `--check-refs` 会把"被引用但不可用 / 不支持工具 / 是免费模型"全部列出来，
 并用 `exit 3` 与"悬空引用"的 `exit 2` 区分开。
 
+## 手机/平板经 Tailscale 打开后"一直 reconnecting、不显示对话"
+
+几乎总是 **`--trusted-host` 缺失**，不是 Tailscale 断了。区分方法：
+
+```sh
+# 服务在跑、页面能开，但 API 被围栏拒了：
+curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: <你的>.<tailnet>.ts.net' \
+     http://127.0.0.1:3080/api/changes.summary     # 403 = 围栏拒绝；401 = 围栏通过（只是没带 token）
+# 看当前进程到底有没有这个参数：
+tr '\0' '\n' < /proc/$(fuser -n tcp 3080 2>/dev/null | tr -d ' ')/cmdline | grep trusted-host
+```
+
+原因：`/api` 的浏览器信任围栏默认只信 loopback 与 IP 字面量，MagicDNS 主机名必须
+用 `--trusted-host` 显式放行。启动器会自动加，但**以前是从 `/etc/resolv.conf` 的
+`search` 域现推的** —— WSL 会重写这个文件，恰好在那次启动时没有 search 域，参数就
+静默丢了（页面能开、每个 API 都 403 → 客户端无限重连）。
+
+已修（2026-10-27）：
+
+1. 启动器优先读 **`DSH_TAILNET_HOST`**（建议在 `~/.bashrc` 显式写死，模板见
+   `ops/bashrc.dsh.example`），其次 resolv.conf、再次 `hostname -d`；
+2. 三个来源都拿不到时**大声告警**并写 `logs/launcher.log`，不再静默；
+3. 每次启动把 `trusted-host=<值> (source=env|derived)` 记进 `logs/launcher.log`，
+   下次一查就知道。
+
+> 另注：token 每次重启都会换。手机端要重新从「设置 → 连接信息」复制当次链接，
+> 用旧链接同样会连不上。
+
 ## 超时：为什么默认是 60 秒
 
 `DSH_ROUTER_HEADER_TIMEOUT_MS` 默认 **60000**（旧默认 120000）。上游卡住时这个值

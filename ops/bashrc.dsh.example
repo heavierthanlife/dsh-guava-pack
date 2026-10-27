@@ -16,6 +16,15 @@ esac
 # 直接 ECONNREFUSED，而日志里什么都没有。
 # export DSH_GUAVA_PACK="$HOME/dsh/playground/themes/dsh-guava-pack"
 
+# ── tailnet(MagicDNS) 主机名：手机/平板经 tailscale serve 访问必需 ──────
+# DSH 的 /api 浏览器信任围栏（防 DNS rebinding）只信 loopback 与 IP 字面量；
+# 用 MagicDNS 名字访问时**必须**显式放行，否则页面能打开、所有 API 403，
+# 客户端表现是"一直 reconnecting、不显示任何对话"（2026-10-27 真事故）。
+# 启动器会自动从 /etc/resolv.conf 的 search 域推导，但 WSL 会重写该文件 ——
+# 推导失败的启动就会静默丢这个参数，所以**建议显式写死**：
+#   hostname 小写 . 你的 tailnet 域名
+# export DSH_TAILNET_HOST="ygy12.tailef4f13.ts.net"
+
 # ── SSR 出口（**端口每台机器都可能不同**，必须按机器写）──────────────────
 # 启动器 / router start.sh / 桥接都会读这一条。不写就默认 2080。
 # 踩过的坑：一台机器是 2080、另一台是 2099；写成默认值时那台机器所有 SSR

@@ -113,10 +113,37 @@ if [ "$WANT_TRUSTED_HOST" = true ]; then
   case " $* " in
     *" --trusted-host "*|*" --trusted-host="*) ;;
     *)
-      TAILNET_SUFFIX=$(sed -n "s/^search[[:space:]]*//p" /etc/resolv.conf 2>/dev/null | awk "{print \$1; exit}")
-      if [ -n "$TAILNET_SUFFIX" ]; then
-        TAILNET_HOST="$(hostname 2>/dev/null | tr "A-Z" "a-z").$TAILNET_SUFFIX"
+      # 主机名的三个来源，按可靠性排序：
+      #   1. DSH_TAILNET_HOST  —— 显式配置（.bashrc 会被本脚本载入）。**推荐**：
+      #      resolv.conf 会被 WSL 重写，靠它现推会在"某个时刻没有 search 域"时静默丢
+      #      —— 真事故（2026-10-27）：DSH 起来时不带 --trusted-host，手机经
+      #      tailscale serve 打开页面能加载，但所有 /api 调用 403，客户端一直
+      #      reconnecting、不显示任何对话。
+      #   2. /etc/resolv.conf 的 search 域（MagicDNS 正常时可用）
+      #   3. hostname -d（某些发行版只有域名）
+      TAILNET_HOST="${DSH_TAILNET_HOST:-}"
+      if [ -z "$TAILNET_HOST" ]; then
+        TAILNET_SUFFIX=$(sed -n "s/^search[[:space:]]*//p" /etc/resolv.conf 2>/dev/null | awk "{print \$1; exit}")
+        if [ -z "$TAILNET_SUFFIX" ]; then
+          TAILNET_SUFFIX=$(hostname -d 2>/dev/null | tr "A-Z" "a-z")
+        fi
+        if [ -n "$TAILNET_SUFFIX" ]; then
+          TAILNET_HOST="$(hostname 2>/dev/null | tr "A-Z" "a-z").$TAILNET_SUFFIX"
+        fi
+      fi
+      if [ -n "$TAILNET_HOST" ]; then
         set -- "$@" --trusted-host "$TAILNET_HOST"
+        _src=derived
+        [ -n "${DSH_TAILNET_HOST:-}" ] && _src=env
+        mkdir -p "$DSH_HOME/logs" 2>/dev/null || true
+        echo "[dsh] $(date '+%F %T') trusted-host=$TAILNET_HOST (source=$_src)" >> "$DSH_HOME/logs/launcher.log" 2>/dev/null || true
+      else
+        # **必须大声说出来**：没有这个参数时手机/平板能打开页面但所有 API 403，
+        # 报错完全不像"配置缺一项"，极难排查 —— 宁可吵，也不要静默。
+        mkdir -p "$DSH_HOME/logs" 2>/dev/null || true
+        echo "[dsh] ⚠️ 无法确定 tailnet 主机名：手机/平板经 tailscale serve 访问会全部 403。" >&2
+        echo "[dsh]    请 export DSH_TAILNET_HOST=<hostname>.<tailnet>.ts.net（例如 ygy12.tailef4f13.ts.net）。" >&2
+        echo "[dsh] $(date '+%F %T') WARN no tailnet host; phone/tablet API calls will 403" >> "$DSH_HOME/logs/launcher.log" 2>/dev/null || true
       fi
       ;;
   esac
