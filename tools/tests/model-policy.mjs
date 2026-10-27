@@ -456,6 +456,16 @@ check('分发模板的 responses 模型表覆盖三个在线模型',
 check('分发模板的 allowedModels 不再引用已下线的 agentrouter/deepseek-v4-flash',
   !/- provider: agentrouter\s*\n\s*model: deepseek-v4-flash/.test(exampleSrc));
 
+// 2026-10-27 profile 收尾后的回归：live profile 里也不能再有 anthropic 路由 /
+// 死引用（否则用户面板里能选到一个必然 503 的模型）。
+const profSrc = readFileSync(join(process.env.HOME || '', 'dsh', 'profiles', 'web', 'cordis.patch.yml'), 'utf8');
+check('live profile 已无 anthropic 协议的 agentrouter 路由',
+  !/^\s{6}agentrouter:\s*$/m.test(profSrc));
+check('live profile 的 allowedModels 已无 agentrouter/deepseek-v4-flash',
+  !/- provider: agentrouter\s*\n\s*model: deepseek-v4-flash/.test(profSrc));
+check('live profile 的 responses 路由覆盖三个在线模型',
+  ['gpt-6.1-sol', 'gpt-5.6-sol', 'gpt-6-astra'].every((m) => profSrc.includes(`- id: ${m}`)));
+
 // ── 18. 进程生命周期：改完代码必须能真的重启 ────────────────────────────
 // 事故（2026-10-22）：两个 start.sh 都是"健康就退出"，于是改了 router.mjs /
 // server.mjs 后**进程还是旧的、健康检查却全绿**。没有 --force 时只能猜 PID 去 kill。
