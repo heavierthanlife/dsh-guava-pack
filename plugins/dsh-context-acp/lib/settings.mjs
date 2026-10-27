@@ -35,6 +35,8 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
+import { latestNudgeOf } from './state.mjs';
+
 import { z } from 'zod';
 
 /** 面板路由前缀（client.js 必须用同一个）。 */
@@ -313,8 +315,9 @@ function registerProjection(cctx) {
  * 面板读的权威值：
  *   · `tunables`：阈值 / 增长 tokens / 分页 / 检索上限（可调，白名单夹取）
  *   · `armed`：根插件已挂载即 armed（真正的引擎能力由 nudge 的 pre-step 检查）
- *   · `lastNudge`：HTTP 路由没有 sessionId，拿不到 per-session 就诚实地给 null
- *     （面板显示「本进程暂无记录」），绝不伪造一个时间。
+ *   · `lastNudge`：HTTP 路由没有 sessionId，无法按 agent 取；给**本进程最近一次**
+ *     nudge（state.mjs 的 latestNudgeOf），没有就 null（面板显示「本进程暂无记录」），
+ *     绝不伪造一个时间。
  *
  * @param {object} deps 见 lib/index.js `makeDeps`
  * @returns {() => void} disposer
@@ -333,7 +336,10 @@ export function installPanel(deps) {
   void (async () => {
     const loaded = await loadSavedSettings(deps.runtime);
     if (settingsEpoch === 0 && loaded !== deps.runtime) deps.runtime = loaded;
-  })();
+  })().catch(() => {
+    // loadSavedSettings 自己吞掉读盘/坏文件错误；这里只兜住理论上的意外，
+    // 不让一个异步设置加载变成 unhandled rejection 拖垮进程。
+  });
 
   // 1) 每会话投影：客户端 pill 的唯一每会话数据源。
   const projectionFiber = ctx.inject(['sessionProjections'], (cctx) => {
@@ -380,7 +386,7 @@ export function installPanel(deps) {
                 // nudge 在 pre-step 里用 markArmed 另行验证。
                 armed: true,
                 tunables: tunablesOf(deps.runtime),
-                lastNudge: null,
+                lastNudge: typeof latestNudgeOf === 'function' ? latestNudgeOf() : null,
               },
             });
             return;

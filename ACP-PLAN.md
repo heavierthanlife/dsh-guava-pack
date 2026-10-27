@@ -300,6 +300,10 @@ npm test                                                 ✅ 全过（原有 4 �
    已用真实 `Session.append` 单测钉住 source 形状。
 2. **屏障细分 code 扩充**：`protected-system-prompt`（system 节点恒保护）与
    `protected-unreadable`（判不了就拒绝）；工具对外统一 `code:'protected'`，细分写在 message。
+3. **面板「上次 nudge」= 进程内最近一次**（不是 per-session）：客户端 slot props 没有
+   sessionId，per-session 数据只能走 session projection（`contextAcp`），而 nudge 是瞬时
+   状态；所以 getSettings 返回 `state.latestNudgeOf()`，面板标注「本进程最新」。
+   `/acp status` 的 nudge 是该会话自己的（读 per-agent state）。
 
 ### 11.4 装到 live 的步骤（未执行，需人工）
 

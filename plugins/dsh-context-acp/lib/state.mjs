@@ -41,6 +41,17 @@ function emptyState() {
 /** agent -> state */
 const states = new WeakMap();
 
+/**
+ * 进程内最近一次 nudge（跨 agent 的单一读数）。
+ *
+ * 为什么需要：面板路由（HTTP）拿不到 sessionId（客户端 slot props 只有
+ * useProjection/t），所以没法按 agent 取 lastNudge；但面板要显示「上次 nudge」。
+ * 这里只保留**最近一次**（谁先谁后是 UI 能说清的语义），并在面板文案里标注
+ * 「本进程最新」。WeakMap 不能遍历，所以另存一份标量读数 —— 不是账本，
+ * 账本永远从 session 日志重建。
+ */
+let latestNudge = null;
+
 /** 取（必要时创建）一个 agent 的状态对象。调用方拿到的是**活引用**，可直接改字段。 */
 export function stateOf(agent) {
   if (agent === null || typeof agent !== 'object') return emptyState();
@@ -57,10 +68,16 @@ export function snapshot(agent) {
   return { ...stateOf(agent) };
 }
 
+/** 读进程内最近一次 nudge（面板路由用；没有则 null，绝不伪造时间）。 */
+export function latestNudgeOf() {
+  return latestNudge === null ? null : { ...latestNudge };
+}
+
 /** 记录一次 nudge（C 调用）。 */
 export function recordNudge(agent, { usedTokens, contextWindow, step, reason }) {
   const state = stateOf(agent);
   state.lastNudge = { at: Date.now(), usedTokens, contextWindow, reason: reason ?? 'pressure' };
+  latestNudge = { ...state.lastNudge };
   state.lastNudgeStep = typeof step === 'number' ? step : state.lastNudgeStep;
   state.lastNudgeTokens = typeof usedTokens === 'number' ? usedTokens : state.lastNudgeTokens;
   state.turnNudges += 1;

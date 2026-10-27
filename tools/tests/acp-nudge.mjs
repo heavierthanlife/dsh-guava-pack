@@ -33,7 +33,7 @@ import { createNudgeHandler, decideNudge, installNudge, renderNudge } from '../.
 import { installCommand, parseAcpCommand } from '../../plugins/dsh-context-acp/lib/command.mjs';
 import { applyTunables, installPanel } from '../../plugins/dsh-context-acp/lib/settings.mjs';
 import { PROMPT_SECTION } from '../../plugins/dsh-context-acp/lib/prompt.mjs';
-import { snapshot, stateOf } from '../../plugins/dsh-context-acp/lib/state.mjs';
+import { recordNudge, snapshot, stateOf } from '../../plugins/dsh-context-acp/lib/state.mjs';
 import { Session } from '@deepseek-ai/dsh-session';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 
@@ -814,7 +814,13 @@ test('installPanel 路由：getSettings 信封 + setSettings 夹取并落盘', a
     eq(got.result.value.tunables.growthTokens, 12000, 'tunables.growthTokens');
     eq(got.result.value.tunables.decompressPageSize, 8, 'tunables.decompressPageSize');
     eq(got.result.value.tunables.searchLimit, 20, 'tunables.searchLimit');
-    eq(got.result.value.lastNudge, null, '拿不到 per-session 时诚实给 null');
+    // 面板没有 sessionId：给「本进程最近一次 nudge」或 null，绝不伪造时间。
+    // 前面的 nudge 用例可能已经记录过，所以这里只断言形状。
+    assert(got.result.value.lastNudge === null || typeof got.result.value.lastNudge?.at === 'number', 'lastNudge 形状');
+    recordNudge({ id: 'panel-test-agent' }, { usedTokens: 80, contextWindow: 100, step: 3, reason: 'pressure' });
+    const gotAfterNudge = await callRoute(route, 'getSettings', {}, 'r1b');
+    assert(gotAfterNudge.result.value.lastNudge !== null, '记录 nudge 后面板可见');
+    eq(gotAfterNudge.result.value.lastNudge.usedTokens, 80, 'lastNudge.usedTokens');
 
     const saved = await callRoute(route, 'setSettings', {
       pressureRatio: 0.99,

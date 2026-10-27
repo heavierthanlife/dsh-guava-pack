@@ -152,7 +152,10 @@ node tools/gen-acp-preset.mjs --check   # 上游漂移
 
 - **需要重启 DSH**：preset 覆盖层与根插件都在 host 侧加载。
 - **面板 pill 的「上次 nudge」是进程级最新一条**：客户端 slot 拿不到 sessionId，
-  每会话数据走 projection，nudge 瞬时状态只能全局展示（面板有标注）。
+  每会话数据走 projection，nudge 瞬时状态只能全局展示（面板标注「本进程最新」）；
+  `/acp status` 里的 nudge 才是该会话自己的（读共享 state 的 per-agent 值）。
+- **面板只暴露两个可调项**（阈值%、增长 tokens）；`decompressPageSize` / `searchLimit`
+  仍可在 `config/acp.json` + 面板 HTTP 路由的 `setSettings` 调整，只是没放成步进控件。
 - **`compactRegion` 需要在 turn 内调用**：模型在 turn 中调 `compress` 天然满足；
   没有 turn 的外部调用会被父类拒绝（这是父类的锁语义，不是本插件的限制）。
 - **上游升级会漂移**：升级 DSH 后必须重跑 `gen-acp-preset.mjs --write` 并跑
