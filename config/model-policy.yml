@@ -86,29 +86,29 @@ providers:
       # 端点没列出点名的型号时：keep = 保留（可能被服务端别名）/ drop = 删掉
       on_missing: keep
 
-  # ── agentrouter（Anthropic 协议）──────────────────────────────────────────
-  # 只留 deepseek-v4-flash。
+  # ── agentrouter（Anthropic 协议）：**路由已废弃（2026-10-27）** ────────────
+  # 2026-10-27 实测（经 SSR + 合法 UA，见 HANDOFF §8.10）：
+  #   · GET /v1/models 只剩 gpt-5.6-sol / gpt-6-astra / gpt-6.1-sol，
+  #     **全部是 Responses-only**（在 /v1/chat/completions 上一律 400）；
+  #   · 原 Anthropic 路由唯一的 deepseek-v4-flash 已下线 →
+  #     503「当前分组 default 下对于模型 deepseek-v4-flash 无可用渠道」。
+  # 所以策略里**不再保留** `agentrouter` 规则：留着只会让扫描/同步继续保留一个
+  # 必失败的模型。等 profile 里的 anthropic 路由移除后，这里无需任何规则。
   #
-  # ⚠️ 反例留档：`gpt-6.1-sol` **不能**放这条路由。AgentRouter 把 /v1/messages
-  # 翻成 OpenAI /v1/chat/completions，而该模型在这个端点上禁止 Function tools，
-  # DSH 每一轮带工具都会 400（"Function tools with reasoning_effort are not
-  # supported"）。它已迁到下面的 agentrouter-responses。
-  agentrouter:
-    intent: 最新的可用 deepseek（仅 Anthropic 协议路由）
-    pick:
-      explicit:
-        - deepseek-v4-flash
-      on_missing: keep
+  # ⚠️ 反例留档：`gpt-6.1-sol` 曾因"Anthropic 路由会把 /v1/messages 翻成
+  # /v1/chat/completions，而该端点禁止 Function tools"被移出 anthropic 路由。
+  # 现在反过来：**三个模型全部都只能走 /v1/responses**。
 
   # ── agentrouter-responses（OpenAI Responses 协议）────────────────────────
-  # 放**必须走 /v1/responses 才有工具能力**的模型。已实测：同模型在
-  # /v1/chat/completions 上挂 tools 会被上游 400；在 /v1/responses 上返回
-  # 正常 function_call。
+  # 线上仅剩的三个模型都在这里（2026-10-27 实测，工具调用均正常）。
+  # 同模型走 /v1/chat/completions 会 400（原文：请改用 /v1/responses）。
   agentrouter-responses:
-    intent: 需要 Responses 协议才有工具能力的模型
+    intent: AgentRouter 全部在线模型（Responses-only，必须走该协议才有工具）
     pick:
       explicit:
         - gpt-6.1-sol
+        - gpt-5.6-sol
+        - gpt-6-astra
       on_missing: keep
 
   # ── opencode-go / opencode / commandcode ──────────────────────────────────

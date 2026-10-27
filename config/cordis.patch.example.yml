@@ -139,31 +139,13 @@
             input:
               - text
               - image
-      agentrouter:
-        apiKeyEnv: AGENTROUTER_API_KEY
-        displayName: AgentRouter (经路由代理 · SSR · Anthropic 协议)
-        api: anthropic-messages
-        baseURL: http://127.0.0.1:8318/agentrouter
-        thinkingBudgets:
-          low: 8192
-          medium: 16384
-          high: 32768
-        compat:
-          allowEmptySignature: true
-          supportsLongCacheRetention: false
-          supportsEagerToolInputStreaming: false
-          supportsCacheControlOnTools: false
-        models:
-          - id: deepseek-v4-flash
-            name: DeepSeek V4 Flash
-            contextWindow: 1000000
-            maxTokens: 131072
-            input:
-              - text
-            reasoningEfforts:
-              low: low
-              medium: medium
-              high: high
+      # ── AgentRouter · Anthropic 协议路由：**已废弃（2026-10-27）** ────────
+      # 2026-10-27 实测（经 SSR、带合法 UA）：
+      #   · GET /v1/models 只剩 3 个模型，全部是 Responses-only；
+      #   · 原 Anthropic 路由唯一的 deepseek-v4-flash 已下线 →
+      #     503「当前分组 default 下对于模型 deepseek-v4-flash 无可用渠道」。
+      # 所以这里不再保留 anthropic-messages 路由（留着只会让用户选到必失败的模型）。
+      # 若上游将来重新提供 Anthropic 协议模型，按被删块的形状加回即可。
       # ── AgentRouter · Responses API（走工具能力必须用这条路由）──────────
       # 为什么单独开一家：AgentRouter 的 Anthropic 适配层会把 /v1/messages 翻成
       # OpenAI /v1/chat/completions，而 gpt-6.1-sol 在该端点上**禁止 Function
@@ -173,10 +155,29 @@
         displayName: AgentRouter (Responses API · 支持工具)
         api: openai-responses
         baseURL: http://127.0.0.1:8318/agentrouter/v1
+        # 2026-10-27 线上目录实测只剩这三个，且**都只能走 /v1/responses**：
+        # 同模型在 /v1/chat/completions 上一律 400（原文：请改用 /v1/responses），
+        # 在 /v1/responses 上工具调用正常（实测 function_call）。
+        # 目录不提供上下文长度（created 还是 one-api 的假时间戳 1626777600），
+        # 除 gpt-6.1-sol 外按保守 1M 记录。
         models:
           - id: gpt-6.1-sol
             name: GPT 6.1 Sol
             contextWindow: 1050000
+            maxTokens: 64000
+            input:
+              - text
+              - image
+          - id: gpt-5.6-sol
+            name: GPT 5.6 Sol
+            contextWindow: 1000000
+            maxTokens: 64000
+            input:
+              - text
+              - image
+          - id: gpt-6-astra
+            name: GPT 6 Astra
+            contextWindow: 1000000
             maxTokens: 64000
             input:
               - text
@@ -326,8 +327,9 @@
         model: deepseek-flash
       - provider: deepseek-official
         model: deepseek-v4-pro
-      - provider: agentrouter
-        model: deepseek-v4-flash
+      # AgentRouter 的 Anthropic 路由已废弃（deepseek-v4-flash 下线），改指 Responses 路由
+      - provider: agentrouter-responses
+        model: gpt-5.6-sol
       - provider: antigravity
         model: gemini-3.8-flash-high
       - provider: antigravity

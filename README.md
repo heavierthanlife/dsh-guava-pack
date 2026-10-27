@@ -95,10 +95,12 @@ curl -s http://127.0.0.1:8318/health
 整段对话）明文写入 `plugins/provider-router/captures/req-<时间戳>.json`（只保留最近 8 份）。默认关闭；
 只在排障时临时打开，用完立刻删除文件，**不要把抓到的内容随包分发**。
 
-### ⚠️ node_modules 补丁 —— 不打就用不了 agentrouter
+### ⚠️ node_modules 补丁 —— 不打的话 Anthropic 协议 provider 容易 400
 
 有两个补丁**不在插件目录里**，而是改 DSH 安装目录下的 `node_modules`。
-换机器只装包不打补丁，**agentrouter 的模型仍然会 400**：
+换机器只装包不打补丁，走 `api: anthropic-messages` 的路由（现在只剩 `antigravity`）仍会 400。
+（这两个问题最早是在 `agentrouter` 的 `deepseek-v4-flash` 通道上暴露的；该路由已于
+**2026-10-27 随上游模型下线而废弃**，见下面的「AgentRouter 变更」。）
 
 | 补丁 | 改的文件 | 修什么 |
 |---|---|---|
@@ -116,7 +118,7 @@ node install.mjs --patch          # 幂等，已打过就跳过
 
 - 补丁①是全局的 —— 影响 dsh 自己声明的内置工具 schema；语义等价（`required: []` ≡ 不写），
   已实测 xiaomi 两种写法都 200。MCP 工具的 schema 原样透传，不受影响。
-- 补丁②只作用于 `api: anthropic-messages` 的 provider（即 antigravity、agentrouter）；
+- 补丁②只作用于 `api: anthropic-messages` 的 provider（现为 `antigravity`；2026-10-27 前还包括 `agentrouter` 的 Anthropic 路由）；
   openai 系走另一个文件，完全没动。
 
 **这两个补丁会在 dsh 依赖升级后被 npm/pnpm 覆盖** —— 升级完必须重跑补丁脚本。
@@ -247,7 +249,7 @@ sh tools/run-model-policy.sh --probe --write
 
 探针必须看**正文产出**，不能只看状态码。两个真实教训：
 0. **两种协议格式完全不同**：`openai-completions` 的正文在 `choices[].delta.content`；
-   `anthropic-messages`（antigravity / agentrouter）是**一整个 message 对象**，
+   `anthropic-messages`（现为 antigravity）是**一整个 message 对象**，
    正文在 `content: [{type:"text", text:"…"}]`。只认前者的话，后者正文数恒为 0
    → 好模型被误判成"只出推理不出正文"（踩过）。
 1. commandcode 的桥接**对失败也返回 200**，错误藏在 SSE body 里（`data: {"error":…}`）。
@@ -319,9 +321,13 @@ deepseek 血统 → `low/medium/high`（opencode 系实测支持 `max`）；anti
     providers:
       opencode-go:
         baseURL: http://127.0.0.1:8318/opencode-go
-      agentrouter:
-        baseURL: http://127.0.0.1:8318/agentrouter
+      agentrouter-responses:
+        baseURL: http://127.0.0.1:8318/agentrouter/v1
 ```
+
+> 2026-10-27：`agentrouter`（`api: anthropic-messages`）整条路由已移除 ——
+> 上游只剩 3 个 Responses-only 模型，原 Anthropic 路由唯一的 `deepseek-v4-flash`
+> 已下线（503「无可用渠道」）。剩下三个模型统一挂在 `agentrouter-responses` 上。
 
 改完必须重启 DSH。面板「设置 → 供应商路由」里可以逐个切换直连 / 经 SSR。
 
@@ -445,7 +451,7 @@ node tools/preflight.mjs --json   # 给别的脚本用
 |---|---|
 | Node / `DSH_HOME` | 版本太旧或家目录指错时，一切看起来都像"模型坏了" |
 | pack 位置 | 曾把默认值写成 `$HOME/dsh-guava-pack`（实际在 `$DSH_HOME/playground/themes/...`）→ 桥接与路由代理被**静默跳过**，8317/8318 双双起不来 |
-| `node_modules` 补丁 | 一次 `pnpm install` 就把 Anthropic 工具补丁冲掉，之后 agentrouter 立刻 400，报错完全看不出原因 |
+| `node_modules` 补丁 | 一次 `pnpm install` 就把 Anthropic 工具补丁冲掉，之后 anthropic 协议路由（antigravity）立刻 400，报错完全看不出原因 |
 | 8318 / 8317 / 3080 | 三进程互相独立，挂哪个现象都不一样 |
 | `mode.json` 可写 | 不可写时面板开关"点了没反应"，没有任何提示 |
 | provider key 可得性 | 只报"有没有"，绝不打印值。缺 key 时探测全是 401，免费模型会被"保守保留"成噪音 |
@@ -469,13 +475,36 @@ curl -s http://127.0.0.1:8318/health ; curl -s http://127.0.0.1:8317/health
 
 DSH 是 Agent，**每一轮都会把工具清单塞进请求**。而"能聊"和"能挂工具"是两件事：
 
-- `agentrouter`（`api: anthropic-messages`）：适配层会把请求翻成 OpenAI
-  `/v1/chat/completions`。`gpt-6.1-sol` 在这个端点上**禁止 Function tools**
-  （400 `Function tools with reasoning_effort are not supported`）。
-- `agentrouter-responses`（`api: openai-responses`）：同一个模型走 `/v1/responses`，
-  工具调用完全正常（实测返回 `function_call`）。
+- `agentrouter-responses`（`api: openai-responses`）：线上仅剩的三个模型
+  （`gpt-6.1-sol` / `gpt-5.6-sol` / `gpt-6-astra`）**全部**只能走 `/v1/responses`，
+  工具调用正常（实测返回 `function_call`）。
+- 历史教训：`agentrouter`（`api: anthropic-messages`）会把 `/v1/messages` 翻成
+  OpenAI `/v1/chat/completions`，而这三个模型在该端点上**一律 400**
+  （原文：「请改用 /v1/responses」）。该 Anthropic 路由已于 2026-10-27 废弃。
+- 另一个坑：AgentRouter 的网关按 **User-Agent 白名单**拦截，`curl/*` 会被
+  `401 unauthorized client detected` 拒掉；`opencode/1.18.29` 或本包路由代理用的
+  `pi (win32 …)` 都能过。排障时别因为 401 就以为 key 废了。
 
-所以 `gpt-6.1-sol` 放在后者。**加新模型时先确认它支持哪种协议**：
+### AgentRouter 变更（2026-10-27 实测）
+
+上游模型池变了，**不是配置写错**。当日用本机 key（经 SSR + 合法 UA）实测：
+
+| 观测 | 结果 |
+|---|---|
+| `GET /v1/models` | 只剩 `gpt-6.1-sol`、`gpt-5.6-sol`、`gpt-6-astra` |
+| 三个模型 → `/v1/chat/completions` | **全部 400**：「模型 X 不支持 /v1/chat/completions 接口，请改用 /v1/responses」 |
+| 三个模型 → `/v1/responses` | **全部 200**，且工具调用正常（`function_call`） |
+| `deepseek-v4-flash`（原 Anthropic 路由唯一模型） | **503**「当前分组 default 下对于模型 deepseek-v4-flash 无可用渠道」 |
+| UA 不带合法值（如 `curl/*`） | `401 unauthorized client detected`；`pi (win32 …)` / `opencode/1.18.29` 均 200 |
+
+由此做的改动：**删除 `agentrouter`（anthropic-messages）整条路由**，
+三个模型统一挂 `agentrouter-responses`；策略表同步（`config/model-policy.yml`）。
+
+> ⚠️ **本机 profile 的对应改动尚未落盘**（与另一个并发会话冲突，等它收工后再做）。
+> 在那之前，本机 live profile 里仍留着 `agentrouter` + `deepseek-v4-flash`
+> （选中会 503），`allowedModels` 里也还留着这条死引用 —— 这是已知且临时的状态。
+
+**加新模型时先确认它支持哪种协议**：
 
 ```sh
 node tools/sync-model-policy.mjs --probe     # 会额外探测一次"带 tools 的请求"

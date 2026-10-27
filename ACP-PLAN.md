@@ -195,7 +195,7 @@ P2 的 `ledger.mjs` 纯函数部分可与 P1 并行起稿，但合并按 P1→P2
    `改了什么 / 测试结果 / 未决问题 / 需要 Lead 决策的点`。
 5. **禁止**：重启 DSH、写 profile、`git commit`、动 live 会话。
 6. 模型：`provider=commandcode, model=deepseek/deepseek-v4.1-flash`。
-   若同一任务连续两次失败，Lead 改派 `agentrouter/deepseek-v4-flash` 或亲自写。
+   若同一任务连续两次失败，Lead 改派 `agentrouter-responses/gpt-5.6-sol` 或亲自写。
 
 Lead 在每阶段结束时：读 diff → 跑全量门禁 → 只由 Lead 接线 `index.js` → 进入下一阶段。
 

@@ -118,8 +118,15 @@ const prof = yaml.load(readFileSync(join(process.env.HOME || '', 'dsh', 'profile
 const pi = prof.find((e) => e?.id === 'llm-pi-ai');
 const provs = Object.keys(pi?.config?.providers ?? {});
 check('策略表能解析', policy !== null && typeof policy === 'object');
-check(`策略表覆盖全部 ${provs.length} 家`, provs.every((p) => p in (policy.providers ?? {})),
-  provs.filter((p) => !(p in (policy.providers ?? {}))));
+// 已废弃的上游路由允许没有策略规则（2026-10-27：AgentRouter 的 Anthropic 路由
+// 已无任何可用模型，策略故意不再覆盖它；profile 侧的移除因与并发会话冲突而延后）。
+// 除这些之外，策略必须覆盖 profile 里的每一家 —— 否则新供应商会静默漏配。
+const RETIRED_PROVIDERS = new Set(['agentrouter']);
+const uncovered = provs.filter((p) => !(p in (policy.providers ?? {})));
+check(`策略表覆盖全部在用供应商（已废弃的 ${[...RETIRED_PROVIDERS].join('/')} 除外）`,
+  uncovered.every((p) => RETIRED_PROVIDERS.has(p)), uncovered);
+check('豁免清单里的路由确实没有任何策略规则（防止悄悄扩大豁免范围）',
+  [...RETIRED_PROVIDERS].every((p) => !(p in (policy.providers ?? {}))));
 check('每家的 pick 都非空', Object.values(policy.providers ?? {}).every((r) => r.pick && Object.keys(r.pick).length > 0));
 check('exclude 正则在 JS 里可构造（不支持 (?i)）',
   (() => { try { new RegExp(policy.defaults.exclude, policy.defaults.exclude_flags ?? ''); return true; } catch { return false; } })());
@@ -421,20 +428,33 @@ const startSrc = readFileSync(join(PACK, 'plugins', 'provider-router', 'start.sh
 check('router start.sh 端口可被 DSH_ROUTER_PORT 覆盖', /DSH_ROUTER_PORT:-8318/.test(startSrc));
 check('router start.sh 会创建 mode.json 父目录', /mkdir -p "\$\(dirname "\$DSH_ROUTER_MODE_FILE"\)"/.test(startSrc));
 
-// ── 17. gpt-6.1-sol 必须待在 Responses 路由上 ───────────────────────────
-// 这是"模型能力 ↔ 协议"绑定的具体修复，单独钉一条，防止以后被策略同步搬回去。
-console.log('\ngpt-6.1-sol 的路由归属');
+// ── 17. AgentRouter 的路由归属（2026-10-27 上游模型池变动）─────────────────
+// 事实（当日实测）：线上只剩 gpt-6.1-sol / gpt-5.6-sol / gpt-6-astra，
+// **三个都只能走 /v1/responses**（chat/completions 一律 400）；
+// 原 Anthropic 路由唯一的 deepseek-v4-flash 已下线（503 无可用渠道）。
+// 所以策略里不再保留 anthropic 路由规则，三个模型全部归 responses 路由。
+console.log('\nAgentRouter 路由归属');
 const policyProviders = Object.keys(policy.providers);
 check('策略表里有 agentrouter-responses 路由', policyProviders.includes('agentrouter-responses'));
-check('agentrouter（Anthropic）不再点名 gpt-6.1-sol',
-  !(policy.providers.agentrouter?.pick?.explicit ?? []).includes('gpt-6.1-sol'));
-check('agentrouter-responses 点名 gpt-6.1-sol',
-  (policy.providers['agentrouter-responses']?.pick?.explicit ?? []).includes('gpt-6.1-sol'));
+check('策略表里已无 agentrouter（Anthropic）规则',
+  !policyProviders.includes('agentrouter'), policyProviders.filter((n) => n.startsWith('agentrouter')));
+const responsesPick = policy.providers['agentrouter-responses']?.pick?.explicit ?? [];
+check('responses 路由覆盖三个在线模型',
+  ['gpt-6.1-sol', 'gpt-5.6-sol', 'gpt-6-astra'].every((m) => responsesPick.includes(m)), responsesPick);
+check('responses 路由不再残留已下线的 deepseek-v4-flash',
+  !responsesPick.includes('deepseek-v4-flash'));
 const exampleSrc = readFileSync(join(PACK, 'config', 'cordis.patch.example.yml'), 'utf8');
 check('分发模板里有 agentrouter-responses 且 api 是 openai-responses',
   /agentrouter-responses:[\s\S]{0,200}api: openai-responses/.test(exampleSrc));
-check('模板里 gpt-6.1-sol 不在 agentrouter 的 models 下',
-  !/agentrouter:(?!-responses)[\s\S]{0,600}- id: gpt-6\.1-sol/.test(exampleSrc));
+check('分发模板里没有 anthropic 协议的 agentrouter 路由',
+  !/^\s{6}agentrouter:\s*$/m.test(exampleSrc));
+// 取 responses 块，避免跨块误匹配 / 正则转义踩坑
+const responsesBlock = exampleSrc.split('agentrouter-responses:')[1]?.slice(0, 1500) ?? '';
+check('分发模板的 responses 模型表覆盖三个在线模型',
+  ['gpt-6.1-sol', 'gpt-5.6-sol', 'gpt-6-astra'].every((m) => responsesBlock.includes(`- id: ${m}`)),
+  ['gpt-6.1-sol', 'gpt-5.6-sol', 'gpt-6-astra'].filter((m) => !responsesBlock.includes(`- id: ${m}`)));
+check('分发模板的 allowedModels 不再引用已下线的 agentrouter/deepseek-v4-flash',
+  !/- provider: agentrouter\s*\n\s*model: deepseek-v4-flash/.test(exampleSrc));
 
 // ── 18. 进程生命周期：改完代码必须能真的重启 ────────────────────────────
 // 事故（2026-10-22）：两个 start.sh 都是"健康就退出"，于是改了 router.mjs /
