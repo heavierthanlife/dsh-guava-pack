@@ -1,0 +1,20 @@
+[Unit]
+# DSH tailnet 固定入口：https://<tailnet>/go → 302 → DSH 当前 token 链接。
+# 由 ops/install-tailnet-autostart.sh 安装（会把下面两个 @@ 占位符替换成本机路径）。
+Description=DSH tailnet fixed entry (/go → current token)
+Documentation=file://@@PACK@@/ops/tailnet-entry.mjs
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=@@PACK@@
+Environment=DSH_HOME=@@DSH_HOME@@
+ExecStart=/usr/bin/env node @@PACK@@/ops/tailnet-entry.mjs
+# token 每次 DSH 重启都会变，但本服务只读日志，不需要跟着重启；
+# 真正需要的是"它自己别挂"，所以用 always。
+Restart=always
+RestartSec=3
+TimeoutStopSec=10
+
+[Install]
+WantedBy=default.target

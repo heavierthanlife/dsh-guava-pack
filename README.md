@@ -567,6 +567,36 @@ tr '\0' '\n' < /proc/$(fuser -n tcp 3080 2>/dev/null | tr -d ' ')/cmdline | grep
 > 另注：token 每次重启都会换。手机端要重新从「设置 → 连接信息」复制当次链接，
 > 用旧链接同样会连不上。
 
+## 手机 tailnet 全自动（开机自启 + 固定入口）
+
+两个组件，装一次就够（`sh ops/install-tailnet-autostart.sh`，幂等；`--check` 只预览）：
+
+| 组件 | 作用 |
+|---|---|
+| Windows 启动文件夹里的 `dsh-wsl-autostart.vbs` | 登录时**隐藏**拉起 `wsl.exe -d Ubuntu --exec sleep infinity`；WSL 起后 systemd user `linger` 自动启动 `dsh.service` 与 `dsh-entry.service` |
+| `dsh-entry.service`（127.0.0.1:3099）+ `tailscale serve --set-path /go` | 固定入口：`https://<tailnet>/go` → 302 → DSH 当前 token 链接。**手机只需收藏这一个地址，DSH 重启换 token 也不用重新复制** |
+
+为什么用启动文件夹而不是计划任务：`Register-ScheduledTask` 需要管理员权限（实测
+`0x80070005` 拒绝）；启动文件夹方案普通用户即可，效果等价（登录时触发）。
+
+验证：
+
+```sh
+systemctl --user is-active dsh-entry.service     # active
+curl -s http://127.0.0.1:3099/health             # {"ok":true,...}
+"/mnt/c/Program Files/Tailscale/tailscale.exe" serve status
+#   |-- /    proxy http://127.0.0.1:3080
+#   |-- /go  proxy http://127.0.0.1:3099
+```
+
+边界与注意：
+
+- `/go` 只经 **tailnet** 暴露（serve 不是 funnel），能打开它的设备本来就在你 tailnet 里；
+- 入口服务只监听 `127.0.0.1`，不直接开局域网端口；
+- `wsl --shutdown` 会停掉 WSL 内所有服务，直到下次登录/手动拉起；
+- 同机用浏览器直接访问 `https://<自己 tailnet 名>` 会 TLS 失败（Windows 对本机 tailnet IP
+  的 hairpin 限制），**这是正常的**，从手机/其他设备访问不受影响。
+
 ## 超时：为什么默认是 60 秒
 
 `DSH_ROUTER_HEADER_TIMEOUT_MS` 默认 **60000**（旧默认 120000）。上游卡住时这个值
