@@ -147,14 +147,41 @@ window.__ModuleLoader__.load({
 .acp_note[data-ok="true"]{color:var(--dsw-alias-state-success-primary)}
 .acp_hint{margin-top:2px;color:var(--dsw-alias-label-tertiary);opacity:.8}
 .acp_label{text-overflow:ellipsis;min-width:0;overflow:hidden}
-@media (max-width:520px){
-  .acp_panel{position:fixed;left:calc(8px + env(safe-area-inset-left,0px));
-    right:calc(8px + env(safe-area-inset-right,0px));bottom:calc(84px + env(safe-area-inset-bottom,0px));
-    width:auto;min-width:0;max-width:none;max-height:55dvh;overflow-y:auto;
-    -webkit-overflow-scrolling:touch;padding:12px 14px;font-size:13px;line-height:19px}
-  .acp_anchor{font-size:11px;line-height:14px}
-  .acp_pill{gap:4px;padding:0 6px}
-}
+/* 手机短标签：dock 里横向空间紧张，完整文案（"ACP N 块 · P%"）留给 aria。 */
+.acp_short{display:none}
+/* ── 手机形态：以宿主给的 dsh-phone 类为准，而不是视口宽度 ─────────────
+   为什么不能只用 @media (max-width:520px)：**横屏时宽度是 844**，媒体查询
+   不命中，但宿主仍然标记 dsh-phone —— 于是药丸在横屏下又变回 0 宽。
+   （2026-10-28 实测：横屏 844×390 下药丸 w=0、面板跑出屏外。） */
+:root.dsh-phone .acp_panel{position:fixed;
+  left:calc(8px + env(safe-area-inset-left,0px));
+  right:calc(8px + env(safe-area-inset-right,0px));
+  bottom:calc(140px + env(safe-area-inset-bottom,0px));
+  width:auto;min-width:0;max-width:none;
+  max-height:min(60dvh, 520px);overflow-y:auto;
+  -webkit-overflow-scrolling:touch;padding:12px 14px;font-size:13px;line-height:19px}
+/* 手机上 dock 的祖先宽度是 0（宿主 composer 用 0 宽占位层做布局），
+   把药丸塞在 dock 里必然是 0 宽 —— 所以手机端改为**悬浮徽标**。 */
+:root.dsh-phone .acp_anchor{position:fixed;
+  right:calc(8px + env(safe-area-inset-right,0px));
+  bottom:calc(96px + env(safe-area-inset-bottom,0px));z-index:1200;
+  display:inline-flex;align-items:center;font-size:12px;line-height:16px;min-width:auto;
+  background:var(--dsw-alias-bg-layer-1,rgba(28,28,30,.72));border-radius:999px;
+  padding:2px 8px;box-shadow:var(--dsw-elevation-prominent,0 2px 12px rgba(0,0,0,.28))}
+/* 注意：这里**不要**给 anchor 加 backdrop-filter / filter / transform ——
+   它们会给 position:fixed 的后代创建新的包含块，面板就会相对这个小药丸定位，
+   横屏时直接跑到屏幕外（2026-10-28 实测：面板 91px 宽、top=-80）。 */
+:root.dsh-phone .acp_pill{gap:4px;padding:0 8px;min-height:40px;align-items:center}
+:root.dsh-phone .acp_full{display:none}
+:root.dsh-phone .acp_short{display:inline}
+/* 长中文标签（"兜底自动压缩：nudge 阈值"）必须能折行，否则 nowrap 会挤掉数值列 */
+:root.dsh-phone .acp_rows{grid-template-columns:minmax(96px,1fr) minmax(0,1.15fr);gap:4px 10px}
+:root.dsh-phone .acp_rows dt{white-space:normal;word-break:break-word}
+/* 步进按钮：视觉 32×32，靠 ::after 把**可点区域**扩到 44×44，
+   既不把 17 行面板撑高，又满足移动端最小触控尺寸。 */
+:root.dsh-phone .acp_step{width:32px;height:32px;position:relative}
+:root.dsh-phone .acp_step::after{content:"";position:absolute;inset:-6px}
+:root.dsh-phone .acp_value{min-width:52px}
 `;
 
     /** 有限非负数，否则 undefined。 */
@@ -519,7 +546,11 @@ window.__ModuleLoader__.load({
             onClick: () => setOpen((value) => !value),
           },
           h(AcpIcon, { key: 'icon' }),
-          h('span', { key: 'label', className: 'acp_label' }, label),
+          // 两份文案：桌面用完整（ACP N 块 · P%），手机用短标签（N·P%）。
+          // 无障碍仍读 aria-label 的完整句子。
+          h('span', { key: 'label', className: 'acp_label acp_full' }, label),
+          h('span', { key: 'short', className: 'acp_label acp_short' },
+            (percent === undefined ? `${blocks}` : `${blocks}·${percent}%`)),
         ),
         open &&
           h('div', { key: 'panel', className: 'acp_panel', role: 'dialog', 'aria-label': tr('panel.title') }, [

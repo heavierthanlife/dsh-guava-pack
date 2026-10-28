@@ -55,7 +55,7 @@ window.__ModuleLoader__.load({
 .wsw_sec{display:flex;flex-direction:column;gap:10px;padding:2px 0}
 .wsw_title{font-weight:600;font-size:15px}
 .wsw_desc{font-size:12px;opacity:.65;line-height:18px}
-.wsw_seg{display:flex;gap:6px}
+.wsw_seg{display:flex;gap:6px;flex-wrap:wrap}
 .wsw_seg button{flex:1;display:flex;flex-direction:column;align-items:flex-start;gap:2px;
   padding:8px 10px;border:1px solid var(--dsw-alias-border-l1);border-radius:var(--dsw-radius-sm,6px);
   background:0 0;color:var(--dsw-alias-label-secondary);font:inherit;font-size:13px;cursor:pointer;text-align:left}
@@ -76,6 +76,12 @@ window.__ModuleLoader__.load({
 .wsw_key button{padding:5px 10px;border:0;border-radius:var(--dsw-radius-sm,6px);
   background:var(--dsw-alias-button-tool-bar-fill);color:var(--dsw-alias-label-primary);font:inherit;font-size:12px;cursor:pointer}
 .wsw_key button:disabled{opacity:.5;cursor:default}
+@media (max-width:520px){
+  /* 手机：输入框与保存按钮换行，避免 360px 下按钮被挤出去 */
+  .wsw_key .row{flex-wrap:wrap}
+  .wsw_key input{flex:1 1 100%;min-height:40px}
+  .wsw_key button{min-height:40px}
+}
 `;
 
     /** 调 host 的面板路由（与 session-purge 同一套 client-request 信封）。 */

@@ -13,8 +13,8 @@
 | `plugins/dsh-theme-manager` | 设置里的主题管理页 | 自研 |
 | `plugins/provider-router` | 供应商直连 / 经 SSR 路由 + 状态面板（**可配置**） | 自研 |
 | `plugins/dsh-theme-cyberpunk2077` | 赛博朋克 2077 主题（**改装版**） | ⚠️ 原作者 Tommy00748，MIT |
-| `plugins/dsh-opencode-session-header` | 修 OpenCode 的 `400 MissingSessionID` | ⚠️ 原作者 beihzb，MIT |
-| `plugins/dsh-context-guard` | **已合并进 `dsh-context-acp`（2026-10-27）**：自动压缩→兜底压缩、handoff→ACP 内；代码保留用于回滚，不再从 profile 加载 | 自研 |
+| `plugins/dsh-opencode-session-header` | 修 OpenCode 的 `400 MissingSessionID`（**改装版**：本机代理路由也打头） | ⚠️ 原作者 beihzb，MIT |
+| `plugins/dsh-context-guard` | **已合并进 `dsh-context-acp`（2026-10-27）**：自动压缩→兜底压缩、handoff→ACP 内；代码保留用于回滚，**patch 行已 `disabled: true`**，不再挂载 | 自研 |
 | `plugins/dsh-context-acp` | **模型驱动压缩（ACP 全套）**：nudge 提醒 → 模型自己选区间/写摘要（零额外 LLM 调用）→ 账本/`decompress`/`search_context` 找回原文；**兜底自动压缩**（连续 2 次 nudge 未响应且 ≥75%）+ **交接文档**（压满 2 次写 handoff）；替换 4 个 agent preset 的 `compaction-basic` 后端 | 自研 |
 | `plugins/dsh-session-purge` | 清理已归档会话记录（保留产出并写清单），侧栏入口在设置上方一行 | 自研 |
 | `plugins/dsh-code-theme` | 只给代码上色（Monokai Pro / Material / One Dark / GitHub / **OpenCode 官方色值**，共 5 套），自动跟随明暗 + 可强制代码区明暗；附 WCAG 对比度自检 | 自研 |
@@ -24,11 +24,20 @@
 | `services/commandcode-bridge` | 把 OpenAI 格式转成 Command Code 内部端点 | 自研 |
 
 第三方组件的授权与出处见 [`LICENSES/`](LICENSES/)。**两个第三方包都在原作者 MIT 授权范围内**：
-`dsh-theme-cyberpunk2077` 是**改装衍生版**（改动逐条记在 LICENSES §1）；`dsh-opencode-session-header`
-是**原样分发**（未改一个字节）。两者都保留了各自的 LICENSE / 仓库地址。
-`plugins/dsh-opencode-session-header` 是 vendored 的第三方副本（版本 0.1.0）：它的 `tests/smoke.mjs`
-已从上游 v0.1.0 **原样收录**，所以 `npm test` 可以跑（13 passed / 0 failed）。
-`package.json` 未改动。上游出新的话，`tests/` 也要一起更新。
+`dsh-theme-cyberpunk2077` 是**改装衍生版**（改动逐条记在 LICENSES §1）；
+`dsh-opencode-session-header` 也是**改装版**（改动逐条记在 LICENSES §2）——
+上游只认 `opencode.ai` 主机名，而这套 profile 的 `opencode-go` 走本机代理
+（`127.0.0.1:8318/opencode-go`），hostname 恒为回环地址，上游规则永不命中。
+本副本补了一条「回环 + 路径首段 `opencode-go`」的匹配，其余行为不变。两者都保留了各自的 LICENSE / 仓库地址。
+`plugins/dsh-opencode-session-header` 是 vendored 的第三方副本（版本 `0.1.0-dsh.1`）：它的 `tests/smoke.mjs`
+以上游 v0.1.0 的 13 条断言为基底、追加本副本的 9 条（现 **22 passed / 0 failed**），所以 `npm test` 可以跑。
+上游出新的话，`lib/` 与 `tests/` 都要一起比对更新（本副本的 diff 很小，见 LICENSES §2）。
+
+> ⏸ **运行期未验证**：上面这条改装「真正发出的头值是什么」尚未在活进程里观测过
+> （当前没有 `opencode-go` 订阅流量；且日志不落该插件的 info 行、沙箱看不到宿主进程）。
+> 注意 profile 里还有一条静态兜底 `x-opencode-session`，它会**掩盖**注入失效——
+> 「能用」不等于「插件生效」。开通订阅后照 [`PENDING-VERIFICATION.md`](PENDING-VERIFICATION.md)
+> §1 的 echo 配方验一次（含「两个会话头值是否不同」）。
 
 > `ops/bootstrap-machine.sh` 是 **DSH 主仓库根目录**那份 bootstrap 的副本：它 clone DSH 仓库、
 > 对仓库根与 `profiles/web` 各跑一次 `pnpm install`，并假定在 DSH 仓库根目录下执行。
@@ -596,6 +605,57 @@ curl -s http://127.0.0.1:3099/health             # {"ok":true,...}
 - `wsl --shutdown` 会停掉 WSL 内所有服务，直到下次登录/手动拉起；
 - 同机用浏览器直接访问 `https://<自己 tailnet 名>` 会 TLS 失败（Windows 对本机 tailnet IP
   的 hairpin 限制），**这是正常的**，从手机/其他设备访问不受影响。
+
+## 手机界面适配（2026-10-28 回归 + 修复）
+
+**现象**：手机上门户能打开、控制台无报错，但 composer dock 里的插件药丸**看不见**
+（ACP 药丸、"X 轮 X 步"统计等全部消失）。
+
+**实测（390×844，真实 DOM 度量）**：
+
+| 元素 | 尺寸 |
+|---|---|
+| `.*_dock`（dock 容器） | **2 × 25 px** |
+| 父 `.*_root` | 32 × 176，`flex-direction: column` |
+| `.acp_anchor` / `.acp_pill` | 0×14 / 12×14，**x = −9（屏幕外）** |
+| 桌面 1280×900 对照 | dock **779 × 27**，正常 |
+
+**根因（两层）**：
+
+1. 撑开 dock 的 JS 原来在 `dsh-context-guard` 客户端里（从 `display:contents`
+   包装层向上找到 dock，打 `cguard_dock` 网格类）。合并进 ACP 时一起删掉了；
+2. 更关键：这台宿主（0.2.1-alpha.3）在手机端把 composer 放在**宽度 0 的占位层**
+   （`.composerStack` 宽 0、高 176）里 —— 任何塞进 dock 的控件都必然被压成 0 宽。
+   试过"用 CSS 把 dock 撑开"：只会把高度从 176 撑到 224（竖向浪费），药丸仍是 0 宽。
+
+**因此确立约定**：
+
+- **手机端插件控件必须自包含**（`position: fixed` 悬浮），不要依赖宿主 dock；
+- 手机样式以 **`:root.dsh-phone`** 为准，不要只写 `@media (max-width:520px)`
+  —— 横屏宽度 844 > 520，媒体查询不命中但宿主仍标记 `dsh-phone`；
+- 悬浮控件**不能**给祖先加 `backdrop-filter` / `filter` / `transform`
+  —— 它们会给 `position:fixed` 后代创建包含块（实测横屏下面板被压成 91px 宽、top=−80）；
+- 触控目标 ≥40px（视觉可小，用 `::after` 扩大可点区域）。
+
+**本轮修复**：
+
+| 插件 | 改动 |
+|---|---|
+| `dsh-context-acp` | 手机端药丸改为右上悬浮徽标（短标签 `N·P%`，`aria` 保留全量）；面板 `max-height:min(60dvh,520px)` 可滚动、长标签折行、步进按钮可点区域 44px |
+| `dsh-session-purge` | 侧栏行 32 → 40px（触控） |
+| `provider-router` | 行允许换行、按钮最小高度、备注可断词 |
+| `dsh-web-search-switch` | 输入框/按钮换行（360px 不再挤出屏幕） |
+
+**门禁**：
+
+```sh
+npm test                 # 含 tools/tests/mobile-ui-guards.mjs（静态守卫，17 条）
+npm run test:mobile      # 真机视口审计（需浏览器 --remote-debugging-port=9222）
+```
+
+审计实测：`390×844`、`360×740`、`844×390`（横屏）三档 **10/10** 通过。
+
+> 未覆盖：`theme-manager` / `code-theme` / `cyberpunk` 的设置页没有逐页量（手机端进设置会被侧栏遮挡，需要人工目视）；`dsh-mobile-ui` 里针对 `[data-composer-stats]` 的规则在当前宿主已失效（该属性不再输出），属于待清理的历史规则。
 
 ## 超时：为什么默认是 60 秒
 

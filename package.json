@@ -39,7 +39,7 @@
     "check": "node install.mjs --check",
     "preflight": "node tools/preflight.mjs",
     "search": "node tools/set-search-provider.mjs",
-    "test": "node tools/tests/model-policy.mjs && node tools/tests/web-search-switch.mjs && node tools/tests/provider-router-adaptive.mjs && node tools/tests/context-guard-trigger.mjs && node tools/gen-acp-preset.mjs --check && node tools/tests/acp-engine.mjs && node tools/tests/acp-ledger.mjs && node tools/tests/acp-nudge.mjs && node tools/tests/acp-fallback.mjs && node tools/tests/acp-handoff.mjs && node tools/tests/acp-mount.mjs && node tools/tests/acp-e2e.mjs --strict && node tools/tests/acp-client.mjs",
+    "test": "node tools/tests/model-policy.mjs && node tools/tests/web-search-switch.mjs && node tools/tests/provider-router-adaptive.mjs && node tools/tests/context-guard-trigger.mjs && node tools/gen-acp-preset.mjs --check && node tools/tests/acp-engine.mjs && node tools/tests/acp-ledger.mjs && node tools/tests/acp-nudge.mjs && node tools/tests/acp-fallback.mjs && node tools/tests/acp-handoff.mjs && node tools/tests/acp-mount.mjs && node tools/tests/acp-e2e.mjs --strict && node tools/tests/acp-client.mjs && node tools/tests/mobile-ui-guards.mjs",
     "model-policy": "node tools/sync-model-policy.mjs",
     "model-policy:probe": "node tools/sync-model-policy.mjs --probe",
     "model-policy:check": "node tools/sync-model-policy.mjs --check-refs",
@@ -47,7 +47,8 @@
     "sync-models:write": "node tools/sync-models.mjs --write",
     "acp-preset": "node tools/gen-acp-preset.mjs --write",
     "acp-preset:check": "node tools/gen-acp-preset.mjs --check",
-    "acp-rollback": "node tools/gen-acp-preset.mjs --write --backend basic"
+    "acp-rollback": "node tools/gen-acp-preset.mjs --write --backend basic",
+    "test:mobile": "node tools/mobile-audit.mjs"
   },
   "dependencies": {
     "undici": "^7.0.0",

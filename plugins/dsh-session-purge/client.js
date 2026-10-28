@@ -92,6 +92,10 @@ window.__ModuleLoader__.load({
   font:inherit;font-size:13px;line-height:20px;cursor:pointer;text-align:left}
 .spurge_row:hover{background:var(--dsw-specific-sidebar-nav-item-hover);color:var(--dsw-alias-label-primary)}
 .spurge_row[data-open="true"]{color:var(--dsw-alias-label-primary)}
+@media (max-width:520px){
+  /* 手机触控：32px 行高太小，抬到 40 并加内边距 */
+  .spurge_row{min-height:40px;padding:8px 10px}
+}
 .spurge_icon{width:16px;height:16px;flex:none;display:block}
 .spurge_label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .spurge_chevron{flex:none;color:var(--dsw-alias-label-tertiary);font-size:11px}

@@ -87,6 +87,18 @@ window.__ModuleLoader__.load({
       return 'pr-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
     }
 
+    /**
+     * 这一行在**路由代理 / mode.json 里的键**。
+     *
+     * profile 的 id 不一定等于代理认识的路径前缀（例如 `agentrouter-responses`
+     * 的 baseURL 是 `8318/agentrouter/v1`，代理只认 `agentrouter`）。发给 host 的
+     * setMode/measure 以及查 resolved/measurements 都必须用这个键，否则请求会被
+     * 代理判成 unknown provider、开关也落进了代理不读的键上 —— 静默失效。
+     */
+    function keyOf(p) {
+      return p && typeof p.routerKey === 'string' && p.routerKey !== '' ? p.routerKey : p && p.id;
+    }
+
     /** POST one endpoint to the Host route and unwrap the result envelope. */
     function callHost(endpoint, payload) {
       var rpcId = randomId();
@@ -166,7 +178,9 @@ window.__ModuleLoader__.load({
       }
 
       var rowStyle = {
+        // 手机窄屏：允许换行，否则长备注与两个按钮会把行撑出屏幕
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        flexWrap: 'wrap', rowGap: 6,
         gap: 12, padding: '12px 0',
         borderBottom: '1px solid var(--dsw-alias-border-l1, rgba(128,128,128,0.14))',
       };
@@ -204,7 +218,8 @@ window.__ModuleLoader__.load({
         }
 
         var rows = providers.map(function (p) {
-          var decision = resolved[p.id] || {};
+          var rk = keyOf(p);
+          var decision = resolved[rk] || {};
           var effective = decision.resolved || 'direct';
           var requested = decision.requested || effective;
           var name = LABELS.provider[p.id] || p.name || p.id;
@@ -217,7 +232,7 @@ window.__ModuleLoader__.load({
           if (decision.reason === 'default') meta.push(LABELS.unset);
           if (p.control !== 'router' && p.control !== 'bridge') meta.push(controlText);
           if (p.note) meta.push(p.note);
-          var hit = measurements[p.id];
+          var hit = measurements[rk];
           if (hit && hit.direct && hit.ssr) {
             meta.push(LABELS.measuredWhy + '：' + (hit.reason || ''));
           }
@@ -236,18 +251,18 @@ window.__ModuleLoader__.load({
             trailing = h('div', { key: 'ctl', style: { flex: 'none', display: 'flex', gap: 6, alignItems: 'center' } }, [
               p.control === 'router' ? h('button', {
                 key: 'm', type: 'button',
-                disabled: busy === p.id,
+                disabled: busy === rk,
                 title: LABELS.hintMeasure,
-                onClick: function () { measureNow(p.id); },
+                onClick: function () { measureNow(rk); },
                 style: {
-                  cursor: 'pointer', fontSize: 11, padding: '4px 8px', borderRadius: 6,
+                  cursor: 'pointer', fontSize: 11, padding: '6px 10px', borderRadius: 6, minHeight: 34,
                   border: '1px solid var(--dsw-alias-border-l2, rgba(128,128,128,0.25))',
-                  background: 'transparent', color: 'inherit', opacity: busy === p.id ? 0.5 : 0.85,
+                  background: 'transparent', color: 'inherit', opacity: busy === rk ? 0.5 : 0.85,
                 },
-              }, busy === p.id ? LABELS.measuring : LABELS.measureNow) : null,
+              }, busy === rk ? LABELS.measuring : LABELS.measureNow) : null,
               h('button', {
                 key: 'btn', type: 'button',
-                onClick: function () { cycle(p.id, requested); },
+                onClick: function () { cycle(rk, requested); },
                 'aria-pressed': isSsr,
                 title: LABELS.hintCycle,
                 style: {
@@ -259,14 +274,14 @@ window.__ModuleLoader__.load({
                   color: isSsr
                     ? 'var(--dsw-alias-label-primary-bluish, var(--dsw-alias-label-primary, inherit))'
                     : 'var(--dsw-alias-label-secondary, inherit)',
-                  fontSize: 12, padding: '4px 12px',
+                  fontSize: 12, padding: '6px 12px', minHeight: 34,
                 },
               }, label),
             ]);
           }
 
           return h('div', { key: p.id, style: rowStyle }, [
-            h('div', { key: 'info', style: { minWidth: 0 } }, [
+            h('div', { key: 'info', style: { minWidth: 0, flex: '1 1 160px' } }, [
               h('div', { key: 'n', style: { fontSize: 13, fontWeight: 500 } }, [
                 name,
                 p.live === false ? h('span', {
@@ -274,7 +289,7 @@ window.__ModuleLoader__.load({
                   style: { fontSize: 10, opacity: 0.55, marginLeft: 6, fontWeight: 400 },
                 }, LABELS.dormant) : null,
               ]),
-              h('div', { key: 'c', style: { fontSize: 11, opacity: 0.55, marginTop: 2, lineHeight: 1.5 } }, meta.join('；')),
+              h('div', { key: 'c', style: { fontSize: 11, opacity: 0.55, marginTop: 2, lineHeight: 1.5, wordBreak: 'break-word' } }, meta.join('；')),
             ]),
             trailing,
           ]);

@@ -130,6 +130,8 @@ const REQUIRED = [
   'tools/tests/web-search-switch.mjs',
   'tools/tests/provider-router-adaptive.mjs',
   'tools/tests/context-guard-trigger.mjs',
+  'tools/tests/mobile-ui-guards.mjs',
+  'tools/mobile-audit.mjs',
   'tools/set-search-provider.mjs',
   // 一条命令体检（补丁 / pack 位置 / 端口 / mode.json / key / 模型引用）
   'tools/preflight.mjs',
@@ -212,6 +214,8 @@ const MIN_BYTES = {
   'tools/tests/web-search-switch.mjs': 2000,
   'tools/tests/provider-router-adaptive.mjs': 2000,
   'tools/tests/context-guard-trigger.mjs': 2000,
+  'tools/tests/mobile-ui-guards.mjs': 2500,
+  'tools/mobile-audit.mjs': 3000,
   'tools/set-search-provider.mjs': 2000,
   'tools/preflight.mjs': 2000,
   'tools/run-model-policy.sh': 300,
