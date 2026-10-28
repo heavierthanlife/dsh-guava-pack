@@ -114,7 +114,11 @@ export function chooseAuto(direct, ssr) {
  * @param {string[]} [input.routerPrefixes] - 路由代理承认的前缀（来自 /_router/state）
  * @param {Record<string, {baseURL?: string}>} [input.endpoints] - profile 里各家的 baseURL
  *        （决定"到底走不走本代理"，见 §control 推导）
- * @returns {Array<{id:string,name:string,live:boolean,configurable:boolean,control:string,prefix:string,note:string}>}
+ * @returns {Array<{id:string,name:string,live:boolean,configurable:boolean,control:string,prefix:string,routerKey:string,note:string}>}
+ *   `routerKey` 是**路由代理与 mode.json 认的那个键**：经过本代理的行用 baseURL 里的
+ *   前缀（例如 profile 的 `agentrouter-responses` 走 `8318/agentrouter/v1`，代理只认
+ *   `agentrouter`），其余行就是 `id`。面板/宿主凡是要发 setMode/measure 或查
+ *   mode/measurements，都必须用 `routerKey` —— 用 `id` 会让开关与实测静默失效。
  */
 export function buildProviderCatalog({
   live = [],
@@ -191,6 +195,13 @@ export function buildProviderCatalog({
     if (!row.live && row.configurable) {
       row.note = (row.note ? row.note + '；' : '') + '已配置但当前未注册（多半缺 key/未登录）';
     }
+
+    // 路由代理只按**路径前缀**认供应商，mode.json / measurements 也用前缀做键。
+    // 经过本代理的行：键就是 baseURL 里的前缀；拿不到 baseURL 时 prefix 为空串，
+    // 必须回落到 id（历史行 `agentrouter` 就是这种）。其余行代理根本不读，键 = id。
+    row.routerKey = row.control === 'router' || row.control === 'router-missing-upstream'
+      ? (row.prefix || row.id)
+      : row.id;
   }
 
   // 稳定排序：先 live，再按 id；避免面板顺序每次刷新都变。
@@ -198,6 +209,29 @@ export function buildProviderCatalog({
     if (a.live !== b.live) return a.live ? -1 : 1;
     return a.id.localeCompare(b.id);
   });
+}
+
+/**
+ * 把目录里的每一行解析成"实际怎么走"，**以 routerKey 为键**。
+ *
+ * 为什么键必须是 routerKey 而不是 id：路由代理按路径前缀认供应商（mode.json 与
+ * `/_router/state` 的 measurements 都用前缀作键）。`agentrouter-responses` 这种
+ * 指向 `8318/agentrouter/v1` 的条目，用 id 去查永远是空 → 面板显示"未设置"、
+ * 切 auto 看起来没反应。集中在这里算，host 与测试共用同一份规则。
+ *
+ * @param {Array<{id?:string, routerKey?:string}>} [providers] - buildProviderCatalog 的输出
+ * @param {Record<string,string>} [modes] - mode.json（键是代理前缀）
+ * @param {Record<string, {winner?: string}>} [measurements] - 代理侧的 auto 实测结论
+ * @returns {Record<string, {requested:string, resolved:string, reason:string}>}
+ */
+export function resolveProviderRows(providers = [], modes = {}, measurements = {}) {
+  const resolved = {};
+  for (const row of providers) {
+    const key = typeof row?.routerKey === 'string' && row.routerKey !== '' ? row.routerKey : row?.id;
+    if (typeof key !== 'string' || key === '') continue;
+    resolved[key] = resolveMode(modes[key], key, measurements);
+  }
+  return resolved;
 }
 
 /**

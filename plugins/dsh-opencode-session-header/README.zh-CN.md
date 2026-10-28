@@ -10,6 +10,25 @@
 
 [English](./README.md)
 
+> ## 本副本的改动（dsh-guava-pack，2026-10-28）
+>
+> 本副本基于上游 **v0.1.0**，加了一个本地补丁（版本号标为 `0.1.0-dsh.1`）。
+>
+> **为什么改**：上游只按 **hostname** 判定（`opencode.ai` + 子域）。但这套 profile 把
+> `opencode-go` 的 baseURL 指到本机路由代理 `http://127.0.0.1:8318/opencode-go`，
+> 出站请求的 hostname 恒为 `127.0.0.1` —— 上游规则**永远不命中**，插件对主用路由
+> 完全空转，只能靠 profile 里一条硬编码的静态 UUID 顶着（所有会话共用一个 id，
+> 丢掉上游按会话的路由亲和与前缀缓存）。
+>
+> **改了什么**：新增一条**只对回环地址生效**的补充规则 —— hostname 是
+> `127.0.0.1` / `localhost` / `::1` 时，再按**路径首段**匹配（默认只认
+> `opencode-go`，与 profile 的 baseURL 前缀同名）。首段判定是**整段相等**：
+> `/opencode-goo/...` 不命中；非回环主机即使路径相同也不命中（白名单没被放宽）。
+> 挂载配置传 `loopbackPrefixes: []` 可关闭这条规则。
+>
+> **测试**：上游 13 条断言原样保留，追加 9 条（8a–8i），现 **22 passed / 0 failed**。
+> 逐条 diff 见包根 `LICENSES/README.md` §2。
+
 ## 问题背景
 
 自 2026-09-05 起，[OpenCode Go](https://opencode.ai/docs/go/) 强制要求每个推理请求携带稳定的 `x-opencode-session` 头（用于路由与提示词缓存）。DeepSeek Harness ≤ `0.1.2-rc.1` 在所有适配器路径上都不发送该头，导致 **opencode-go 下所有模型调用失败**：

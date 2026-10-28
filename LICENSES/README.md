@@ -54,21 +54,42 @@
 按该声明与仓库地址补写的，并已在文件头部注明这一点 —— 若上游日后发布自己的 LICENSE，
 以上游为准。
 
-## 2. dsh-opencode-session-header（原样分发）
+## 2. dsh-opencode-session-header（改装版，2026-10-28）
 
 | 项 | 值 |
 |---|---|
 | 上游 | https://github.com/beihzb/dsh-opencode-session-header |
 | 作者 | beihzb \<zhang2357@mail.ustc.edu.cn\> |
-| 版本 | 0.1.0 |
+| 上游版本 | 0.1.0（本副本版本号 `0.1.0-dsh.1`，表示带本地补丁） |
 | 授权 | MIT，Copyright (c) 2026 beihzb |
-| 改动 | **无改动** —— 所有文件原样收录，另**补回**上游的 `tests/smoke.mjs`（原先漏收，导致 `npm test` ENOENT） |
-| 许可文件 | [`../plugins/dsh-opencode-session-header/LICENSE`](../plugins/dsh-opencode-session-header/LICENSE)（上游自带） |
+| 改动 | **有改动**：新增「loopback + 路径首段」匹配规则（见下）；另补回上游的 `tests/smoke.mjs` 并扩展它 |
+| 许可文件 | [`../plugins/dsh-opencode-session-header/LICENSE`](../plugins/dsh-opencode-session-header/LICENSE)（上游自带，未改） |
 
-`tests/smoke.mjs` 取自上游 **v0.1.0 tag**，blob SHA 与上游一致
-（`474028a602f8be9826cfd2fe7f708662d0207815`，5687 字节），未改一个字节；
-`package.json` 也**未改**（它本来就写着 `test: node tests/smoke.mjs`）。
-补上之后 `npm test` → **13 passed / 0 failed**。
+### 改装内容（与上游 v0.1.0 的实际 diff）
+
+**`lib/index.js`**：
+
+- 上游只按 **hostname** 白名单（`opencode.ai` + 子域）决定是否打 `x-opencode-session`。
+  但这套 profile 把 `opencode-go` 的 baseURL 指到本机路由代理
+  `http://127.0.0.1:8318/opencode-go`，出站请求的 hostname 恒为 `127.0.0.1` ——
+  上游规则**永远不命中**，插件对主用路由空转，只能靠 profile 里一条硬编码的静态
+  UUID 顶着（所有会话共用，丢掉上游按会话的路由亲和与前缀缓存）。
+- 新增补充规则：hostname 是回环地址（`127.0.0.1` / `localhost` / `::1`，含 `[::1]`）时，
+  再按**路径首段**匹配；默认只认 `opencode-go`（与 baseURL 前缀同名），
+  可用挂载配置 `loopbackPrefixes` 覆盖，传 `[]` 关闭这条规则。
+- 首段判定是**整段相等**，不是字符串前缀：`/opencode-goo/...` 不会命中。
+- 非回环主机即使路径相同也不命中 —— 白名单没有被放宽。
+- 新增导出：`isLoopbackHostname`、`firstPathSegment`、`matchesSessionHeaderTarget`；
+  `createSessionHeaderMiddleware` 新增 `loopbackPrefixes` 选项；`apply` 透传并在
+  info 日志里打印生效前缀。
+
+**`tests/smoke.mjs`**：上游 v0.1.0 的 13 条断言保留不动，新增第 8 组 9 条
+（8a–8i）覆盖上述规则，现为 **22 passed / 0 failed**。
+
+上游那份 `tests/smoke.mjs` 本身的 blob SHA 与上游一致
+（`474028a602f8be9826cfd2fe7f708662d0207815`，5687 字节）—— 改动是**追加**上去的，
+原有 13 条断言一个字节没动。`package.json` 仅把 `version` 改成 `0.1.0-dsh.1`，
+`test` 脚本、`files`、依赖声明均未改。
 
 ## 3. 本包原创部分
 
@@ -81,6 +102,10 @@
   `plugins/dsh-opencode-session-header/LICENSE`，不要删。
 - 若你进一步修改赛博主题，建议在 `LICENSE` 的改动说明里补一句你改了什么，
   方便自己日后分辨与上游的差异。
+- `plugins/dsh-opencode-session-header` 已是**改装版**（§2）：重新分发时要么保留
+  §2 的改动说明，要么把它换回上游原版（那样 `opencode-go` 走本机代理时又会被
+  profile 里那条静态 UUID 顶掉按会话隔离）。上游发布新版本时，先比对 `lib/index.js`
+  与 `tests/smoke.mjs`，把本地补丁重新贴上去再升级。
 - 包内**不应包含**任何抓包产物（`plugins/provider-router/captures/req-<时间戳>.json`）——
   那里面可能有你的提示词。`captures/` 与旧的 `capture-last-request.json` 都已被
   `.gitignore` / `.npmignore` 排除，但**手工 `cp`/打包时仍要自己确认**。

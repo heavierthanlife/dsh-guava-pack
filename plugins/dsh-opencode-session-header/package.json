@@ -1,7 +1,7 @@
 {
   "name": "dsh-opencode-session-header",
-  "version": "0.1.0",
-  "description": "Per-conversation x-opencode-session header injection for OpenCode Go in DeepSeek Harness (DSH). Fixes 400 MissingSessionID, keeps prompt-cache routing optimal, scoped strictly to opencode.ai, runtime-switchable without restart.",
+  "version": "0.1.0-dsh.1",
+  "description": "Per-conversation x-opencode-session header injection for OpenCode Go in DeepSeek Harness (DSH). Fixes 400 MissingSessionID, keeps prompt-cache routing optimal, scoped to opencode.ai hosts plus a local routing proxy path prefix (this copy: local patch, see README), runtime-switchable without restart.",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",

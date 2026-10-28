@@ -138,6 +138,48 @@ try {
 	check('7b. exact host matches', mod.hostMatches('opencode.ai', ['opencode.ai']))
 	check('7c. different host rejected', !mod.hostMatches('example.com', ['opencode.ai']))
 	check('7d. lookalike host rejected', !mod.hostMatches('notopencode.ai', ['opencode.ai']))
+
+	// --- case 8: 本副本新增的 loopback + 路径首段匹配 ---
+	// 背景：profile 把 opencode-go 的 baseURL 指到本机路由代理，hostname 恒为
+	// 127.0.0.1，上游只认 hostname 的规则永远不命中（插件对主用路由空转）。
+	mod.registerFetchMiddleware({
+		name: 'test-inject',
+		priority: 7,
+		middleware: mod.createSessionHeaderMiddleware({
+			hosts: ['opencode.ai'],
+			loopbackPrefixes: ['opencode-go'],
+			fallbackSession: 'fb-fallback',
+			isEnabled: () => true,
+		}),
+	})
+	seen.length = 0
+	await mod.requestSessionContext.run('session-lo', () =>
+		fetch(`${base}/opencode-go/v1/chat/completions`, { method: 'POST', body: '{}' }))
+	check('8a. loopback /opencode-go 打头', seen.at(-1)?.session === 'session-lo', seen.at(-1))
+
+	seen.length = 0
+	await mod.requestSessionContext.run('session-lo', () =>
+		fetch(`${base}/agentrouter/v1/chat/completions`, { method: 'POST', body: '{}' }))
+	check('8b. 其它本地前缀不打头', seen.at(-1)?.session === null, seen.at(-1))
+
+	seen.length = 0
+	await mod.requestSessionContext.run('session-lo', () =>
+		fetch(`${base}/opencode-goo/v1/chat/completions`, { method: 'POST', body: '{}' }))
+	check('8c. 路径首段必须整段相等（opencode-goo 不算）', seen.at(-1)?.session === null, seen.at(-1))
+
+	check('8d. 真实 opencode 主机仍命中',
+		mod.matchesSessionHeaderTarget(new URL('https://api.opencode.ai/v1/messages'), ['opencode.ai'], ['opencode-go']))
+	check('8e. 回环 + 前缀命中',
+		mod.matchesSessionHeaderTarget(new URL('http://127.0.0.1:8318/opencode-go/v1'), ['opencode.ai'], ['opencode-go']))
+	check('8f. IPv6 回环与 localhost 同等处理',
+		mod.matchesSessionHeaderTarget(new URL('http://[::1]:8318/opencode-go/v1'), ['opencode.ai'], ['opencode-go']) &&
+		mod.matchesSessionHeaderTarget(new URL('http://localhost:8318/opencode-go/v1'), ['opencode.ai'], ['opencode-go']))
+	check('8g. 显式空数组关闭回环规则',
+		!mod.matchesSessionHeaderTarget(new URL('http://127.0.0.1:8318/opencode-go/v1'), ['opencode.ai'], []))
+	check('8h. 非回环主机即使路径相同也不命中（白名单没被放宽）',
+		!mod.matchesSessionHeaderTarget(new URL('https://example.com/opencode-go/v1'), ['opencode.ai'], ['opencode-go']))
+	check('8i. 根路径不打头',
+		!mod.matchesSessionHeaderTarget(new URL('http://127.0.0.1:8318/'), ['opencode.ai'], ['opencode-go']))
 } finally {
 	mod.unregisterFetchMiddleware('test-inject')
 	await new Promise((resolve) => server.close(resolve))

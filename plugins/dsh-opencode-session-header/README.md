@@ -10,6 +10,28 @@ It fixes the `400 MissingSessionID` rejection **and** keeps OpenCode's per-conve
 
 [中文文档](./README.zh-CN.md)
 
+> ## Local change in this vendored copy (dsh-guava-pack, 2026-10-28)
+>
+> This copy is upstream **v0.1.0** plus one local patch (version `0.1.0-dsh.1`).
+>
+> **Why**: upstream matches on **hostname** only (`opencode.ai` + subdomains). This
+> DSH profile points `opencode-go` at the local routing proxy
+> `http://127.0.0.1:8318/opencode-go`, so the outbound hostname is always
+> `127.0.0.1` — the upstream rule can never match, the plugin is inert for the
+> main route, and a hard-coded static UUID in the profile (shared by every
+> conversation, losing per-conversation routing affinity and prefix caching)
+> is the only thing that keeps it working.
+>
+> **What changed**: one extra rule that applies to **loopback only** — when the
+> hostname is `127.0.0.1` / `localhost` / `::1`, match the **first path segment**
+> instead (default: `opencode-go`, the same name as the profile's baseURL
+> prefix). The segment must match exactly: `/opencode-goo/...` does not. A
+> non-loopback host with the same path still does not match (the allowlist is
+> not widened). Mount config `loopbackPrefixes: []` turns the rule off.
+>
+> **Tests**: upstream's 13 assertions kept verbatim, plus 9 new ones (8a–8i):
+> **22 passed / 0 failed**. Per-item diff lives in the pack's `LICENSES/README.md` §2.
+
 ## The problem
 
 Since 2026-09-05, [OpenCode Go](https://opencode.ai/docs/go/) requires a stable `x-opencode-session` header on every inference request (used for routing and prompt caching). DeepSeek Harness ≤ `0.1.2-rc.1` sends no such header on any adapter path, so **every opencode-go model call fails**:

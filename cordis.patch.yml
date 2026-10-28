@@ -16,8 +16,15 @@
     - id: dsh-opencode-session-header
       name: ./plugins/dsh-opencode-session-header/lib/index.js
 
+    # ⚠️ dsh-context-guard 已于 2026-10-27 合并进 dsh-context-acp（兜底压缩 + handoff）。
+    # 两个插件同时挂载会互相打架：context-guard 在每轮 turn/end 后、占用 ≥60% 就
+    # 无条件 compactNow()，而它压出来的摘要没有经过 ACP 的 stageSummary 通道，
+    # 于是走父类 LLM 摘要 —— 既抢了"模型自己决定压哪段"的决定权，又多花一次 LLM
+    # 调用，还让 ACP 的 65% nudge 永远抢不到时机。所以这里**保留行但停用**：
+    # 目录与代码留着可随时回滚（把 disabled 删掉即恢复旧行为）。
     - id: context-guard
       name: ./plugins/dsh-context-guard/index.js
+      disabled: true
 
     - id: session-purge
       name: ./plugins/dsh-session-purge/index.js

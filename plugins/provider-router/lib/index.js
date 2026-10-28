@@ -41,7 +41,7 @@ import { readFileSync } from 'node:fs';
 import {
   buildProviderCatalog,
   DEFAULT_MODES as BUILTIN_DEFAULT_MODES,
-  resolveMode as resolveModePolicy,
+  resolveProviderRows,
 } from './auto-mode.mjs';
 import { readProviderEndpoints } from './profile-providers.mjs';
 import { hostname } from 'node:os';
@@ -80,14 +80,6 @@ const HOST_API_VERSION = 2;
 const ROUTER_STATE_URL = process.env.DSH_ROUTER_STATE_URL || 'http://127.0.0.1:8318/_router/state';
 const ROUTER_MEASURE_URL = process.env.DSH_ROUTER_MEASURE_URL || 'http://127.0.0.1:8318/_router/measure';
 
-/** Resolve "auto" to the provider default. */
-function resolveMode(provider, mode) {
-  if (mode === 'auto' || mode === undefined || mode === null) {
-    return DEFAULT_MODES[provider] || 'direct';
-  }
-  return mode;
-}
-
 /** Read the merged mode map (defaults + persisted overrides). */
 export async function readModeFile() {
   const out = { ...DEFAULT_MODES };
@@ -104,12 +96,24 @@ export async function readModeFile() {
   return out;
 }
 
+/**
+ * 归一化一份待落盘的 mode 表：内置兜底打底，只接受合法模式。
+ *
+ * **绝不把 `auto` 塌缩成静态默认值** —— 代理侧的 `currentMode()` 只有读到字符串
+ * `'auto'` 才会做双路实测；以前这里当场换成 `DEFAULT_MODES[provider]`，于是面板的
+ * 「自动」永远写不进去、启动时的 seed 还会把手工写的 `auto` 冲掉，自适应选路等于死的。
+ */
+function normalizeModeFile(modes) {
+  const normalized = { ...DEFAULT_MODES };
+  for (const [provider, mode] of Object.entries(modes ?? {})) {
+    if (VALID_MODES.has(mode)) normalized[provider] = mode;
+  }
+  return normalized;
+}
+
 async function writeModeFile(modes) {
   await mkdir(ROOT, { recursive: true });
-  const normalized = { ...DEFAULT_MODES };
-  for (const [provider, mode] of Object.entries(modes)) {
-    if (VALID_MODES.has(mode)) normalized[provider] = resolveMode(provider, mode);
-  }
+  const normalized = normalizeModeFile(modes);
   await writeFile(MODE_FILE, JSON.stringify(normalized, null, 2) + '\n', 'utf8');
   return normalized;
 }
@@ -184,11 +188,9 @@ async function getState(ctx) {
   });
 
   const measurements = router?.measurements ?? {};
-  const resolved = {};
-  for (const row of providers) {
-    const decision = resolveModePolicy(modes[row.id], row.id, measurements);
-    resolved[row.id] = decision;
-  }
+  // 键是 routerKey（代理认识的前缀），不是 profile 里的 id —— 见
+  // auto-mode.buildProviderCatalog / resolveProviderRows。
+  const resolved = resolveProviderRows(providers, modes, measurements);
 
   return {
     apiVersion: HOST_API_VERSION,
@@ -314,7 +316,7 @@ function sameAuthority(a, b) {
 export const inject = ['webServer', 'connection'];
 
 /** 导出以便自检直接驱动（不需要起 Cordis / 起浏览器）。 */
-export { getState, measureViaRouter, HOST_API_VERSION };
+export { getState, measureViaRouter, HOST_API_VERSION, normalizeModeFile };
 
 export function apply(ctx) {
   // 挂在 effect 上：`webServer.register()` 返回 disposer，不登记的话插件重挂

@@ -23,10 +23,14 @@ import {
   buildProviderCatalog,
   chooseAuto,
   resolveMode,
+  resolveProviderRows,
   routerPrefixOf,
   normalizeMode,
   DEFAULT_MODES,
 } from '../../plugins/provider-router/lib/auto-mode.mjs';
+// host 侧纯函数（`normalizeModeFile` 必须保真 `auto`）。这个模块顶层只有常量与
+// 函数定义（MODE_FILE 只是读 env），import 不会发起 IO，也不会起 Cordis。
+import { normalizeModeFile } from '../../plugins/provider-router/lib/index.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PACK = dirname(dirname(HERE));
@@ -167,6 +171,65 @@ check('router 探活会真正发送请求（req.end）', /req\.end\(\);/.test(ro
 check('router 的 auto 有 TTL 缓存', /DSH_ROUTER_AUTO_TTL_MS/.test(routerSrc));
 check('router 不重复定义 DEFAULT_MODES（单一来源）',
   !/const DEFAULT_MODES = \{/.test(routerSrc));
+
+// ── 6. routerKey：面板/宿主对"代理认的键"的映射 ────────────────────────
+// 代理按**路径前缀**认供应商。profile 里 `agentrouter-responses` 的 baseURL 是
+// `8318/agentrouter/v1`，代理只认 `agentrouter`；面板拿 id 去 measure/setMode
+// 会得到 unknown provider、写进代理不读的键 —— 两条都是静默失效。
+console.log('\nrouterKey 推导（代理认的键，不是 profile id）');
+const rkCatalog = buildProviderCatalog({
+  live: [{ id: 'agentrouter-responses', name: 'AgentRouter' }],
+  configurable: [],
+  routerPrefixes: ['agentrouter', 'commandcode'],
+  endpoints: {
+    'agentrouter-responses': { baseURL: 'http://127.0.0.1:8318/agentrouter/v1' },
+    'opencode': { baseURL: 'https://opencode.ai/zen/v1' },
+    'commandcode': { baseURL: 'http://127.0.0.1:8317/v1' },
+  },
+});
+const rkById = Object.fromEntries(rkCatalog.map((r) => [r.id, r]));
+check('经过本代理的行 → routerKey 取 baseURL 前缀（agentrouter-responses → agentrouter）',
+  rkById['agentrouter-responses'].control === 'router' &&
+  rkById['agentrouter-responses'].prefix === 'agentrouter' &&
+  rkById['agentrouter-responses'].routerKey === 'agentrouter',
+  rkById['agentrouter-responses']);
+check('拿不到 baseURL 的历史行回落到 id（agentrouter）',
+  rkById['agentrouter'].control === 'router' && rkById['agentrouter'].routerKey === 'agentrouter');
+check('bridged 行 → routerKey 就是 id（commandcode）',
+  rkById['commandcode'].control === 'bridge' && rkById['commandcode'].routerKey === 'commandcode');
+
+const directCatalog = buildProviderCatalog({
+  live: [{ id: 'opencode' }],
+  endpoints: { 'opencode': { baseURL: 'https://opencode.ai/zen/v1' } },
+});
+const directRow = directCatalog.find((r) => r.id === 'opencode');
+check('直连行 → control=direct 且 routerKey=id（opencode）',
+  directRow.control === 'direct' && directRow.routerKey === 'opencode', directRow);
+
+// ── 7. resolveProviderRows：解析结果必须以 routerKey 为键 ───────────────
+console.log('\n解析结果的键（resolveProviderRows）');
+const rkResolved = resolveProviderRows(rkCatalog, { agentrouter: 'ssr', commandcode: 'direct' }, {});
+check('显式 ssr 按 routerKey 查到', rkResolved['agentrouter'].resolved === 'ssr');
+check('显式值 reason=explicit', rkResolved['agentrouter'].reason === 'explicit');
+check('桥接行也按 routerKey 查到（commandcode=direct）', rkResolved['commandcode'].resolved === 'direct');
+check('resolved 里**没有** profile id 这个键（面板必须用 routerKey 查表）',
+  !Object.prototype.hasOwnProperty.call(rkResolved, 'agentrouter-responses'),
+  Object.keys(rkResolved));
+const directResolved = resolveProviderRows(directCatalog, {}, {});
+check('直连行按 id 查到（opencode，未设置走默认）',
+  directResolved['opencode'].reason === 'default' && directResolved['opencode'].resolved === 'direct');
+
+// ── 8. auto 保真：落盘不得把 auto 塌缩成静态默认值 ──────────────────────
+// 代理侧 currentMode() 只有读到字符串 'auto' 才做双路实测；塌缩 = 自适应选路死掉。
+console.log('\nauto 保真（normalizeModeFile）');
+check('auto 原样保留（不被塌缩成 DEFAULT_MODES.agentrouter）',
+  normalizeModeFile({ agentrouter: 'auto' })['agentrouter'] === 'auto');
+check('非法值不得写入（回落内置默认）',
+  normalizeModeFile({ agentrouter: 'bogus' })['agentrouter'] === DEFAULT_MODES.agentrouter);
+const kept = normalizeModeFile({});
+check('空输入仍包含全部内置默认键',
+  Object.keys(DEFAULT_MODES).every((k) => kept[k] === DEFAULT_MODES[k]));
+check('空输入不夹带额外键', Object.keys(kept).length === Object.keys(DEFAULT_MODES).length);
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);

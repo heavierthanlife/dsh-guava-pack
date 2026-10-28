@@ -176,6 +176,30 @@ function doubleFixture() {
   };
 }
 
+/**
+ * 真实引擎形状的夹具：checkpoint 节点的正文就是被 framed 的摘要文本。
+ *
+ * compaction-basic 的 frameSummary 把 `compaction/summary.summary` 原样夹在
+ * preamble 与闭合标记之间，所以 surface 上的 checkpoint 与账本块 `text` 承载
+ * 同一份文本 —— 这正是 `scope: 'all'` 会把同一段摘要返回两条的场景。
+ * `doubleFixture` 的 checkpoint 正文是 'CHECKPOINT NODE cN'，与摘要不同，
+ * 覆盖不到这条路径（只能覆盖「按事务身份抑制」，见下面对应用例的第二段）。
+ */
+function framedCheckpointFixture() {
+  const record = recorder();
+  const one = record.user('第一段：ALPHA 记录，含 ORCHID-11。');
+  const tool = record.toolResult('tool output: ALPHA confirmed');
+  record.start('c1');
+  // 选词依据：'ZEBRA' 只出现在 b1 摘要正文里，原文与其他摘要都不含它。
+  const summaryText = '第一层摘要：ALPHA 记录，代号 ZEBRA 只写在摘要里。';
+  const summary1 = record.summary('c1', { text: summaryText, shadowedSeqs: [one, tool], tokens: 111 });
+  const checkpoint1 = record.checkpoint('c1', `上下文压缩检查点。\n\n<summary>\n${summaryText}\n</summary>`);
+  record.end('c1');
+  const current = record.user('现役用户消息：当前上下文里的 UNIQUE-SURFACE-TOKEN。');
+  const session = fakeSession(record, [checkpoint1, current]);
+  return { record, session, seqs: { one, tool, summary1, checkpoint1, current }, summaryText };
+}
+
 // ── 假 deps / 工具调用 ───────────────────────────────────────────────────────
 
 const RUNTIME = {
@@ -364,6 +388,55 @@ test('search_context：scope summaries/originals/all 范围差异', async () => 
 
   const notInSummary = await run(tool('search_context'), { query: 'UNIQUE-SURFACE-TOKEN', scope: 'summaries' }, { session });
   eq(notInSummary.hits.length, 0, 'summaries 不应看到现役 surface 文本');
+});
+
+test('search_context：all 不重复返回已被账本代表的 checkpoint', async () => {
+  // 用 framedCheckpointFixture 而不是 doubleFixture：后者的 checkpoint 正文
+  // （'CHECKPOINT NODE cN'）不含摘要文本，且 '层摘要' 会同时命中 b1/b2 两份摘要
+  // （all 下 total=2，与重复无关），断言不出「同一份摘要只出现一条」。
+  // 选词依据：'ZEBRA' 只存在于 b1 摘要正文（及其 surface checkpoint 副本）里。
+  const { session, seqs } = framedCheckpointFixture();
+  const { tool } = installTools(registerRestoreTools);
+
+  // 夹具前提自检：checkpoint 确实在 surface 上，且正文携带同一份摘要。
+  const checkpointEvent = session.eventAt(seqs.checkpoint1);
+  eq(session.surface.nodes.includes(seqs.checkpoint1), true, '夹具前提：checkpoint 在 surface 上');
+  eq(checkpointEvent.data.source.kind, 'compact-checkpoint', '夹具前提：checkpoint source 标记');
+  assert(
+    session.deriveEventMessage(checkpointEvent).content[0].text.includes('ZEBRA'),
+    '夹具前提：checkpoint 正文含摘要副本',
+  );
+
+  const result = await run(tool('search_context'), { query: 'ZEBRA', scope: 'all' }, { session });
+  eq(result.ok, true, 'ok');
+  eq(result.hits.length, 1, '同一份摘要只应命中一条');
+  eq(result.total, 1, 'total 也只算一条');
+  eq(result.hits[0].block, 'b1', '应保留带块号的那条（信息更多）');
+  eq(result.hits[0].seq, seqs.summary1, '应保留账本摘要 seq，而不是 surface 上的 checkpoint 节点');
+
+  // 抑制按「事务身份是否已被账本代表」判定，与文本是否相同无关：doubleFixture 的
+  // checkpoint 正文不含摘要文本，仍然必须被跳过，否则模型会在现役上下文里看到
+  // 一段其实属于旧块的文本。真实用户消息不受影响（上一条用例已断言 block=null 命中）。
+  const double = doubleFixture();
+  const doubleTools = installTools(registerRestoreTools);
+  const withCheckpointText = await run(
+    doubleTools.tool('search_context'),
+    { query: 'CHECKPOINT', scope: 'all' },
+    { session: double.session },
+  );
+  assert(
+    !withCheckpointText.hits.some((hit) => hit.seq === double.seqs.checkpoint2),
+    '已被账本代表的 surface checkpoint 不应作为候选',
+  );
+  // 不再硬编码命中条数（旧写法 `total === 2` 依赖夹具文案里有几个 'CHECKPOINT'，
+  // 改文案就得改数字 —— 而「把 2 改成 3」恰好会让去重回归悄悄溜过去）。
+  // 改成两块与文案无关的性质断言：① 被 b2 压掉的 checkpoint1 原文仍搜得到
+  // （originals 没被一起吞掉）；② total 与 hits 一致（没有被 limit 截断）。
+  assert(
+    withCheckpointText.hits.some((hit) => hit.seq === double.seqs.checkpoint1),
+    '被 b2 压掉的 checkpoint1 原文仍应可搜（originals 不能被一起吞掉）',
+  );
+  eq(withCheckpointText.total, withCheckpointText.hits.length, 'total 与返回条数一致');
 });
 
 test('search_context：limit 截断且 total 保留', async () => {

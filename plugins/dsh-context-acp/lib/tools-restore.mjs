@@ -27,6 +27,7 @@
  * @module dsh-context-acp/tools-restore
  */
 
+import { isCompactCheckpointSource } from '@deepseek-ai/dsh-compaction';
 import { defineTool } from '@deepseek-ai/dsh-tools';
 
 import { buildLedger, eventRole, eventText } from './ledger.mjs';
@@ -303,8 +304,29 @@ export function registerRestoreTools(deps) {
             return [];
           }
         })();
+        // 已被账本块代表的压缩事务：它的 checkpoint 节点在 surface 上只承载那一块的摘要
+        // 副本，与 blocks 里的摘要指纹是同一条文本。
+        const represented = new Set();
+        for (const block of blocks) {
+          const id = typeof block.compactionId === 'string' ? block.compactionId : '';
+          if (id !== '') represented.add(id);
+        }
         for (const seq of nodes) {
-          const text = eventText(session, eventAt(session, seq));
+          const event = eventAt(session, seq);
+          const source = event?.data?.source;
+          // 已由账本块代表的 checkpoint 不再作为「现役节点」重复入库：
+          // 它和 block 摘要指向同一份文本，重复命中只会白占预算并误导模型。
+          // 没有对应块的 checkpoint（理论上不该有）仍然以 block=null 出现，
+          // 属于 fail-open 的可接受降级：宁可多一条命中，也不肯丢掉真实 context。
+          if (
+            event?.type === 'user/message'
+            && source !== null && typeof source === 'object'
+            && isCompactCheckpointSource(source)
+            && represented.has(String(source.compactionId))
+          ) {
+            continue;
+          }
+          const text = eventText(session, event);
           // 当前 surface 上的节点不属于任何块 —— block 必须是 null（模型据此区分「现役上下文」）。
           if (text.length > 0) candidates.push({ block: null, seq, text });
         }
