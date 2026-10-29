@@ -41,23 +41,34 @@ function check(label, condition, detail) {
   }
 }
 
-const mobileUi = read('plugins/dsh-mobile-ui/lib/client.js');
+const mobileUiRaw = read('plugins/dsh-mobile-ui/lib/client.js');
+// mobile-ui 的 CSS 由字符串拼接而成（':root.' + PHONE_CLASS + ' ...'）；
+// 直接对源码做正则会被拼接打断，先归一化成最终选择器文本再断言。
+const mobileUi = mobileUiRaw
+  .replace(/'\:root\.'\s*\+\s*PHONE_CLASS\s*\+\s*'/g, "':root.dsh-phone ")
+  .replace(/'\:root\.'\s*\+\s*PHONE_CLASS\s*\+\s*"[^"]*"/g, "':root.dsh-phone ")
+  // 拼接还原后会出现双空格（'…dsh-phone ' + ' .xxx'），统一压成一个
+  .split(':root.dsh-phone  ').join(':root.dsh-phone ')
 const acp = read('plugins/dsh-context-acp/client.js');
 const purge = read('plugins/dsh-session-purge/client.js');
 const router = read('plugins/provider-router/lib/client.js');
 const search = read('plugins/dsh-web-search-switch/lib/client.js');
 
-// ── 1. 手机端 dock 的现实：宿主那层不可用，插件必须自包含 ───────────────
-// 2026-10-28 实测：手机上 composer dock 的祖先 (.composerStack) 宽度就是 0，
-// 试过"用 CSS 把 dock 撑开"→ 只会把高度从 176 撑到 224（竖向浪费），
-// 药丸仍然是 0 宽。所以约定：**手机端交互控件不要依赖 dock，自己 fixed 悬浮。**
-console.log('\n手机端控件约定');
-check('ACP 药丸在手机端是 fixed 悬浮（不依赖 dock 宽度）',
-  /:root\.dsh-phone \.acp_anchor\{[^}]*position:\s*fixed/.test(acp));
-check('悬浮徽标只定位自身（不试图修改宿主 dock）',
-  !/dsh-mobile-dock/.test(mobileUi), 'mobile-ui 不应再尝试改造 dock');
-check('mobile-ui 没有把 dock 高度撑开的规则（避免竖向浪费）',
-  !/composer.*dock[\s\S]{0,80}flex-wrap:\s*wrap\s*!important/.test(mobileUi));
+// ── 1. 旧版两列布局的归属：mobile-ui 负责 dock 网格 ─────────────────────
+// 2026-10-28 复现：关闭侧栏时 dock 有 350px，但内部是一行 flex → 三块挤成一排、
+// 文字被截断。旧版（context-guard 时期）是 2×2 网格：左列统计上下叠放、右列
+// 占用与插件药丸上下叠放。布局归属回到 mobile-ui。
+console.log('\ndock 两列布局（mobile-ui）');
+check('mobile-ui 提供 installComposerDock', /function installComposerDock\s*\(/.test(mobileUi));
+check('apply 里安装 dock 布局', /return installComposerDock\(\)/.test(mobileUi));
+check('从统计锚点定位 dock（bOPqQW）', /bOPqQW/.test(mobileUi) && /_dock/.test(mobileUi));
+check('dock 改为两列网格', /:root\.dsh-phone \.dsh-mobile-dock\s*\{[^}]*display:\s*grid/.test(mobileUi) &&
+  /grid-template-columns:\s*minmax\(0,\s*1fr\)\s*auto/.test(mobileUi));
+check('统计在左列上下叠放', /bOPqQW[^}]*grid-row:\s*1\s*\/\s*span 2/.test(mobileUi) &&
+  /bOPqQW[^}]*flex-direction:\s*column/.test(mobileUi));
+check('占用量在右列上行', /JObwrW[^}]*grid-row:\s*1/.test(mobileUi) && /JObwrW[^}]*grid-column:\s*2/.test(mobileUi));
+check('插件药丸在右列下行（内联，非悬浮）', /_anchor"\]?:not\(\[class\*="bOPqQW"\]\)[^}]*grid-row:\s*2/.test(mobileUi));
+check('DOM 重建后能重新打标（MutationObserver）', /MutationObserver/.test(mobileUi));
 
 // ── 2. ACP 面板的手机尺寸 ──────────────────────────────────────────────
 console.log('\nACP 面板手机适配');
@@ -73,8 +84,8 @@ check('长标签在手机上允许折行（dt 不再 nowrap）',
   /:root\.dsh-phone \.acp_rows dt\s*\{[^}]*white-space:\s*normal/.test(acpPhone));
 check('面板最大高度用 dvh 且可滚动',
   /max-height:\s*min\(\d+dvh/.test(acpPhone) && /overflow-y:\s*auto/.test(acpPhone));
-check('药丸有短标签切换（.acp_short）',
-  /\.acp_short\s*\{\s*display:\s*none/.test(acp) && /:root\.dsh-phone \.acp_short\s*\{\s*display:\s*inline/.test(acpPhone));
+check('手机用完整文案（旧版样式），短标签保留但隐藏',
+  /\.acp_short\s*\{\s*display:\s*none/.test(acp) && !/:root\.dsh-phone \.acp_short\s*\{\s*display:\s*inline/.test(acpPhone));
 check('药丸在手机上抬高到 ≥40px', /:root\.dsh-phone \.acp_pill\s*\{[^}]*min-height:\s*40px/.test(acpPhone));
 
 // 2026-10-28 两个实测踩到的坑，各钉一条：

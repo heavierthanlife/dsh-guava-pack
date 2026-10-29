@@ -131,6 +131,17 @@ async function openRealSession() {
     return (row.innerText || '').replace(/\\s+/g, ' ').slice(0, 40);
   })()`);
   await sleep(6500);
+  // 手机会把侧栏做成抽屉：开着时 frame 的列被压 0（dock 也就 0 宽），
+  // 必须先关掉抽屉再量布局。优先点遮罩，其次点抽屉开关，最后按 Esc。
+  await evaluate(`(() => {
+    const scrim = document.querySelector('.dsh-mobile-scrim');
+    if (scrim && getComputedStyle(scrim).display !== 'none') { scrim.click(); return 'scrim'; }
+    const toggle = document.querySelector('.dsh-mobile-drawer-toggle');
+    if (toggle) { toggle.click(); return 'toggle'; }
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    return 'escape';
+  })()`);
+  await sleep(1200);
   return clicked;
 }
 
@@ -169,24 +180,60 @@ async function main() {
   const session = await openRealSession();
   check('能打开一个真实历史会话', typeof session === 'string' && session.length > 0, session);
 
-  // ── 药丸：手机端约定是「自包含 fixed 悬浮」，不依赖宿主 dock（其宽度为 0）──
-  const pill = await evaluate(`(() => {
-    const el = document.querySelector('.acp_anchor');
-    if (!el) return { found: false };
-    const r = el.getBoundingClientRect();
-    const st = getComputedStyle(el);
+  // ── dock 两列布局（旧版样子）：左列统计竖排、右列占用+插件药丸竖排 ────────
+  // 兜底：dock 过窄说明抽屉还没关干净，再关一次再量。
+  const dockWidthNow = await evaluate(`(() => {
+    const d = document.querySelector('.dsh-mobile-dock');
+    return d ? Math.round(d.getBoundingClientRect().width) : -1;
+  })()`);
+  if (dockWidthNow >= 0 && dockWidthNow < 200) {
+    await evaluate(`(() => {
+      const scrim = document.querySelector('.dsh-mobile-scrim');
+      if (scrim && getComputedStyle(scrim).display !== 'none') { scrim.click(); return 'scrim'; }
+      const toggle = document.querySelector('.dsh-mobile-drawer-toggle');
+      if (toggle) toggle.click();
+      return 'toggle';
+    })()`);
+    await sleep(1200);
+  }
+
+  const dock = await evaluate(`(() => {
+    const dock = document.querySelector('.dsh-mobile-dock');
+    if (!dock) return { found: false };
+    const rect = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); return { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) }; };
+    const stats = dock.querySelector('[class*="bOPqQW"]');
+    const meter = dock.querySelector('[class*="JObwrW"]');
+    const pill = dock.querySelector('.acp_anchor');
+    const st = getComputedStyle(dock);
+    const pillStyle = pill ? getComputedStyle(pill) : null;
     return {
       found: true,
-      position: st.position,
-      w: Math.round(r.width),
-      x: Math.round(r.left),
-      right: Math.round(r.right),
-      bottom: Math.round(r.bottom),
+      display: st.display,
+      columns: st.gridTemplateColumns,
+      dock: rect(dock),
+      stats: rect(stats),
+      meter: rect(meter),
+      pill: rect(pill),
+      pillPosition: pillStyle ? pillStyle.position : null,
+      pillText: pill ? (pill.innerText || '').replace(/\s+/g, ' ').trim() : '',
+      pillClipped: pill ? pill.scrollWidth > pill.clientWidth + 1 : null,
+      statsStacked: stats ? getComputedStyle(stats).flexDirection : null,
     };
   })()`);
-  check('ACP 药丸已渲染', pill.found === true, pill);
-  check('手机端药丸自包含（position:fixed，不依赖 dock 宽度）', pill.position === 'fixed', pill);
-  check('药丸在屏内且可见（w≥44）', pill.found === true && pill.w >= 44 && pill.x >= 0 && pill.right <= W + 1, pill);
+
+  check('dock 已按两列网格排布（display:grid）', dock.found === true && dock.display === 'grid', dock.display);
+  // 右列宽度 = max(占用量, 药丸)，两者都右对齐 → 药丸可能比占用量更靠左，
+  // 所以判据是「都在统计列右侧」，而不是「药丸在占用量右侧」。
+  const statsEnd = dock.found === true && dock.stats !== null ? dock.stats.x + dock.stats.w : 0;
+  check('统计在左列、占用与药丸在右列',
+    dock.found === true && dock.stats !== null && dock.meter !== null && dock.pill !== null &&
+      dock.meter.x >= statsEnd - 2 && dock.pill.x >= statsEnd - 2, { statsEnd, meter: dock.meter, pill: dock.pill });
+  check('左列统计上下叠放（flex-direction:column）', dock.statsStacked === 'column', dock.statsStacked);
+  check('右列：占用量在上、插件药丸在下',
+    dock.found === true && dock.meter.y <= dock.pill.y + 2, { meter: dock.meter, pill: dock.pill });
+  check('药丸内联在 dock 里（不悬浮、不压输入框）', dock.pillPosition === 'static', dock.pillPosition);
+  check('药丸文字不截断', dock.pillClipped === false, dock.pillText);
+  check('药丸在屏内', dock.found === true && dock.pill.x >= 0 && dock.pill.x + dock.pill.w <= W + 1, dock.pill);
 
   // ── ACP 面板 ─────────────────────────────────────────────────────────
   const opened = await evaluate(`(() => {

@@ -162,18 +162,15 @@ window.__ModuleLoader__.load({
   -webkit-overflow-scrolling:touch;padding:12px 14px;font-size:13px;line-height:19px}
 /* 手机上 dock 的祖先宽度是 0（宿主 composer 用 0 宽占位层做布局），
    把药丸塞在 dock 里必然是 0 宽 —— 所以手机端改为**悬浮徽标**。 */
-:root.dsh-phone .acp_anchor{position:fixed;
-  right:calc(8px + env(safe-area-inset-right,0px));
-  bottom:calc(96px + env(safe-area-inset-bottom,0px));z-index:1200;
-  display:inline-flex;align-items:center;font-size:12px;line-height:16px;min-width:auto;
-  background:var(--dsw-alias-bg-layer-1,rgba(28,28,30,.72));border-radius:999px;
-  padding:2px 8px;box-shadow:var(--dsw-elevation-prominent,0 2px 12px rgba(0,0,0,.28))}
-/* 注意：这里**不要**给 anchor 加 backdrop-filter / filter / transform ——
-   它们会给 position:fixed 的后代创建新的包含块，面板就会相对这个小药丸定位，
-   横屏时直接跑到屏幕外（2026-10-28 实测：面板 91px 宽、top=-80）。 */
+/* 手机端药丸**内联**在 dock 的右下格（由 dsh-mobile-ui 的两列网格定位），
+   不再做悬浮徽标：悬浮会压在输入框边框上，而且旧版就是内联叠放的。 */
+:root.dsh-phone .acp_anchor{position:static;
+  display:inline-flex;align-items:center;font-size:12px;line-height:16px;
+  min-width:auto;max-width:100%;background:none;border-radius:0;padding:0;box-shadow:none}
+/* 注意：panel 是 position:fixed，它的祖先**不能**有 backdrop-filter / filter /
+   transform —— 否则会创建包含块，面板就会相对药丸定位并跑出屏幕
+   （2026-10-28 实测：横屏下面板 91px 宽、top=−80）。 */
 :root.dsh-phone .acp_pill{gap:4px;padding:0 8px;min-height:40px;align-items:center}
-:root.dsh-phone .acp_full{display:none}
-:root.dsh-phone .acp_short{display:inline}
 /* 长中文标签（"兜底自动压缩：nudge 阈值"）必须能折行，否则 nowrap 会挤掉数值列 */
 :root.dsh-phone .acp_rows{grid-template-columns:minmax(96px,1fr) minmax(0,1.15fr);gap:4px 10px}
 :root.dsh-phone .acp_rows dt{white-space:normal;word-break:break-word}

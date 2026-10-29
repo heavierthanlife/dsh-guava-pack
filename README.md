@@ -608,40 +608,39 @@ curl -s http://127.0.0.1:3099/health             # {"ok":true,...}
 
 ## 手机界面适配（2026-10-28 回归 + 修复）
 
-**现象**：手机上门户能打开、控制台无报错，但 composer dock 里的插件药丸**看不见**
-（ACP 药丸、"X 轮 X 步"统计等全部消失）。
+**现象**：手机上门户能打开、控制台无报错，但输入栏下方的数据条**挤成一行**、
+文字被截断，ACP 药丸要么看不见、要么压在输入框边框上。旧版（context-guard 时期）
+是**两列上下叠放**：左边「N 轮 M 步 · x tok/s」「xxxM tok · 缓存命中 x%」，
+右边「63%」和上下文药丸，贴在输入栏下方。
 
-**实测（390×844，真实 DOM 度量）**：
+**根因**：
 
-| 元素 | 尺寸 |
-|---|---|
-| `.*_dock`（dock 容器） | **2 × 25 px** |
-| 父 `.*_root` | 32 × 176，`flex-direction: column` |
-| `.acp_anchor` / `.acp_pill` | 0×14 / 12×14，**x = −9（屏幕外）** |
-| 桌面 1280×900 对照 | dock **779 × 27**，正常 |
-
-**根因（两层）**：
-
-1. 撑开 dock 的 JS 原来在 `dsh-context-guard` 客户端里（从 `display:contents`
-   包装层向上找到 dock，打 `cguard_dock` 网格类）。合并进 ACP 时一起删掉了；
-2. 更关键：这台宿主（0.2.1-alpha.3）在手机端把 composer 放在**宽度 0 的占位层**
-   （`.composerStack` 宽 0、高 176）里 —— 任何塞进 dock 的控件都必然被压成 0 宽。
-   试过"用 CSS 把 dock 撑开"：只会把高度从 176 撑到 224（竖向浪费），药丸仍是 0 宽。
+1. 撑开/排布 dock 的 JS 原来在 `dsh-context-guard` 客户端里（打 `cguard_dock`
+   网格类）。合并进 ACP 时一起删掉了 → 没人负责 dock 布局；
+2. 宿主把统计、上下文计量、插件药丸全塞在 dock 的**一行 flex** 里 → 手机上
+   必然挤成一排并截断；
+3. 另一个坑：**侧栏抽屉展开时** frame 的列被压成 0（这是手机抽屉的既有行为），
+   此时 dock 宽度为 0 属正常；量布局必须在**抽屉关闭态**。
 
 **因此确立约定**：
 
-- **手机端插件控件必须自包含**（`position: fixed` 悬浮），不要依赖宿主 dock；
+- **dock 的两列网格由 `dsh-mobile-ui` 负责**（布局归属回到手机适配插件）：
+  左列 = 统计竖排，右列上行 = 上下文计量，右列下行 = 插件药丸（内联参与网格）；
+- 插件不要把手机药丸做成悬浮徽标（会压输入框边框），也**不要**自己去改 dock
+  的 display/宽度；
 - 手机样式以 **`:root.dsh-phone`** 为准，不要只写 `@media (max-width:520px)`
   —— 横屏宽度 844 > 520，媒体查询不命中但宿主仍标记 `dsh-phone`；
-- 悬浮控件**不能**给祖先加 `backdrop-filter` / `filter` / `transform`
-  —— 它们会给 `position:fixed` 后代创建包含块（实测横屏下面板被压成 91px 宽、top=−80）；
+- `position:fixed` 的浮层（如 ACP 面板）**祖先不能**有
+  `backdrop-filter` / `filter` / `transform` —— 会给它创建包含块
+  （实测横屏面板被压成 91px 宽、top=−80）；
 - 触控目标 ≥40px（视觉可小，用 `::after` 扩大可点区域）。
 
 **本轮修复**：
 
 | 插件 | 改动 |
 |---|---|
-| `dsh-context-acp` | 手机端药丸改为右上悬浮徽标（短标签 `N·P%`，`aria` 保留全量）；面板 `max-height:min(60dvh,520px)` 可滚动、长标签折行、步进按钮可点区域 44px |
+| `dsh-mobile-ui` | 给 dock 打 `dsh-mobile-dock` 标记，并用 `:root.dsh-phone` 网格复原旧版两列：统计竖排 / 占用+药丸竖排；用 MutationObserver 兜住 dock 重建 |
+| `dsh-context-acp` | 手机端药丸**内联**参与网格（完整文案 `ACP N 块 · P%`），不再悬浮；面板 `max-height:min(60dvh,520px)` 可滚动、长标签折行、步进按钮可点区域 44px |
 | `dsh-session-purge` | 侧栏行 32 → 40px（触控） |
 | `provider-router` | 行允许换行、按钮最小高度、备注可断词 |
 | `dsh-web-search-switch` | 输入框/按钮换行（360px 不再挤出屏幕） |
@@ -649,13 +648,17 @@ curl -s http://127.0.0.1:3099/health             # {"ok":true,...}
 **门禁**：
 
 ```sh
-npm test                 # 含 tools/tests/mobile-ui-guards.mjs（静态守卫，17 条）
+npm test                 # 含 tools/tests/mobile-ui-guards.mjs（静态守卫，22 条）
 npm run test:mobile      # 真机视口审计（需浏览器 --remote-debugging-port=9222）
 ```
 
-审计实测：`390×844`、`360×740`、`844×390`（横屏）三档 **10/10** 通过。
+审计实测：`390×844`、`360×740`、`844×390`（横屏）三档 **14/14** 通过
+（检查项：dock 两列网格、统计在左竖排、占用与药丸在右竖排、药丸内联且不截断、
+面板在屏内可滚动、步进按钮可点区域 ≥40）。
 
-> 未覆盖：`theme-manager` / `code-theme` / `cyberpunk` 的设置页没有逐页量（手机端进设置会被侧栏遮挡，需要人工目视）；`dsh-mobile-ui` 里针对 `[data-composer-stats]` 的规则在当前宿主已失效（该属性不再输出），属于待清理的历史规则。
+> 未覆盖：`theme-manager` / `code-theme` / `cyberpunk` 的设置页没有逐页量；
+> `dsh-mobile-ui` 里针对 `[data-composer-stats]` 的旧规则在当前宿主已失效
+> （该属性不再输出），属于待清理的历史规则。
 
 ## 超时：为什么默认是 60 秒
 

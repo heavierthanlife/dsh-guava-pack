@@ -300,6 +300,57 @@ window.__ModuleLoader__.load({
      * 只在**确知是非 loopback** 时才介入：loopback 页面 DSH 自己能持久化，
      * 抢着写反而会让它无法跟随 Host 侧的语言设置。
      */
+    /**
+     * 给 composer dock 打标记，让上面的两步网格在手机端生效。
+     *
+     * 为什么用 JS 打标记而不是纯 CSS：dock 的类名是 CSS module 哈希
+     * （形如 `uV2eYG_dock`），而 `:has()` 在旧浏览器会被整条丢弃。
+     * 定位方式：从**统计锚点** `[class*="bOPqQW"]` 向上找到 `<hash>_dock`。
+     * 注意不能引用 apply() 作用域的 root（模块级函数 → ReferenceError，
+     * 会被 apply 的 try/catch 静默吞掉，这是本轮踩过的坑）。
+     */
+    function installComposerDock() {
+      var tagged = [];
+      function isPhone() {
+        return document.documentElement.classList.contains(PHONE_CLASS);
+      }
+      function findDock() {
+        var stats = document.querySelector('[class*="bOPqQW_anchor"], [class*="bOPqQW_root"]');
+        var el = stats;
+        for (var i = 0; i < 8 && el; i += 1) {
+          if (/(^|\s)[^\s]*_dock(\s|$)/.test(String(el.className || ''))) return el;
+          el = el.parentElement;
+        }
+        var docks = document.querySelectorAll('[class*="_dock"]');
+        for (var j = 0; j < docks.length; j += 1) return docks[j];
+        return null;
+      }
+      function sync() {
+        for (var i = 0; i < tagged.length; i += 1) {
+          try { tagged[i].el.classList.remove(tagged[i].cls); } catch (e) {}
+        }
+        tagged = [];
+        var dock = findDock();
+        if (!dock) return;
+        dock.classList.add('dsh-mobile-dock');
+        tagged.push({ el: dock, cls: 'dsh-mobile-dock' });
+        if (isPhone()) dock.setAttribute('data-dsh-mobile-dock', '1');
+      }
+      sync();
+      var observer = new MutationObserver(function () { sync(); });
+      try { observer.observe(document.body, { childList: true, subtree: true }); } catch (e) {}
+      return function () {
+        try { observer.disconnect(); } catch (e) {}
+        for (var i = 0; i < tagged.length; i += 1) {
+          try {
+            tagged[i].el.classList.remove(tagged[i].cls);
+            tagged[i].el.removeAttribute('data-dsh-mobile-dock');
+          } catch (e) {}
+        }
+        tagged = [];
+      };
+    }
+
     function installLocaleMemo(ctx, locale) {
       var enabled = function () { return liveSettings.rememberLocale !== false; };
       var host = null;
@@ -604,6 +655,61 @@ window.__ModuleLoader__.load({
         '  overflow: visible !important;',
         '  white-space: nowrap !important;',
         '  text-overflow: clip !important;',
+        '}',
+        '',
+        '/* ══ STEP 6.5：输入框下方的 dock —— 复原旧版两列叠放 ═══════════════',
+        '   旧版（context-guard 时期）手机上很好看：左边上下两行统计',
+        '   （「N 轮 M 步·x tok/s」「xxxM tok·缓存命中 x%」），右边上下两行',
+        '   （上下文「63%」+ 插件药丸），都贴在输入栏下方。',
+        '   宿主现在把这几块塞在同一个 flex 行里，手机上会挤成一行、字被截断，',
+        '   所以这里把它改成 2×2 网格。',
+        '   钩子：dock 容器 <hash>_dock（CSS module 哈希，用 JS 打标记），',
+        '   子项：统计锚点 [class*="bOPqQW"]、上下文计量 [class*="JObwrW_root"]、',
+        '   插件药丸的 [class*="_anchor"]。 */',
+        ':root.' + PHONE_CLASS + ' .dsh-mobile-dock {',
+        '  display: grid !important;',
+        '  grid-template-columns: minmax(0, 1fr) auto !important;',
+        '  grid-template-rows: auto auto !important;',
+        '  column-gap: 10px !important;',
+        '  row-gap: 1px !important;',
+        '  align-items: center !important;',
+        '  width: 100% !important;',
+        '  height: auto !important;',
+        '  min-width: 0 !important;',
+        '}',
+        '/* 左列：统计两行上下叠放，且不截断 */',
+        ':root.' + PHONE_CLASS + ' .dsh-mobile-dock [class*="bOPqQW"] {',
+        '  grid-column: 1 !important;',
+        '  grid-row: 1 / span 2 !important;',
+        '  display: flex !important;',
+        '  flex-direction: column !important;',
+        '  align-items: flex-start !important;',
+        '  gap: 0 !important;',
+        '  min-width: 0 !important;',
+        '  overflow: visible !important;',
+        '}',
+        ':root.' + PHONE_CLASS + ' .dsh-mobile-dock [class*="bOPqQW"] button,',
+        ':root.' + PHONE_CLASS + ' .dsh-mobile-dock [class*="bOPqQW"] span {',
+        '  overflow: visible !important;',
+        '  text-overflow: clip !important;',
+        '  white-space: nowrap !important;',
+        '  min-width: 0 !important;',
+        '  max-width: 100% !important;',
+        '}',
+        '/* 右列上行：上下文占用（63%） */',
+        ':root.' + PHONE_CLASS + ' .dsh-mobile-dock [class*="JObwrW"] {',
+        '  grid-column: 2 !important;',
+        '  grid-row: 1 !important;',
+        '  justify-self: end !important;',
+        '}',
+        '/* 右列下行：插件药丸（ACP 等）—— 按内容撑开，不再被压成 0 宽 */',
+        ':root.' + PHONE_CLASS + ' .dsh-mobile-dock [class*="_anchor"]:not([class*="bOPqQW"]) {',
+        '  grid-column: 2 !important;',
+        '  grid-row: 2 !important;',
+        '  justify-self: end !important;',
+        '  flex: 0 0 auto !important;',
+        '  min-width: auto !important;',
+        '  max-width: 100% !important;',
         '}',
         '',
         '/* ══ STEP 7：赛博主题的两个悬浮开关别压住发送按钮 ══════════════',
@@ -1042,6 +1148,11 @@ window.__ModuleLoader__.load({
               } catch (e) {}
             };
           }, 'dsh-mobile-ui: phone font layer');
+
+          // composer dock 两列布局（统计在左、占用量与插件药丸在右）
+          ctx.effect(function () {
+            return installComposerDock();
+          }, 'dsh-mobile-ui: composer dock layout');
 
           // 手机上的回车＝换行（见 installEnterAsNewline 的注释）
           ctx.effect(function () {
