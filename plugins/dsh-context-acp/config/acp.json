@@ -29,6 +29,7 @@
     "enabled": true,
     "afterCompactions": 2,
     "prefix": "HANDOFF-context-acp",
-    "maxRecentUserMessages": 8
+    "maxRecentUserMessages": 8,
+    "refreshOnHigherCompaction": true
   }
 }

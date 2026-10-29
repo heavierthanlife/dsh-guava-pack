@@ -33,7 +33,7 @@ const USAGE = [
   '- /acp 或 /acp status：账本摘要（块数、tier、被压 tokens、最近 nudge、引擎）',
   '- /acp blocks：逐块列表（编号、tier、tokens、seq 区间、compactionId）',
   '- /acp nudge：按最近一次 nudge 的压力数字渲染提醒文本',
-  '- /acp handoff：立即检查并按阈值写交接文档（压满 handoff.afterCompactions 次才写）',
+  '- /acp handoff：立即检查交接文档（压满 handoff.afterCompactions 次才写；之后每次压缩次数增加会自动刷新同一份）',
   '- /acp handoff --force：无视阈值立即写一份（换会话/收尾时用）',
 ].join('\n');
 
@@ -165,6 +165,9 @@ function renderHandoffCommand(result) {
     switch (reason) {
       case 'written':
         return '已写出交接文档';
+      case 'refreshed':
+        // 压缩次数比上次写时高 → 原地刷新同一份文件（不新增文件）。
+        return `已刷新交接文档（压缩次数 → ${positiveOrZero(result?.compactions)}）`;
       case 'existing':
         return '本会话已有交接文档（复用磁盘上的那份）';
       case 'cached':

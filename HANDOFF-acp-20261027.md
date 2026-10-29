@@ -99,7 +99,7 @@ tools/tests/lib/acp-driver.mjs  进程内 e2e 驱动（只在隔离 profile 里�
 | 文件 | 作用 |
 |---|---|
 | `lib/fallback.mjs` | 兜底纯逻辑：`countUnansweredNudges`（从日志数，模型一压自动归零）+ `decideFallback` |
-| `lib/handoff.mjs` | 交接文档（从 guard 迁移）：日志重建统计 → `HANDOFF-context-acp-*.md` |
+| `lib/handoff.mjs` | 交接文档（从 guard 迁移）：日志重建统计 → `HANDOFF-context-acp-*.md`；压缩次数增加时原地刷新同一份（2026-10-29） |
 | `engine.compactByFallback()` | 调父类 pressure 压缩；阈值由生成器写入引擎行 `basic.thresholdRatio`（与面板同源） |
 | `nudge` 的 `attemptFallback()` | 在 `next()` **之前**执行（先压后组装请求，与 compaction-basic 同序） |
 | `settings.mjs` | 面板 v2：`lastFallback` / `handoff` / `fallbackAfterNudges` + 两个新 stepper（兜底阈值、压满几次） |

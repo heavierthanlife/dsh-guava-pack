@@ -11,7 +11,8 @@
  *
  *   1. **统计从日志重建**：轮/步/压缩次数/释放 token/路由，全部 `snapshotEvents()` 现数
  *      —— 保证同一份日志永远生成同一份文档（投影是进程内状态，重启后不可复现）；
- *   2. **该写才写**：未达次数不写、禁用不写、同一会话只写一份（含重启后认回旧文件）；
+ *   2. **该写才写、写完保持最新**：未达次数不写、禁用不写、同一会话始终只有一份文件；
+ *      压缩次数高于上次写时**原地刷新**（覆盖同一文件，不新增），重启后也能认回并续写；
  *   3. **失败不静默**：写入失败返回 `{written:false, reason:'write-failed', error}`；
  *   4. **接线真的会触发**：`turn/end` 与 `compaction/end` 都检查（手动 compact 不在
  *      turn 里，只等 turn/end 会拖到下一轮），其它事件不触发，一个 agent 只挂一份监听；
@@ -20,7 +21,7 @@
  * 全部离线：用假 session（snapshotEvents + header.cwd）+ 临时目录 + 迷你 cordis ctx。
  */
 
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -118,9 +119,11 @@ check('会话短标识取 8 位且剥掉 session- 前缀',
 check('非法 id 也能生成安全 key', /^[a-zA-Z0-9]+$/.test(handoffSessionKey({ id: '!!!' })));
 check('时间戳是文件名安全形状', /^\d{8}-\d{6}$/.test(stamp(Date.now())), stamp(Date.now()));
 
-// ── 4. 写入器（该写才写 / 只写一份 / 失败可见）─────────────────────────
+// ── 4. 写入器（该写才写 / 一份文件 / 次数增加即刷新）────────────────────
 console.log('\n写入器（createHandoff）');
 const dir = mkdtempSync(join(tmpdir(), 'acp-handoff-'));
+/** 目录里指定前缀的文件（按名排序）。 */
+const filesWith = (prefix) => readdirSync(dir).filter((f) => f.startsWith(prefix)).sort();
 try {
   const fakeSession = {
     id: 'session-77777777-1111',
@@ -133,20 +136,84 @@ try {
   check('压缩 1 次 < 阈值 2 → 不写', below.written === false && below.reason === 'below-threshold', below);
   check('不写时目录里没有文件', readdirSync(dir).length === 0);
 
-  const two = createHandoff({ cfg: { ...DEFAULT_HANDOFF, afterCompactions: 2 } });
-  const written = await two.maybeHandoff({ ...fakeSession, snapshotEvents: () => makeEvents({ compactions: 2 }) });
+  const writer = createHandoff({ cfg: { ...DEFAULT_HANDOFF, afterCompactions: 2 } });
+  const c2session = { ...fakeSession, snapshotEvents: () => makeEvents({ compactions: 2 }) };
+  const written = await writer.maybeHandoff(c2session);
   check('压缩 2 次 → 写出', written.written === true && written.reason === 'written', written);
-  const files = readdirSync(dir);
-  check('文件名带插件前缀与次数', files.length === 1 && files[0].startsWith('HANDOFF-context-acp-77777777-c2-'), files);
-  const text = readFileSync(join(dir, files[0]), 'utf8');
-  check('落盘内容与 builder 一致（含摘要）', text.includes('第 2 次压缩的摘要'));
+  const afterFirst = readdirSync(dir);
+  check('一个会话一份、文件名带前缀与会话 key', afterFirst.length === 1 && afterFirst[0].startsWith('HANDOFF-context-acp-77777777-'), afterFirst);
+  check('文件名**不再带 cN**（次数是正文事实，不是文件名）', !/-c\d+-/.test(afterFirst[0]), afterFirst[0]);
+  const firstPath = join(dir, afterFirst[0]);
+  check('落盘内容与 builder 一致（含摘要）', readFileSync(firstPath, 'utf8').includes('第 2 次压缩的摘要'));
 
-  const again = await two.maybeHandoff({ ...fakeSession, snapshotEvents: () => makeEvents({ compactions: 2 }) });
-  check('同一会话再触发 → 认缓存，不写第二份', again.written === true && again.reason === 'cached' && readdirSync(dir).length === 1);
+  const again = await writer.maybeHandoff(c2session);
+  check('同一会话、同次数再触发 → 认缓存，不写第二份',
+    again.written === true && again.reason === 'cached' && readdirSync(dir).length === 1, again);
+
+  const c3 = await writer.maybeHandoff({ ...fakeSession, snapshotEvents: () => makeEvents({ compactions: 3 }) });
+  check('压缩次数 3 > 2 → 原地刷新（不新增文件）',
+    c3.written === true && c3.reason === 'refreshed' && c3.file === firstPath && readdirSync(dir).length === 1, c3);
+  check('刷新后文件名不变（覆盖同一份）', readdirSync(dir)[0] === afterFirst[0], readdirSync(dir));
+  const textC3 = readFileSync(firstPath, 'utf8');
+  check('刷新后正文是最新 c3（含第 3 次摘要与已压缩: 3 次）',
+    textC3.includes('第 3 次压缩的摘要') && textC3.includes('已压缩: 3 次'), textC3.slice(0, 400));
+
+  const c6 = await writer.maybeHandoff({ ...fakeSession, snapshotEvents: () => makeEvents({ compactions: 6 }) });
+  check('跳过 c4 直接到 c6 也刷新到最新（长会话不冻结在旧快照）',
+    c6.reason === 'refreshed' && readFileSync(firstPath, 'utf8').includes('已压缩: 6 次') && readdirSync(dir).length === 1, c6);
 
   const restarted = createHandoff({ cfg: { ...DEFAULT_HANDOFF, afterCompactions: 2 } });
-  const existing = await restarted.maybeHandoff({ ...fakeSession, snapshotEvents: () => makeEvents({ compactions: 2 }) });
-  check('新进程（无缓存）→ 认回磁盘上的旧文件', existing.written === true && existing.reason === 'existing' && readdirSync(dir).length === 1);
+  const sameExisting = await restarted.maybeHandoff({ ...fakeSession, snapshotEvents: () => makeEvents({ compactions: 6 }) });
+  check('新进程（无缓存）→ 认回磁盘上的 c6 文件且不重写',
+    sameExisting.written === true && sameExisting.reason === 'existing' && sameExisting.compactions === 6 && readdirSync(dir).length === 1, sameExisting);
+  const c7 = await restarted.maybeHandoff({ ...fakeSession, snapshotEvents: () => makeEvents({ compactions: 7 }) });
+  check('新进程 + 次数增加 → 原地刷新磁盘上的旧文件（同名覆盖）',
+    c7.reason === 'refreshed' && c7.file === firstPath && readdirSync(dir).length === 1 && readFileSync(firstPath, 'utf8').includes('已压缩: 7 次'), c7);
+
+  // 事后把阈值调高：已有文件不受阈值影响，次数增加仍要刷新（否则旧文件冻结）。
+  const raisedDirSession = { id: 'session-cccccccc-0000', header: { cwd: dir }, snapshotEvents: () => makeEvents({ compactions: 2 }) };
+  const raisedWriter = createHandoff({ cfg: { ...DEFAULT_HANDOFF, afterCompactions: 2, prefix: 'HANDOFF-raised' } });
+  await raisedWriter.maybeHandoff(raisedDirSession);
+  const raisedFile = join(dir, filesWith('HANDOFF-raised-')[0]);
+  const raisedAgain = createHandoff({ cfg: { ...DEFAULT_HANDOFF, afterCompactions: 5, prefix: 'HANDOFF-raised' } });
+  const raisedResult = await raisedAgain.maybeHandoff({ ...raisedDirSession, snapshotEvents: () => makeEvents({ compactions: 3 }) });
+  check('事后调高 afterCompactions：已有文件仍按次数刷新，不被阈值挡住',
+    raisedResult.reason === 'refreshed' && readFileSync(raisedFile, 'utf8').includes('已压缩: 3 次'), raisedResult);
+
+  // force 早写（c1 < 阈值 2）之后，普通触发不应再报 below-threshold：文件已在，就该报 cached/existing。
+  const earlyDirSession = { id: 'session-dddddddd-0000', header: { cwd: dir }, snapshotEvents: () => makeEvents({ compactions: 1 }) };
+  const earlyWriter = createHandoff({ cfg: { ...DEFAULT_HANDOFF, afterCompactions: 2, prefix: 'HANDOFF-early' } });
+  const earlyForced = await earlyWriter.maybeHandoff(earlyDirSession, { force: true });
+  const earlyAgain = await earlyWriter.maybeHandoff(earlyDirSession);
+  check('force 早写后普通触发报已存在（而不是 below-threshold）',
+    earlyForced.reason === 'written' && earlyAgain.reason === 'cached' && earlyAgain.compactions === 1, earlyAgain);
+
+  // 关掉刷新：回到「写完冻结」的旧语义（显式逃生门）。
+  const frozenDirSession = { id: 'session-88888888-0000', header: { cwd: dir }, snapshotEvents: () => makeEvents({ compactions: 2 }) };
+  const frozen = createHandoff({ cfg: { ...DEFAULT_HANDOFF, afterCompactions: 2, prefix: 'HANDOFF-frozen', refreshOnHigherCompaction: false } });
+  await frozen.maybeHandoff(frozenDirSession);
+  const frozenFile = join(dir, filesWith('HANDOFF-frozen-')[0]);
+  const frozenBefore = readFileSync(frozenFile, 'utf8');
+  const frozenAgain = await frozen.maybeHandoff({ ...frozenDirSession, snapshotEvents: () => makeEvents({ compactions: 5 }) });
+  check('refreshOnHigherCompaction=false → 不刷新（逃生门有效）',
+    frozenAgain.reason === 'cached' && readFileSync(frozenFile, 'utf8') === frozenBefore, frozenAgain);
+
+  // 旧命名（…-c<N>-…）兼容：认领并原地刷新，不改名、不新增。
+  const legacyName = 'HANDOFF-context-acp-99999999-c1-20260101-000000.md';
+  writeFileSync(join(dir, legacyName), '# old\n\n- 已压缩: 1 次\n', 'utf8');
+  const legacySession = { id: 'session-99999999-2222', header: { cwd: dir }, snapshotEvents: () => makeEvents({ compactions: 4 }) };
+  const legacyWriter = createHandoff({ cfg: { ...DEFAULT_HANDOFF, afterCompactions: 2 } });
+  const legacyResult = await legacyWriter.maybeHandoff(legacySession);
+  check('旧命名 cN 文件被认领并原地刷新（文件名保持不变）',
+    legacyResult.reason === 'refreshed' && legacyResult.file === join(dir, legacyName), legacyResult);
+  check('旧文件仍只有一份、正文更新到 c4',
+    filesWith('HANDOFF-context-acp-99999999-').length === 1 && readFileSync(join(dir, legacyName), 'utf8').includes('已压缩: 4 次'));
+
+  // 并发触发（compaction/end 紧接 turn/end）必须串行化：只能产生一份文件。
+  const conc = createHandoff({ cfg: { ...DEFAULT_HANDOFF, afterCompactions: 1, prefix: 'HANDOFF-conc' } });
+  const concSession = { id: 'session-aaaaaaaa-0000', header: { cwd: dir }, snapshotEvents: () => makeEvents({ compactions: 2 }) };
+  await Promise.all([conc.maybeHandoff(concSession), conc.maybeHandoff(concSession), conc.maybeHandoff(concSession)]);
+  check('并发触发只产生一份文件（per-session 串行化）', filesWith('HANDOFF-conc-').length === 1, filesWith('HANDOFF-conc-'));
 
   const disabled = createHandoff({ cfg: { ...DEFAULT_HANDOFF, enabled: false, afterCompactions: 1 } });
   const off = await disabled.maybeHandoff({ ...fakeSession, snapshotEvents: () => makeEvents({ compactions: 2 }) });
@@ -275,9 +342,11 @@ console.log('\n接线（--force 与真实场景）');
       refused.written === false && refused.reason === 'below-threshold' && refused.required === 2, refused);
     const forced = await writer.maybeHandoff(session, { force: true });
     check('--force：无视阈值写出', forced.written === true && forced.reason === 'written', forced);
-    check('force 写出的文件带真实压缩次数（c1）', readdirSync(dir).some((f) => f.startsWith('HANDOFF-context-acp-55555555-c1-')), readdirSync(dir));
+    check('force 写出的文件名稳定、正文带真实压缩次数（c1）',
+      readdirSync(dir).length === 1 && !/-c\d+-/.test(readdirSync(dir)[0]) && readFileSync(join(dir, readdirSync(dir)[0]), 'utf8').includes('已压缩: 1 次'), readdirSync(dir));
     const forcedAgain = await writer.maybeHandoff(session, { force: true });
-    check('--force 重复调用不再写第二份', forcedAgain.written === true && forcedAgain.reason === 'cached' && readdirSync(dir).length === 1);
+    check('--force 重复调用：原地刷新同一份，不写第二份',
+      forcedAgain.written === true && forcedAgain.reason === 'refreshed' && readdirSync(dir).length === 1, forcedAgain);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -297,6 +366,9 @@ check('hook 用共享的触发判定，不硬编码单个事件类型',
   /isHandoffTriggerEvent\(event\)/.test(handoffSrc) && !/event\?\.type !== 'turn\/end'/.test(handoffSrc));
 check('runtime.json 的 handoff 配置存在且默认 2 次',
   runtime?.handoff?.enabled === true && runtime?.handoff?.afterCompactions === 2);
+check('runtime.json 开启「次数增加即刷新」', runtime?.handoff?.refreshOnHigherCompaction === true);
+check('写入器实现刷新分支（同文件覆盖，reason=refreshed）',
+  /reason = existing !== undefined \? 'refreshed' : 'written'/.test(handoffSrc) && /writeFile\(file, body/.test(handoffSrc));
 check('面板显示交接文档状态', /panel\.handoff/.test(clientSrc) && /handoffNotWritten/.test(clientSrc));
 check('面板可调"压满几次"', /handoffAfter/.test(clientSrc) && /HANDOFF_MIN/.test(clientSrc));
 

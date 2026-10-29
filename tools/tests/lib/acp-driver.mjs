@@ -27,7 +27,8 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 
 export const name = 'acp-e2e-driver';
@@ -371,6 +372,72 @@ export function apply(ctx, config = {}) {
         decompressOk: decompressed?.ok,
         searchHits: searched?.hits?.length ?? null,
       });
+    }
+
+    // ── 10. 交接文档（handoff）：c2 写出 → 第三次压缩后**原地刷新同一份** ──
+    // 这是 2026-10-29 的增强点：旧语义「每会话只写一份、写完冻结」会让长会话从
+    // c2 压到 c6 后交接文档停在旧快照。这里用真实 hook（root 插件装的
+    // installHandoffHook）验证：写出 → 压缩次数增加 → 同一路径内容刷新。
+    if (scenario === 'full') {
+      const handoffPrefix = 'HANDOFF-context-acp-';
+      const handoffFiles = () => readdirSync(workDir).filter((file) => file.startsWith(handoffPrefix)).sort();
+      const waitFor = async (predicate, timeoutMs = 8000) => {
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+          const value = predicate();
+          if (value !== undefined && value !== false && value !== null) return value;
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        return undefined;
+      };
+
+      const firstFiles = await waitFor(() => (handoffFiles().length > 0 ? handoffFiles() : undefined));
+      assert(Array.isArray(firstFiles) && firstFiles.length === 1, '压缩满 2 次后写出交接文档（每会话一份）', JSON.stringify(firstFiles ?? null));
+      const handoffPath = join(workDir, firstFiles[0]);
+      const firstText = readFileSync(handoffPath, 'utf8');
+      assert(firstText.includes('已压缩: 2 次'), '首份交接文档记录 c2', firstText.slice(0, 200));
+      assert(!/-c\d+-/.test(firstFiles[0]), '文件名会话稳定（不带 cN）', firstFiles[0]);
+
+      // 第三次压缩：压「tier-2 checkpoint + 它后面那条用户消息」。
+      // 不能压单条短消息：framed 摘要固定开销（~115 tokens）比它大 → no-gain；
+      // checkpoint 节点本身有 ~177 tokens，加上一条用户消息足够有收益。
+      // 先 append 一条普通用户消息，把「活动用户消息」标记从 seq9 移走（seq9 否则受保护）。
+      session.append('user/message', createUserMessage({
+        content: [{ type: 'text', text: 'FILLER：交接文档刷新验收——这条是最新用户消息（受保护），不要压。' }],
+        source: { kind: 'user' },
+      }), { surfaceOp: 'append' });
+      const surfaceNow = [...session.surface.nodes];
+      const checkpoint2 = surfaceNow.find((seq) => session.eventAt(seq)?.data?.source?.kind === 'compact-checkpoint');
+      assert(checkpoint2 !== undefined, 'surface 上仍有 tier-2 checkpoint 节点');
+      const checkpoint2Idx = surfaceNow.indexOf(checkpoint2);
+      assert(checkpoint2Idx + 1 < surfaceNow.length, 'tier-2 checkpoint 后面还有节点可压');
+      const third = await runTool('compress', agent, {
+        startSeq: checkpoint2,
+        endSeq: surfaceNow[checkpoint2Idx + 1],
+        summary: '## 第三次压缩\n- S3 标记：ORCHID-11 / E_MIGRATE_LOCKED 仍保留。',
+      });
+      step('thirdCompress', third);
+      assert(third?.ok === true, '第三次压缩成功（触发 handoff 次数增加）', JSON.stringify(third));
+
+      const refreshedText = await waitFor(() => {
+        try {
+          const text = readFileSync(handoffPath, 'utf8');
+          return text.includes('已压缩: 3 次') ? text : undefined;
+        } catch {
+          return undefined;
+        }
+      });
+      assert(typeof refreshedText === 'string', '交接文档刷新到 c3（同一路径）', null);
+      const afterFiles = handoffFiles();
+      step('handoff', { first: firstFiles[0], after: afterFiles, refreshed: refreshedText.includes('S3 标记') });
+      assert(afterFiles.length === 1 && afterFiles[0] === firstFiles[0], '刷新是覆盖同一份文件，不新增文件', JSON.stringify(afterFiles));
+      assert(refreshedText.includes('第 3 次压缩') || refreshedText.includes('S3 标记'), '刷新后正文包含最新一次摘要', refreshedText.slice(0, 400));
+      report.handoff = {
+        file: firstFiles[0],
+        filesAfter: afterFiles,
+        refreshed: true,
+        hasC3: refreshedText.includes('已压缩: 3 次'),
+      };
     }
 
     // 关闭 turn（保持日志事件形状干净；driver 随后直接退出进程）

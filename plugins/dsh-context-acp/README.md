@@ -66,7 +66,7 @@ ctx.compaction（preset realm，4 个 preset 各一份）
 | `lib/settings.mjs` | 面板数据：projection `contextAcp` + `/context-acp` 路由 + 设置落盘 |
 | `lib/state.mjs` | 每 agent 瞬时状态（WeakMap；只放「日志里没有也不该进日志」的东西） |
 | `lib/fallback.mjs` | **兜底自动压缩**的纯逻辑：数「未被响应的 nudge」+ 决策（≥75% 且连续 2 次） |
-| `lib/handoff.mjs` | **交接文档**（从 context-guard 迁移）：从日志重建统计 → 写 `HANDOFF-context-acp-*.md`；含接线 `installHandoffHook`（`turn/end` + `compaction/end`） |
+| `lib/handoff.mjs` | **交接文档**（从 context-guard 迁移）：从日志重建统计 → 写 `HANDOFF-context-acp-*.md`；压缩次数增加时原地刷新同一份；含接线 `installHandoffHook`（`turn/end` + `compaction/end`） |
 | `client.js` | 面板 pill（composer dock，沿用 context-guard 样式） |
 | `config/acp.json` | **唯一人工配置源**（backend / nudge / retain / engine） |
 | `config/preset-override.generated.yml` | 生成物：4 个 preset 的 `config.plugins` 覆盖 |
@@ -109,8 +109,9 @@ node tools/gen-acp-preset.mjs --write --backend basic
 | `fallback.afterUnansweredNudges` | 2 | 连续几次 nudge 没被响应才动手 |
 | `fallback.retryCooldownSteps` | 3 | 兜底失败（无可压区间）后的节流步数 |
 | `handoff.enabled` | true | 交接文档开关 |
-| `handoff.afterCompactions` | 2 | 压缩满几次写一份（每个会话一份） |
+| `handoff.afterCompactions` | 2 | 压缩满几次**开始**写（每个会话始终一份文件） |
 | `handoff.prefix` | `HANDOFF-context-acp` | 文件名前缀 |
+| `handoff.refreshOnHigherCompaction` | true | 压缩次数比上次写时更高 → 原地刷新同一份（关掉 = 写完冻结） |
 | `backend` | `"acp"` | `"basic"` = 回滚到内置压缩 |
 
 ## 兜底自动压缩 + 交接文档（2026-10-27 合并 `dsh-context-guard`）
@@ -134,9 +135,17 @@ nudge（提醒模型）──模型响应──> 模型自己 compress（模型�
 `basic.thresholdRatio`，与面板上的兜底阈值是同一个数（改 `acp.json` 后必须重跑
 `gen-acp-preset --write`，否则面板显示 75% 而引擎按旧值动手）。
 
-**交接文档**：从 `dsh-context-guard` 迁移的 `HANDOFF-context-acp-<sid8>-c<N>-<时间>.md`，
-在 **`turn/end` 与 `compaction/end`** 两个事件上检查；统计（轮/步/压缩次数/释放 token/路由）
-全部从 `session.snapshotEvents()` **现场重建**，所以同一份日志永远生成同一份文档。
+**交接文档**：从 `dsh-context-guard` 迁移的 `HANDOFF-context-acp-<sid8>-<时间>.md`
+（一个会话始终只有一份，文件名不带压缩次数），在 **`turn/end` 与 `compaction/end`**
+两个事件上检查；统计（轮/步/压缩次数/释放 token/路由）全部从
+`session.snapshotEvents()` **现场重建**，所以同一份日志永远生成同一份文档。
+
+**刷新语义（2026-10-29 增强）**：文件一旦写出，之后每次压缩完成（次数比上次写时高）
+就**覆盖刷新同一份** —— 否则长会话从 c2 压到 c6，交接文档会永远停在 c2 的旧快照
+（摘要少了两次、统计全旧）。代价是每次压缩多写一次盘（频率天然被压缩事件限制，
+不是每步写盘）；并发触发（`compaction/end` 紧跟 `turn/end`）用 per-session promise 链
+串行化，保证不会写出两份。`handoff.refreshOnHigherCompaction=false` 可回到「写完冻结」。
+旧命名 `…-c<N>-…` 的历史文件仍会被认领并**原地刷新**（不改名），重启后也能续写。
 面板显示「写没写、写在哪、为什么没写」。
 
 为什么要加 `compaction/end`：手动 compact 是一次**独立命令**（日志里 `turn: null` +

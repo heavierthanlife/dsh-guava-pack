@@ -194,6 +194,13 @@ function assertReport(report) {
   if (skill?.code === 'protected' && String(skill?.message ?? '').includes('protected-skill-catalog')) pass('skill 目录最新副本被拒');
   else fail('skill 目录屏障', JSON.stringify(skill)?.slice(0, 500));
 
+  const handoff = report.handoff;
+  if (handoff?.refreshed === true && handoff.hasC3 === true && Array.isArray(handoff.filesAfter) && handoff.filesAfter.length === 1) {
+    pass('交接文档随压缩次数原地刷新', `${handoff.file}（c2 → c3，仍一份文件）`);
+  } else {
+    fail('交接文档刷新', JSON.stringify(handoff)?.slice(0, 600));
+  }
+
   const decompress = report.decompress;
   const decompressedText = JSON.stringify(decompress ?? {});
   // b1 覆盖被压的第 2..4 条消息；E_MIGRATE_LOCKED 只出现在被压原文里（ORCHID-11 在第 1 条，未压）。

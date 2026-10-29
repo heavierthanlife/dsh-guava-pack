@@ -20,19 +20,34 @@
  * @module dsh-context-acp/handoff
  */
 
-import { readdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { readFile, readdir, writeFile } from 'node:fs/promises';
+import { basename, join } from 'node:path';
 
 /** 默认配置（acp.json 的 `handoff` 段会覆盖）。 */
 export const DEFAULT_HANDOFF = Object.freeze({
   enabled: true,
-  /** 压缩达到这个次数后写一份（每个会话最多一份）。 */
+  /** 压缩达到这个次数后**开始**写（每个会话始终只有一份文件）。 */
   afterCompactions: 2,
   /** 文件名前缀。用本插件自己的名字，避免和旧的 context-guard 文件混淆。 */
   prefix: 'HANDOFF-context-acp',
   /** 文档里保留多少条最近的用户消息。 */
   maxRecentUserMessages: 8,
+  /**
+   * 压缩次数比上次写时更高 → 刷新同一份文件（覆盖，不新增文件）。
+   *
+   * 为什么默认开：交接文档的价值在「新会话读它」，而长会话从 c2 压到 c4/c6 时，
+   * 停在 c2 的文档会变成过期快照（摘要少了两次、统计全是旧的）。每次压缩多写
+   * 一次盘是最小代价；频率天然被「一次压缩」限制，不存在每步写盘。
+   * 关掉则回到旧的「写完就冻结」语义（文件不再变化）。
+   */
+  refreshOnHigherCompaction: true,
 });
+
+/** 从文档正文读「已压缩 N 次」（旧文件也可能只有内容可依据）。 */
+const COMPACTIONS_LINE = /^-\s*已压缩:\s*(\d+)\s*次/m;
+
+/** 从旧命名 `…-c<N>-<stamp>.md` 兜底读次数（正文不可读时）。 */
+const LEGACY_NAME_COUNT = /-c(\d+)-/;
 
 /**
  * 触发交接检查的会话事件。
@@ -252,29 +267,89 @@ export function resolveHandoffDir(session) {
  * @returns {{maybeHandoff: (session: object, options?: {force?: boolean}) => Promise<object>, last: () => object|null, reset: () => void}}
  */
 export function createHandoff({ cfg = DEFAULT_HANDOFF, thresholdRatio = () => 0.75, logger } = {}) {
-  /** sessionId → 已写出的绝对路径（本进程判重）。 */
+  /** sessionId → { file, compactions }（本进程判重与刷新基线）。 */
   const written = new Map();
+  /** sessionId → 串行化链尾（并发触发时保证「一个会话一份」）。 */
+  const chains = new Map();
+  /**
+   * 本进程确认过「目录里还没有这个会话的 handoff」的 sessionId。
+   *
+   * 为什么需要：每次 turn/end 都可能触发检查，未达阈值时不应反复 readdir；
+   * 但一旦目录里**已有**文件（上一次进程写的 / 本进程写的），就必须绕过阈值去
+   * 判刷新 —— 否则用户事后把 afterCompactions 调高，旧文件会停在旧次数不再更新。
+   */
+  const knownMissing = new Set();
   let last = null;
 
   function prefixFor(session) {
     return `${cfg.prefix}-${handoffSessionKey(session)}-`;
   }
 
+  /**
+   * 找出这个会话已有的交接文档（含旧命名 `…-c<N>-…`）与它记的压缩次数。
+   *
+   * 次数优先读正文「已压缩: N 次」（对所有命名都成立）；正文读不了再从旧文件名
+   * `-c<N>-` 兜底。判重与「要不要刷新」都必须以这个数为准，不能只看文件在不在 ——
+   * 否则 c2 的旧文件会永远挡住 c4 的刷新。
+   */
   async function findExisting(cwd, session) {
+    let entries;
     try {
-      const prefix = prefixFor(session);
-      const entries = await readdir(cwd);
-      return entries.filter((entry) => entry.startsWith(prefix)).sort().pop();
+      entries = await readdir(cwd);
     } catch {
       return undefined;
     }
+    const latest = entries.filter((entry) => entry.startsWith(prefixFor(session))).sort().pop();
+    if (latest === undefined) return undefined;
+    const file = join(cwd, latest);
+    let compactions = 0;
+    try {
+      const text = await readFile(file, 'utf8');
+      const match = COMPACTIONS_LINE.exec(text);
+      if (match !== null) compactions = Number(match[1]);
+    } catch {
+      /* 正文读不了：用文件名兜底 */
+    }
+    if (!Number.isFinite(compactions) || compactions <= 0) {
+      const legacy = LEGACY_NAME_COUNT.exec(latest);
+      if (legacy !== null) compactions = Number(legacy[1]);
+      else compactions = 0;
+    }
+    return { file, compactions };
+  }
+
+  /**
+   * 新文件名：**会话稳定**，不含压缩次数。
+   *
+   * 为什么不再带 `c<N>`：刷新会覆盖同一份文件，名字里的次数立刻变成假信息
+   * （c2 的文件里写着「已压缩: 4 次」）。次数是正文的事实，不是文件名的。
+   * 旧文件（`…-c2-…`）仍会被认领并按更高次数原地刷新，不需要改名。
+   */
+  function newFilePath(cwd, session) {
+    return join(cwd, `${prefixFor(session)}${stamp(Date.now())}.md`);
   }
 
   async function write(session, { force = false } = {}) {
     if (cfg.enabled === false) return { written: false, reason: 'disabled' };
     const events = [...session.snapshotEvents()];
     const stats = collectStats(events);
-    if (!force && stats.compactions < cfg.afterCompactions) {
+    const belowThreshold = stats.compactions < cfg.afterCompactions;
+
+    // 文件定位：本进程缓存优先；否则从磁盘认领（重启/重挂后仍能续写同一份）。
+    // 「磁盘上还没有文件」的结果进 knownMissing 缓存，避免每次 turn/end 都 readdir。
+    const cwd = resolveHandoffDir(session);
+    if (cwd === undefined) {
+      logger?.warn?.('[acp] handoff: 会话没有 cwd 也没有 DSH_HOME，跳过');
+      return { written: false, reason: 'no-cwd' };
+    }
+    let existing = written.get(session.id);
+    if (existing === undefined && !knownMissing.has(session.id)) {
+      existing = await findExisting(cwd, session);
+      if (existing === undefined) knownMissing.add(session.id);
+    }
+
+    // 还没有任何文件：保持旧的「未达阈值不写」语义。
+    if (existing === undefined && !force && belowThreshold) {
       return {
         written: false,
         reason: 'below-threshold',
@@ -282,23 +357,20 @@ export function createHandoff({ cfg = DEFAULT_HANDOFF, thresholdRatio = () => 0.
         required: cfg.afterCompactions,
       };
     }
-    const cached = written.get(session.id);
-    if (cached !== undefined) return { written: true, file: cached, reason: 'cached' };
 
-    const cwd = resolveHandoffDir(session);
-    if (cwd === undefined) {
-      logger?.warn?.('[acp] handoff: 会话没有 cwd 也没有 DSH_HOME，跳过');
-      return { written: false, reason: 'no-cwd' };
-    }
-    const existing = await findExisting(cwd, session);
-    if (existing !== undefined) {
-      const file = join(cwd, existing);
-      written.set(session.id, file);
-      logger?.info?.(`[acp] handoff 已存在：${file}`);
-      return { written: true, file, reason: 'existing' };
+    // 刷新判定：已经有文件时**不受阈值影响**（文件既然存在就要保持最新）；
+    // 压缩次数比上次写时更高（或显式 --force）就重写同一份文件。
+    // 刷新覆盖同一路径，不新增文件 —— 一个会话永远只有一份 handoff。
+    const higher = existing !== undefined && stats.compactions > existing.compactions;
+    const refresh = existing !== undefined && ((cfg.refreshOnHigherCompaction !== false && higher) || force);
+    if (existing !== undefined && !refresh) {
+      const reason = written.has(session.id) ? 'cached' : 'existing';
+      written.set(session.id, existing);
+      logger?.info?.(`[acp] handoff 已存在：${existing.file}`);
+      return { written: true, file: existing.file, compactions: existing.compactions, reason };
     }
 
-    const file = join(cwd, `${prefixFor(session)}c${stats.compactions}-${stamp(Date.now())}.md`);
+    const file = existing !== undefined ? existing.file : newFilePath(cwd, session);
     const body = buildHandoff(session, stats, { ...cfg, thresholdRatio: thresholdRatio() });
     try {
       await writeFile(file, body, 'utf8');
@@ -307,22 +379,40 @@ export function createHandoff({ cfg = DEFAULT_HANDOFF, thresholdRatio = () => 0.
       logger?.warn?.(`[acp] handoff 写入失败：${file} — ${reason}`);
       return { written: false, reason: 'write-failed', file, error: reason };
     }
-    written.set(session.id, file);
-    logger?.info?.(`[acp] handoff 已写出：${file}`);
-    return { written: true, file, reason: 'written' };
+    const record = { file, compactions: stats.compactions };
+    written.set(session.id, record);
+    knownMissing.delete(session.id);
+    const reason = existing !== undefined ? 'refreshed' : 'written';
+    logger?.info?.(`[acp] handoff ${reason === 'refreshed' ? '已刷新' : '已写出'}：${file}（c${stats.compactions}）`);
+    return { written: true, file, compactions: stats.compactions, reason, refreshedFrom: existing?.compactions };
   }
 
   return {
-    /** 达阈值就写一次；每个会话最多一份。**永不 reject**（失败写进返回值）。 */
+    /**
+     * 达阈值就写一份；之后压缩次数更高就**刷新同一份**（覆盖，不新增文件）。
+     *
+     * 并发触发（`compaction/end` 紧跟 `turn/end`）用 per-session promise 链串行化：
+     * 否则两个调用会同时读「没有文件」并各写一份，破坏「一个会话一份」。
+     *
+     * **永不 reject**（失败写进返回值）。
+     */
     async maybeHandoff(session, options = {}) {
+      const sessionId = session?.id ?? '';
+      const previous = chains.get(sessionId) ?? Promise.resolve();
+      const run = previous.then(() => write(session, options), () => write(session, options));
+      // 链上只保留「已结算」，避免把上一次的返回值/rejection 传下去。
+      const settled = run.then(() => undefined, () => undefined);
+      chains.set(sessionId, settled);
       try {
-        last = { ...(await write(session, options)), sessionId: session?.id ?? '', at: Date.now() };
+        last = { ...(await run), sessionId, at: Date.now() };
         return last;
       } catch (error) {
         const reason = String(error?.message ?? error);
         logger?.warn?.(`[acp] handoff 失败：${reason}`);
-        last = { written: false, reason: 'error', error: reason, sessionId: session?.id ?? '', at: Date.now() };
+        last = { written: false, reason: 'error', error: reason, sessionId, at: Date.now() };
         return last;
+      } finally {
+        if (chains.get(sessionId) === settled) chains.delete(sessionId);
       }
     },
     /** 面板用：最近一次真实结果（含"没写"的原因）。 */
@@ -330,6 +420,8 @@ export function createHandoff({ cfg = DEFAULT_HANDOFF, thresholdRatio = () => 0.
     /** agent 销毁时清判重缓存。 */
     reset: () => {
       written.clear();
+      chains.clear();
+      knownMissing.clear();
       last = null;
     },
   };

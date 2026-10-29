@@ -93,9 +93,12 @@ node tools/gen-acp-preset.mjs --write   # 上游升级后重生成，然后重�
 
 - 回滚内置压缩：`node tools/gen-acp-preset.mjs --write --backend basic`（重启生效）。
 - 交接文档：压满 `handoff.afterCompactions`（默认 2）次后，在每次 `turn/end` **或**
-  `compaction/end` 自动写 `HANDOFF-context-acp-<sid8>-c<N>-<时间>.md`（写在工作目录）。
+  `compaction/end` 自动写 `HANDOFF-context-acp-<sid8>-<时间>.md`（写在工作目录）。
   手动 compact 不在 turn 里，所以只靠 `turn/end` 会拖到下一轮 —— 2026-10-29 起
   `compaction/end` 也算触发点；当场要一份用 `/acp handoff`，无视阈值用 `/acp handoff --force`。
+  每个会话始终只有**一份**文件：之后压缩次数比上次高时**原地刷新**（覆盖同一文件），
+  长会话从 c2 压到 c6 也不会让交接文档停在旧快照；`handoff.refreshOnHigherCompaction=false`
+  可关掉刷新回到旧语义。
 - 配置：`plugins/dsh-context-acp/config/acp.json`（唯一人工配置源），改完重新 `--write`。
 - 生成物 `config/preset-override.generated.yml` + `config/runtime.json` **要提交**；
   `install.mjs --check` 与 `npm test` 都会跑 `--check` 拦上游漂移。
