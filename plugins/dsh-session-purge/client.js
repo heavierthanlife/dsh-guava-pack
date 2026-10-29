@@ -25,7 +25,7 @@ window.__ModuleLoader__.load({
         empty: '没有可清理的归档会话',
         summary: '{count} 个会话 · 可回收 {size}',
         files: '{count} 个产出文件',
-        attachments: '同时清理无人引用的附件',
+        attachments: '同时清理无人引用的附件（含 handoff/清单里的引用）',
         attachmentsHint: '（跨会话去重，只删别的会话不再引用的）',
         mode: '删除方式',
         modeTrash: '移到回滚区',

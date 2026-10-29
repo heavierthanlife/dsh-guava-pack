@@ -7,7 +7,7 @@
  *
  *   删除：sessions/<ws>/<sid>/（日志 + 锁）
  *         storages/session_projcache/sessions/<sid>.json
- *         可选：attachments 中**其余会话都不再引用**的对象
+ *         可选：attachments 中**其余会话与交接文档都不再引用**的对象
  *         可选：workspace.json 里该会话的花名册条目
  *   保留：工作区里的文件（本来就在会话存储之外）
  *         + 删前写一份产出清单 PURGED-<sid8>.md
@@ -22,8 +22,9 @@
  * ## 附件必须引用计数
  *
  * attachments 是内容寻址的（`sha256:<64hex>` → `objects/<前2位>/<哈希>`），
- * 同一张图跨会话只存一份。所以删附件前必须扫描**其余所有**会话日志收集
- * 仍在引用的 id，只删无人引用的 —— 否则会删掉别的会话还在用的图。
+ * 同一张图跨会话只存一份。所以删附件前必须扫描**其余所有**会话日志、
+ * 外加工作区里的 `HANDOFF-*.md` / `PURGED-*.md`（交接文档里的引用不在任何
+ * 日志里），只删无人引用的 —— 否则会删掉别的会话/交接文档还在用的图。
  *
  * ## 搜索索引不用管
  *
@@ -374,12 +375,67 @@ export async function extractSessionFactsAsync(text) {
 }
 
 /**
+ * 工作区文档里引用的附件 id。
+ *
+ * 为什么必须扫：`HANDOFF-*.md` / `PURGED-*.md` 是**跨会话**的交接载体 ——
+ * 上一个会话写了 handoff 交给下一个会话，里面可能嵌着 `sha256:…` 附件引用
+ * （截图/文件）。这些引用**不出现在任何会话日志里**，如果只扫日志，
+ * `--attachments` 会把它们当孤儿删掉，交接文档里的图/文件就断了。
+ *
+ * 范围：所有会话工作区目录顶层的 `HANDOFF-*.md`、`PURGED-*.md`，以及
+ * `$DSH_HOME/.purge-trash/`（那里的清单文件名是 `<session-id>.md`，按 *.md 扫）。
+ *
+ * 安全语义与日志扫描一致：**任何一份文档读不了就返回 null**，调用方据此
+ * 放弃删除全部附件（少删只是浪费空间，多删会删掉别人还在用的对象）。
+ *
+ * @returns {{refs: Set<string>|null, unreadable: string|null}}
+ */
+function* workspaceDocAttachmentRefsSteps(home, dirs) {
+  const refs = new Set();
+  const DOC_RE = /^(HANDOFF|PURGED)-[A-Za-z0-9._-]+\.md$/;
+  const seen = new Set();
+  const trash = join(home, '.purge-trash');
+  for (const { dir, anyMd } of [...dirs.map((dir) => ({ dir, anyMd: false })), { dir: trash, anyMd: true }]) {
+    if (typeof dir !== 'string' || dir === '') continue;
+    if (seen.has(dir)) continue;
+    seen.add(dir);
+    if (!existsSync(dir)) continue;
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      // 目录读不了：不是"没有文档"，而是"不知道有没有" → 保守放弃。
+      return { refs: null, unreadable: dir };
+    }
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      if (anyMd ? !entry.name.endsWith('.md') : !DOC_RE.test(entry.name)) continue;
+      const file = join(dir, entry.name);
+      let text;
+      try {
+        text = readFileSync(file, 'utf8');
+      } catch {
+        return { refs: null, unreadable: file };
+      }
+      for (const m of text.matchAll(/sha256:[a-f0-9]{64}/g)) refs.add(m[0]);
+    }
+    yield;
+  }
+  return { refs, unreadable: null };
+}
+
+/** 工作区文档里的附件引用（同步；自检直接调）。 */
+export function workspaceDocAttachmentRefs(home, dirs) {
+  return driveSync(workspaceDocAttachmentRefsSteps(home, dirs));
+}
+
+/**
  * 除 `skip` 之外的会话仍在引用的附件 id 集合。
  *
  * 关键安全属性：**只要有任一日志解不完整，就放弃删任何附件**（`referenced: null`）。
  * 少删只是浪费空间，多删会删掉别的会话还在用的图。
  */
-function* referencedAttachmentsSteps(home, stored, skip) {
+function* referencedAttachmentsSteps(home, stored, skip, state = null) {
   const referenced = new Set();
   for (const [id, entry] of stored) {
     if (skip.has(id)) continue;
@@ -400,12 +456,25 @@ function* referencedAttachmentsSteps(home, stored, skip) {
     }
     for (const m of decoded.text.matchAll(/sha256:[a-f0-9]{64}/g)) referenced.add(m[0]);
   }
+
+  // 再扫工作区文档（handoff / 清理清单）：它们跨会话存在，引用不在日志里。
+  const workspace = state ?? readWorkspaceState(home);
+  const dirs = [];
+  for (const ws of workspace?.sessionWorkspace?.values?.() ?? []) {
+    if (typeof ws?.path === 'string' && ws.path !== '') dirs.push(ws.path);
+  }
+  const docs = yield* workspaceDocAttachmentRefsSteps(home, dirs);
+  if (docs.refs === null) {
+    return { referenced: null, skipped: `doc:${docs.unreadable}` };
+  }
+  for (const id of docs.refs) referenced.add(id);
+
   return { referenced, skipped: null };
 }
 
 /** 除 `skip` 之外的会话仍在引用的附件 id 集合（同步）。 */
-export function referencedAttachments(home, stored, skip) {
-  return driveSync(referencedAttachmentsSteps(home, stored, skip));
+export function referencedAttachments(home, stored, skip, state = null) {
+  return driveSync(referencedAttachmentsSteps(home, stored, skip, state));
 }
 
 /** 除 `skip` 之外的会话仍在引用的附件 id 集合（让出事件循环；host 用）。 */
@@ -509,7 +578,7 @@ export function manifestPathFor(entry, home = dshHome()) {
  * 生成计划（只读，不写任何东西）。
  *
  * @param options.ids - 明确要清的会话 id；缺省用已归档的那些。
- * @param options.attachments - 是否把无人引用的附件也算进计划。
+ * @param options.attachments - 是否把无人引用的附件也算进计划（会话日志与 handoff/清单文档都算引用）。
  */
 function* buildPlanSteps({ home = dshHome(), ids, attachments = false } = {}) {
   const state = readWorkspaceState(home);
@@ -523,7 +592,7 @@ function* buildPlanSteps({ home = dshHome(), ids, attachments = false } = {}) {
   // `yield*` 把内层 generator 的 yield 一并转给外层驱动器 —— 所以同步/异步两条路径
   // 共用同一份实现，异步驱动在解压每一帧、解析每一行时都能让出事件循环。
   const refs = attachments
-    ? yield* referencedAttachmentsSteps(home, stored, skip)
+    ? yield* referencedAttachmentsSteps(home, stored, skip, state)
     : { referenced: new Set(), skipped: null };
 
   for (const id of targets) {
