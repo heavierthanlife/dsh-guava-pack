@@ -186,7 +186,7 @@ function makeLedgerSession() {
 }
 
 /** 捕获 installCommand 注册的 definition。 */
-function captureCommand(runtime = { backend: 'acp' }) {
+function captureCommand(runtime = { backend: 'acp' }, handoff = undefined) {
   let definition;
   const cctx = {
     commands: {
@@ -202,7 +202,7 @@ function captureCommand(runtime = { backend: 'acp' }) {
       return { dispose() {} };
     },
   };
-  const dispose = installCommand({ ctx, runtime, logger: { warn() {} } });
+  const dispose = installCommand({ ctx, runtime, logger: { warn() {} }, handoff });
   return { definition, dispose };
 }
 
@@ -538,6 +538,19 @@ test('parseAcpCommand：空输入/status/blocks/nudge', () => {
   eq(parseAcpCommand(' nudge ').subcommand, 'nudge', '前后空白');
 });
 
+test('parseAcpCommand：handoff 与 --force', () => {
+  const plain = parseAcpCommand('handoff');
+  eq(plain.subcommand, 'handoff', 'handoff');
+  eq(plain.force, false, '默认不 force');
+  eq(parseAcpCommand('handoff --force').force, true, '--force');
+  eq(parseAcpCommand('handoff -f').force, true, '-f 别名');
+  eq(parseAcpCommand(' handoff   --force ').subcommand, 'handoff', '前后空白');
+
+  const bogusFlag = parseAcpCommand('handoff --now');
+  eq(bogusFlag.subcommand, 'help', '不认识的 flag 回 help');
+  assert(bogusFlag.error.includes('--force'), `error 应说明只接受 --force：${bogusFlag.error}`);
+});
+
 test('parseAcpCommand：未知子命令/多余参数 → error', () => {
   const unknown = parseAcpCommand('bogus');
   eq(unknown.subcommand, 'help', '未知子命令回 help');
@@ -636,11 +649,64 @@ test('installCommand：blocks 逐块一行', async () => {
   assert(result.text.includes('b2 | tier2 | 222 tokens | seqs 4..6 | c2'), `b2 行：${result.text}`);
 });
 
-test('installCommand：help 返回用法（含 status|blocks|nudge）', async () => {
+test('installCommand：help 返回用法（含 status|blocks|nudge|handoff）', async () => {
   const { definition } = captureCommand();
   const result = await definition.handler({ rawInput: 'help', agent: { session: makeLedgerSession() } });
   eq(result.kind, 'success', 'kind');
-  assert(result.text.includes('/acp status|blocks|nudge'), `用法文本：${result.text}`);
+  assert(result.text.includes('/acp status|blocks|nudge|handoff'), `用法文本：${result.text}`);
+  assert(result.text.includes('--force'), '应说明 --force');
+});
+
+test('installCommand：handoff 立即检查（未达阈值也如实报告还差几次）', async () => {
+  const calls = [];
+  const handoff = {
+    async maybeHandoff(session, options) {
+      calls.push({ id: session?.id, options });
+      return { written: false, reason: 'below-threshold', compactions: 1, required: 2, sessionId: session?.id, at: 1 };
+    },
+  };
+  const { definition } = captureCommand({ backend: 'acp' }, handoff);
+  const agent = { session: makeLedgerSession() };
+  const result = await definition.handler({ rawInput: 'handoff', agent });
+  eq(calls.length, 1, '应调用一次写入器');
+  eq(calls[0]?.options?.force, false, '不带 --force 时不强制');
+  eq(result.kind, 'success', '未达阈值不是错误');
+  assert(result.text.includes('未达阈值'), `应说明未达阈值：${result.text}`);
+  assert(result.text.includes('1 次') && result.text.includes('2 次'), `应报出 1/2：${result.text}`);
+  assert(result.text.includes('/acp handoff --force'), '应提示 --force');
+});
+
+test('installCommand：handoff --force 与写出后的文件路径', async () => {
+  const calls = [];
+  const handoff = {
+    async maybeHandoff(_session, options) {
+      calls.push(options);
+      return { written: true, reason: 'written', file: '/tmp/x/HANDOFF-context-acp-abc12345-c1-20261029-120000.md' };
+    },
+  };
+  const { definition } = captureCommand({ backend: 'acp' }, handoff);
+  const result = await definition.handler({ rawInput: 'handoff --force', agent: { session: makeLedgerSession() } });
+  eq(calls.length, 1, '应调用一次写入器');
+  eq(calls[0]?.force, true, '--force 传给写入器');
+  eq(result.kind, 'success', 'kind');
+  assert(result.text.includes('已写出交接文档'), `文案：${result.text}`);
+  assert(result.text.includes('HANDOFF-context-acp-abc12345-c1-'), '应给出文件路径');
+});
+
+test('installCommand：handoff 失败可见（禁用/写入失败 → kind=error）', async () => {
+  const disabled = { async maybeHandoff() { return { written: false, reason: 'disabled' }; } };
+  const off = await captureCommand({ backend: 'acp' }, disabled).definition.handler({ rawInput: 'handoff', agent: { session: makeLedgerSession() } });
+  eq(off.kind, 'error', '禁用是错误态');
+  assert(off.text.includes('已禁用'), `文案：${off.text}`);
+
+  const failing = { async maybeHandoff() { return { written: false, reason: 'write-failed', error: 'EACCES', file: '/tmp/x.md' }; } };
+  const failed = await captureCommand({ backend: 'acp' }, failing).definition.handler({ rawInput: 'handoff', agent: { session: makeLedgerSession() } });
+  eq(failed.kind, 'error', '写入失败是错误态');
+  assert(failed.text.includes('EACCES'), '错误原因要露出来');
+
+  const missing = await captureCommand({ backend: 'acp' }, undefined).definition.handler({ rawInput: 'handoff', agent: { session: makeLedgerSession() } });
+  eq(missing.kind, 'error', '没有写入器是错误态');
+  assert(missing.text.includes('未装配'), `文案：${missing.text}`);
 });
 
 test('installCommand：nudge 无记录 / 有最近记录', async () => {

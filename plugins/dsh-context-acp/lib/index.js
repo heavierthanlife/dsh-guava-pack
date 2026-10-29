@@ -40,7 +40,7 @@ import { installNudge } from './nudge.mjs';
 import { installPromptSection } from './prompt.mjs';
 import { installCommand } from './command.mjs';
 import { installPanel } from './settings.mjs';
-import { DEFAULT_HANDOFF, createHandoff } from './handoff.mjs';
+import { DEFAULT_HANDOFF, createHandoff, installHandoffHook } from './handoff.mjs';
 import { DEFAULT_FALLBACK } from './fallback.mjs';
 
 /** Cordis 插件名（诊断与 effect 标签用）。 */
@@ -197,64 +197,6 @@ function makeDeps(ctx, runtime, rowConfig) {
 }
 
 /**
- * 交接文档：每个 agent 的 turn/end 上检查一次。
- *
- * 为什么挂在 agent 作用域而不是根 `session/event`：根上下文看不到 agent 的
- * scope-filtered 会话事件（这是 context-guard 当初踩过的坑）；`agent/created`
- * 在根上下文可见，用它拿到 agent 后，在其 `agent.ctx` 上听 `session/event`。
- *
- * @param {object} deps
- * @returns {() => void} disposer
- */
-function installHandoff(deps) {
-  const { ctx } = deps;
-  const perAgent = new Map();
-
-  function attach(agent) {
-    if (perAgent.has(agent)) return;
-    const dispose = agent.ctx.effect(function* () {
-      yield agent.ctx.on('session/event', (session, event) => {
-        if (event?.type !== 'turn/end') return;
-        // 不在事件监听器里 await：漏出去的 rejection 在 Node 里会终止进程。
-        // maybeHandoff 自己**永不 reject**（失败写进返回值），这里再兜一层。
-        void deps.handoff?.maybeHandoff?.(session)?.catch?.(() => {});
-      });
-    }, 'context-acp/handoff');
-    perAgent.set(agent, dispose);
-  }
-
-  return ctx.effect(function* () {
-    yield () => {
-      for (const dispose of perAgent.values()) {
-        try {
-          dispose();
-        } catch {
-          /* 已随 agent fiber 销毁 */
-        }
-      }
-      perAgent.clear();
-    };
-    yield ctx.on('agent/created', ({ agent }) => attach(agent));
-    yield ctx.on('agent/disposed', ({ agent }) => {
-      const dispose = perAgent.get(agent);
-      if (dispose === undefined) return;
-      perAgent.delete(agent);
-      try {
-        dispose();
-      } catch {
-        /* 已随 agent fiber 销毁 */
-      }
-    });
-    // 插件挂载时已经活着的 agent（安装/重挂时正在跑的会话）。
-    try {
-      for (const agent of ctx.get('agents')?.list?.() ?? []) attach(agent);
-    } catch {
-      /* agents 服务不可用：新 agent 仍会被 agent/created 捕获 */
-    }
-  }, 'context-acp/handoff lifecycle');
-}
-
-/**
  * 测试/验收用挂载探针（**仅环境变量开启，生产零行为**）。
  *
  * P0 门禁要在隔离进程里证明两件事，而模型工具不可用时没有别的观察口：
@@ -366,7 +308,7 @@ export function apply(ctx, rowConfig = {}) {
     yield installNudge(deps);
     yield installPromptSection(deps);
     yield installCommand(deps);
-    yield installHandoff(deps);
+    yield installHandoffHook(deps);
     yield installPanel(deps);
   }, 'context-acp lifecycle');
 

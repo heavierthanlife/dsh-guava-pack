@@ -34,6 +34,23 @@ export const DEFAULT_HANDOFF = Object.freeze({
   maxRecentUserMessages: 8,
 });
 
+/**
+ * 触发交接检查的会话事件。
+ *
+ * - `turn/end`：一轮结束 —— 原来的唯一触发点；
+ * - `compaction/end`：一次压缩刚完成 —— **手动 compact 不在任何 turn 里**
+ *   （日志里 `turn: null` 且带 `sourceCommandId`），只等 `turn/end` 会拖到下一次
+ *   对话结束。用户手动压完两轮后关闭会话，就永远等不到交接文档。
+ *
+ * 两个都收：压缩完成即时成文，轮结束兜一遍（压缩事件在旧日志/失败路径下可能缺席）。
+ */
+export const HANDOFF_TRIGGER_EVENTS = Object.freeze(['turn/end', 'compaction/end']);
+
+/** 这个会话事件是否值得检查一次交接（纯函数，便于测试）。 */
+export function isHandoffTriggerEvent(event) {
+  return HANDOFF_TRIGGER_EVENTS.includes(event?.type);
+}
+
 /** 把任意 content 形状收敛成纯文本（字符串 / 数组 / {text} / {content}）。 */
 export function textOf(value) {
   if (typeof value === 'string') return value;
@@ -232,7 +249,7 @@ export function resolveHandoffDir(session) {
  * @param {object} deps.cfg `handoff` 配置
  * @param {(ratio: number) => number} [deps.thresholdRatio] 只用于文档里的阈值文案
  * @param {{warn?: Function, info?: Function}} [deps.logger]
- * @returns {{maybeHandoff: (session: object) => Promise<object>, last: () => object|null, reset: () => void}}
+ * @returns {{maybeHandoff: (session: object, options?: {force?: boolean}) => Promise<object>, last: () => object|null, reset: () => void}}
  */
 export function createHandoff({ cfg = DEFAULT_HANDOFF, thresholdRatio = () => 0.75, logger } = {}) {
   /** sessionId → 已写出的绝对路径（本进程判重）。 */
@@ -253,12 +270,17 @@ export function createHandoff({ cfg = DEFAULT_HANDOFF, thresholdRatio = () => 0.
     }
   }
 
-  async function write(session) {
+  async function write(session, { force = false } = {}) {
     if (cfg.enabled === false) return { written: false, reason: 'disabled' };
     const events = [...session.snapshotEvents()];
     const stats = collectStats(events);
-    if (stats.compactions < cfg.afterCompactions) {
-      return { written: false, reason: 'below-threshold', compactions: stats.compactions };
+    if (!force && stats.compactions < cfg.afterCompactions) {
+      return {
+        written: false,
+        reason: 'below-threshold',
+        compactions: stats.compactions,
+        required: cfg.afterCompactions,
+      };
     }
     const cached = written.get(session.id);
     if (cached !== undefined) return { written: true, file: cached, reason: 'cached' };
@@ -292,9 +314,9 @@ export function createHandoff({ cfg = DEFAULT_HANDOFF, thresholdRatio = () => 0.
 
   return {
     /** 达阈值就写一次；每个会话最多一份。**永不 reject**（失败写进返回值）。 */
-    async maybeHandoff(session) {
+    async maybeHandoff(session, options = {}) {
       try {
-        last = { ...(await write(session)), sessionId: session?.id ?? '', at: Date.now() };
+        last = { ...(await write(session, options)), sessionId: session?.id ?? '', at: Date.now() };
         return last;
       } catch (error) {
         const reason = String(error?.message ?? error);
@@ -311,4 +333,65 @@ export function createHandoff({ cfg = DEFAULT_HANDOFF, thresholdRatio = () => 0.
       last = null;
     },
   };
+}
+
+/**
+ * 交接文档的接线：每个 agent 的 `turn/end` / `compaction/end` 上检查一次。
+ *
+ * 为什么挂在 agent 作用域而不是根 `session/event`：根上下文看不到 agent 的
+ * scope-filtered 会话事件（这是 context-guard 当初踩过的坑）；`agent/created`
+ * 在根上下文可见，用它拿到 agent 后，在其 `agent.ctx` 上听 `session/event`。
+ *
+ * 为什么不能只在 `turn/end`：手动 compact 是一次独立命令（`turn: null`），
+ * 压缩完成时没有轮结束；等下一轮结束才写，用户压完就关会话的话永远不会成文。
+ *
+ * @param {object} deps 见 lib/index.js `makeDeps`（需要 `ctx` 与 `handoff`）
+ * @returns {() => void} disposer
+ */
+export function installHandoffHook(deps) {
+  const { ctx } = deps;
+  const perAgent = new Map();
+
+  function attach(agent) {
+    if (agent === null || typeof agent !== 'object' || perAgent.has(agent)) return;
+    const dispose = agent.ctx.effect(function* () {
+      yield agent.ctx.on('session/event', (session, event) => {
+        if (!isHandoffTriggerEvent(event)) return;
+        // 不在事件监听器里 await：漏出去的 rejection 在 Node 里会终止进程。
+        // maybeHandoff 自己**永不 reject**（失败写进返回值），这里再兜一层。
+        void deps.handoff?.maybeHandoff?.(session)?.catch?.(() => {});
+      });
+    }, 'context-acp/handoff');
+    perAgent.set(agent, dispose);
+  }
+
+  return ctx.effect(function* () {
+    yield () => {
+      for (const dispose of perAgent.values()) {
+        try {
+          dispose();
+        } catch {
+          /* 已随 agent fiber 销毁 */
+        }
+      }
+      perAgent.clear();
+    };
+    yield ctx.on('agent/created', ({ agent }) => attach(agent));
+    yield ctx.on('agent/disposed', ({ agent }) => {
+      const dispose = perAgent.get(agent);
+      if (dispose === undefined) return;
+      perAgent.delete(agent);
+      try {
+        dispose();
+      } catch {
+        /* 已随 agent fiber 销毁 */
+      }
+    });
+    // 插件挂载时已经活着的 agent（安装/重挂时正在跑的会话）。
+    try {
+      for (const agent of ctx.get('agents')?.list?.() ?? []) attach(agent);
+    } catch {
+      /* agents 服务不可用：新 agent 仍会被 agent/created 捕获 */
+    }
+  }, 'context-acp/handoff lifecycle');
 }

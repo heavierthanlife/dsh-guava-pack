@@ -34,7 +34,7 @@ ctx.compaction（preset realm，4 个 preset 各一份）
     ├── tools：compress / decompress / search_context / acp_status
     ├── agent/pre-step：nudge（只提醒，不自动压；提醒本身是一条 logged user 消息，见下）
     ├── systemPrompt section：压缩规则与哲学
-    ├── /acp 命令（status / blocks / nudge）
+    ├── /acp 命令（status / blocks / nudge / handoff）
     └── 面板：session projection `contextAcp` + /context-acp 路由 + composer pill
 ```
 
@@ -66,7 +66,7 @@ ctx.compaction（preset realm，4 个 preset 各一份）
 | `lib/settings.mjs` | 面板数据：projection `contextAcp` + `/context-acp` 路由 + 设置落盘 |
 | `lib/state.mjs` | 每 agent 瞬时状态（WeakMap；只放「日志里没有也不该进日志」的东西） |
 | `lib/fallback.mjs` | **兜底自动压缩**的纯逻辑：数「未被响应的 nudge」+ 决策（≥75% 且连续 2 次） |
-| `lib/handoff.mjs` | **交接文档**（从 context-guard 迁移）：从日志重建统计 → 写 `HANDOFF-context-acp-*.md` |
+| `lib/handoff.mjs` | **交接文档**（从 context-guard 迁移）：从日志重建统计 → 写 `HANDOFF-context-acp-*.md`；含接线 `installHandoffHook`（`turn/end` + `compaction/end`） |
 | `client.js` | 面板 pill（composer dock，沿用 context-guard 样式） |
 | `config/acp.json` | **唯一人工配置源**（backend / nudge / retain / engine） |
 | `config/preset-override.generated.yml` | 生成物：4 个 preset 的 `config.plugins` 覆盖 |
@@ -135,9 +135,15 @@ nudge（提醒模型）──模型响应──> 模型自己 compress（模型�
 `gen-acp-preset --write`，否则面板显示 75% 而引擎按旧值动手）。
 
 **交接文档**：从 `dsh-context-guard` 迁移的 `HANDOFF-context-acp-<sid8>-c<N>-<时间>.md`，
-在每轮 `turn/end` 检查一次；统计（轮/步/压缩次数/释放 token/路由）全部从
-`session.snapshotEvents()` **现场重建**，所以同一份日志永远生成同一份文档。
+在 **`turn/end` 与 `compaction/end`** 两个事件上检查；统计（轮/步/压缩次数/释放 token/路由）
+全部从 `session.snapshotEvents()` **现场重建**，所以同一份日志永远生成同一份文档。
 面板显示「写没写、写在哪、为什么没写」。
+
+为什么要加 `compaction/end`：手动 compact 是一次**独立命令**（日志里 `turn: null` +
+`sourceCommandId`），压缩完成时没有任何轮结束。只在 `turn/end` 检查的话，用户手动压满
+两轮后直接关会话，就永远等不到交接文档（2026-10-29 实测就是这样：账本已有 b1/b2 两个块，
+目录里一份 handoff 都没有）。另外 `/acp handoff [--force]` 可以当场触发检查、
+`--force` 无视阈值立即写一份（换会话 / 收尾时用）。
 
 **移除 context-guard**：profile `dsh.profile.bundles` 已删掉 `dsh-context-guard`
 （依赖仍保留，回滚时加回一行 + 重启即可）。旧文件 `HANDOFF-context-guard-*.md`

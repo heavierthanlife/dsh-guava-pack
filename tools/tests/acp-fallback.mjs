@@ -100,6 +100,7 @@ console.log('\n接线检查');
 const engineSrc = readFileSync(join(PACK, 'plugins', 'dsh-context-acp', 'lib', 'engine.mjs'), 'utf8');
 const nudgeSrc = readFileSync(join(PACK, 'plugins', 'dsh-context-acp', 'lib', 'nudge.mjs'), 'utf8');
 const indexSrc = readFileSync(join(PACK, 'plugins', 'dsh-context-acp', 'lib', 'index.js'), 'utf8');
+const handoffSrc = readFileSync(join(PACK, 'plugins', 'dsh-context-acp', 'lib', 'handoff.mjs'), 'utf8');
 const runtime = JSON.parse(readFileSync(join(PACK, 'plugins', 'dsh-context-acp', 'config', 'runtime.json'), 'utf8'));
 const preset = readFileSync(join(PACK, 'plugins', 'dsh-context-acp', 'config', 'preset-override.generated.yml'), 'utf8');
 
@@ -117,9 +118,11 @@ check('runtime 默认值包含 fallback 与 handoff',
 check('生成物把兜底阈值写进引擎行（75%，与面板同源）',
   /thresholdRatio: 0\.75/.test(preset));
 check('根插件创建并安装交接文档写入器',
-  /deps\.handoff = createHandoff\(/.test(indexSrc) && /yield installHandoff\(deps\)/.test(indexSrc));
-check('交接文档挂在 agent 作用域的 turn/end 上（根看不到 scoped 事件）',
-  /agent\.ctx\.on\('session\/event'/.test(indexSrc) && /event\?\.type !== 'turn\/end'/.test(indexSrc));
+  /deps\.handoff = createHandoff\(/.test(indexSrc) && /yield installHandoffHook\(deps\)/.test(indexSrc));
+check('交接文档挂在 agent 作用域，且 turn/end 与 compaction/end 都检查（手动 compact 不在 turn 里）',
+  /agent\.ctx\.on\('session\/event'/.test(handoffSrc) &&
+  /isHandoffTriggerEvent\(event\)/.test(handoffSrc) &&
+  /'turn\/end', 'compaction\/end'/.test(handoffSrc));
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);

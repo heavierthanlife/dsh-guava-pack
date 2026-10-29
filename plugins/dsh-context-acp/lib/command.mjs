@@ -7,6 +7,7 @@
  *   /acp status     账本摘要（块数、最老/最新块、被压 tokens、最高 tier、nudge、引擎）
  *   /acp blocks     全部块列表（一行一块）
  *   /acp nudge      按最近一次压力重新渲染 nudge 文本（调试用）
+ *   /acp handoff    立即检查并按阈值写交接文档；`--force` 无视阈值
  *   /acp help       用法
  *
  * ## 为什么是子命令而不是多个顶层命令
@@ -28,22 +29,29 @@ import { snapshot } from './state.mjs';
 
 /** 用法文本（`/acp help`；也是解析层 help 的兜底输出）。 */
 const USAGE = [
-  '/acp 用法：/acp status|blocks|nudge（省略子命令等价于 status）',
+  '/acp 用法：/acp status|blocks|nudge|handoff（省略子命令等价于 status）',
   '- /acp 或 /acp status：账本摘要（块数、tier、被压 tokens、最近 nudge、引擎）',
   '- /acp blocks：逐块列表（编号、tier、tokens、seq 区间、compactionId）',
   '- /acp nudge：按最近一次 nudge 的压力数字渲染提醒文本',
+  '- /acp handoff：立即检查并按阈值写交接文档（压满 handoff.afterCompactions 次才写）',
+  '- /acp handoff --force：无视阈值立即写一份（换会话/收尾时用）',
 ].join('\n');
 
 /**
  * 解析 `/acp` 的原始输入。
  *
  * @param {string} rawInput 命令后原始文本
- * @returns {{ subcommand: 'status'|'blocks'|'nudge'|'help', error?: string }}
+ * @returns {{ subcommand: 'status'|'blocks'|'nudge'|'handoff'|'help', force?: boolean, error?: string }}
  */
 export function parseAcpCommand(rawInput) {
   const text = typeof rawInput === 'string' ? rawInput.trim() : '';
   if (text === '') return { subcommand: 'status' };
   const [head, ...rest] = text.split(/\s+/);
+  if (head === 'handoff') {
+    const unknown = rest.filter((token) => token !== '--force' && token !== '-f');
+    if (unknown.length > 0) return { subcommand: 'help', error: `handoff 只接受 --force：${unknown.join(' ')}` };
+    return { subcommand: 'handoff', force: rest.length > 0 };
+  }
   if (rest.length > 0) return { subcommand: 'help', error: `多余的参数：${rest.join(' ')}` };
   if (head === 'status' || head === 'blocks' || head === 'nudge') return { subcommand: head };
   return { subcommand: 'help', error: `未知子命令：${head}` };
@@ -149,6 +157,40 @@ function renderNudgeCommand(agent) {
   });
 }
 
+/** `handoff` 子命令的文本（把写入器的返回值翻成人话）。 */
+function renderHandoffCommand(result) {
+  const written = result?.written === true;
+  const reason = typeof result?.reason === 'string' ? result.reason : 'unknown';
+  const headline = (() => {
+    switch (reason) {
+      case 'written':
+        return '已写出交接文档';
+      case 'existing':
+        return '本会话已有交接文档（复用磁盘上的那份）';
+      case 'cached':
+        return '本会话已写过交接文档（本进程缓存）';
+      case 'below-threshold':
+        return `未达阈值：已压 ${positiveOrZero(result?.compactions)} 次 / 需要 ${positiveOrZero(result?.required)} 次`;
+      case 'disabled':
+        return '交接文档已禁用（handoff.enabled=false）';
+      case 'no-cwd':
+        return '会话没有工作目录，也没拿到 DSH_HOME，无法决定写到哪里';
+      case 'write-failed':
+        return `写入失败：${String(result?.error ?? '未知错误')}`;
+      case 'error':
+        return `失败：${String(result?.error ?? '未知错误')}`;
+      default:
+        return `未写出（${reason}）`;
+    }
+  })();
+
+  const lines = ['交接文档', `- 结果：${headline}`];
+  if (typeof result?.file === 'string' && result.file !== '') lines.push(`- 文件：${result.file}`);
+  if (written) lines.push('', '新会话里先读这份文件，再读文档里列出的路径。');
+  else if (reason === 'below-threshold') lines.push('', '想现在就要一份：/acp handoff --force');
+  return lines.join('\n');
+}
+
 /**
  * 安装 `/acp` 命令。
  *
@@ -163,7 +205,7 @@ export function installCommand(deps) {
     try {
       dispose = cctx.commands.register({
         name: 'acp',
-        description: '上下文压缩控制台（status / blocks / nudge）',
+        description: '上下文压缩控制台（status / blocks / nudge / handoff）',
         handler: async (invocation) => {
           try {
             const rawInput = invocation?.rawInput;
@@ -180,6 +222,14 @@ export function installCommand(deps) {
               return { kind: 'error', text: '/acp 失败：当前会话不可用（没有 agent/session）' };
             }
 
+            if (parsed.subcommand === 'handoff') {
+              const result = await deps.handoff?.maybeHandoff?.(agent.session, { force: parsed.force === true });
+              if (result === undefined || result === null) {
+                return { kind: 'error', text: '/acp handoff 失败：交接文档写入器未装配' };
+              }
+              const ok = result.written === true || result.reason === 'below-threshold';
+              return { kind: ok ? 'success' : 'error', text: renderHandoffCommand(result) };
+            }
             if (parsed.subcommand === 'blocks') return { kind: 'success', text: renderBlocks(agent) };
             if (parsed.subcommand === 'nudge') return { kind: 'success', text: renderNudgeCommand(agent) };
             if (parsed.subcommand === 'help') return { kind: 'success', text: USAGE };

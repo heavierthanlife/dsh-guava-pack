@@ -12,9 +12,12 @@
  *   1. **统计从日志重建**：轮/步/压缩次数/释放 token/路由，全部 `snapshotEvents()` 现数
  *      —— 保证同一份日志永远生成同一份文档（投影是进程内状态，重启后不可复现）；
  *   2. **该写才写**：未达次数不写、禁用不写、同一会话只写一份（含重启后认回旧文件）；
- *   3. **失败不静默**：写入失败返回 `{written:false, reason:'write-failed', error}`。
+ *   3. **失败不静默**：写入失败返回 `{written:false, reason:'write-failed', error}`；
+ *   4. **接线真的会触发**：`turn/end` 与 `compaction/end` 都检查（手动 compact 不在
+ *      turn 里，只等 turn/end 会拖到下一轮），其它事件不触发，一个 agent 只挂一份监听；
+ *   5. **`--force` 无视阈值**：换会话/收尾时能立刻要一份（`/acp handoff --force`）。
  *
- * 全部离线：用假 session（snapshotEvents + header.cwd）+ 临时目录。
+ * 全部离线：用假 session（snapshotEvents + header.cwd）+ 临时目录 + 迷你 cordis ctx。
  */
 
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
@@ -24,10 +27,13 @@ import { fileURLToPath } from 'node:url';
 
 import {
   DEFAULT_HANDOFF,
+  HANDOFF_TRIGGER_EVENTS,
   buildHandoff,
   collectStats,
   createHandoff,
   handoffSessionKey,
+  installHandoffHook,
+  isHandoffTriggerEvent,
   stamp,
 } from '../../plugins/dsh-context-acp/lib/handoff.mjs';
 
@@ -149,15 +155,146 @@ try {
   rmSync(dir, { recursive: true, force: true });
 }
 
-// ── 5. 接线检查 ────────────────────────────────────────────────────────
-console.log('\n接线检查');
+// ── 5. 触发事件 ────────────────────────────────────────────────────────
+console.log('\n触发事件（isHandoffTriggerEvent）');
+check('turn/end 触发', isHandoffTriggerEvent({ type: 'turn/end' }) === true);
+check('compaction/end 触发（手动 compact 完成后立刻写）', isHandoffTriggerEvent({ type: 'compaction/end' }) === true);
+check('step/end 不触发（不做步级写盘）', isHandoffTriggerEvent({ type: 'step/end' }) === false);
+check('compaction/start 不触发（压缩还没完成）', isHandoffTriggerEvent({ type: 'compaction/start' }) === false);
+check('空/非对象不触发', isHandoffTriggerEvent(null) === false && isHandoffTriggerEvent({}) === false);
+check('触发集合就是那两类', HANDOFF_TRIGGER_EVENTS.length === 2 && HANDOFF_TRIGGER_EVENTS.join(',') === 'turn/end,compaction/end');
+
+// ── 6. 接线：真监听器会不会被点燃 ──────────────────────────────────────
+/**
+ * 迷你 cordis ctx：只实现本插件用到的三个口。
+ *   ctx.effect(fn)  —— 跑生成器，收集 yield 出来的 disposer，返回组合 disposer
+ *   ctx.on(name,fn) —— 注册/注销监听，返回 disposer
+ *   ctx.get('agents') —— 挂载时已在跑的 agent
+ */
+function miniCtx({ agents = [] } = {}) {
+  const listeners = new Map();
+  const disposers = [];
+  const api = {
+    effect(fn) {
+      const local = [];
+      const collect = (value) => {
+        if (typeof value === 'function') local.push(value);
+        else if (value !== null && typeof value === 'object' && typeof value[Symbol.iterator] === 'function') {
+          for (const item of value) collect(item);
+        }
+      };
+      collect(fn());
+      const dispose = () => {
+        for (const off of local.reverse()) {
+          try {
+            off();
+          } catch {
+            /* 已销毁 */
+          }
+        }
+      };
+      disposers.push(dispose);
+      return dispose;
+    },
+    on(name, fn) {
+      if (!listeners.has(name)) listeners.set(name, new Set());
+      listeners.get(name).add(fn);
+      return () => listeners.get(name)?.delete(fn);
+    },
+    emit(name, ...args) {
+      for (const fn of [...(listeners.get(name) ?? [])]) fn(...args);
+    },
+    get() {
+      return {
+        list: () => agents,
+        get: (id) => agents.find((agent) => agent.id === id),
+      };
+    },
+  };
+  return api;
+}
+
+console.log('\n接线（installHandoffHook）');
+{
+  const calls = [];
+  const handoff = { maybeHandoff: async (session) => { calls.push(session.id); return { written: true }; } };
+  // 挂载时已经活着的 agent 也要挂上（重挂/续跑的场景）。
+  const agent = { id: 'session-live-0001', session: { id: 'session-live-0001' }, ctx: miniCtx() };
+  const rootCtx = miniCtx({ agents: [agent] });
+  const disposeHook = installHandoffHook({ ctx: rootCtx, handoff });
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  agent.ctx.emit('session/event', agent.session, { type: 'turn/end' });
+  await tick();
+  check('挂载时已存在的 agent 在 turn/end 上触发', calls.length === 1 && calls[0] === 'session-live-0001', calls);
+
+  agent.ctx.emit('session/event', agent.session, { type: 'step/end' });
+  await tick();
+  check('step/end 不触发', calls.length === 1, calls);
+
+  agent.ctx.emit('session/event', agent.session, { type: 'compaction/end' });
+  await tick();
+  check('compaction/end 触发（手动 compact 后立即成文）', calls.length === 2, calls);
+
+  // 后创建的 agent 通过 agent/created 挂上。
+  const later = { id: 'session-later-0002', session: { id: 'session-later-0002' }, ctx: miniCtx() };
+  rootCtx.emit('agent/created', { agent: later });
+  later.ctx.emit('session/event', later.session, { type: 'turn/end' });
+  await tick();
+  check('agent/created 之后的新 agent 也触发', calls.length === 3 && calls[2] === 'session-later-0002', calls);
+
+  // 重复 announce 不应重复挂监听（否则一次事件写两次）。
+  rootCtx.emit('agent/created', { agent: later });
+  later.ctx.emit('session/event', later.session, { type: 'turn/end' });
+  await tick();
+  check('同一 agent 重复 attach → 只挂一份监听', calls.length === 4, calls);
+
+  rootCtx.emit('agent/disposed', { agent: later });
+  later.ctx.emit('session/event', later.session, { type: 'turn/end' });
+  await tick();
+  check('agent/disposed 后不再触发', calls.length === 4, calls);
+
+  disposeHook();
+  agent.ctx.emit('session/event', agent.session, { type: 'turn/end' });
+  await tick();
+  check('插件卸载后不再触发', calls.length === 4, calls);
+}
+
+console.log('\n接线（--force 与真实场景）');
+{
+  const dir = mkdtempSync(join(tmpdir(), 'acp-handoff-force-'));
+  try {
+    const session = {
+      id: 'session-55555555-9999',
+      header: { cwd: dir },
+      snapshotEvents: () => makeEvents({ compactions: 1 }),
+    };
+    const writer = createHandoff({ cfg: { ...DEFAULT_HANDOFF, afterCompactions: 2 } });
+    const refused = await writer.maybeHandoff(session);
+    check('不等 force：1 次 < 2 次 → 不写，并报出需要的次数',
+      refused.written === false && refused.reason === 'below-threshold' && refused.required === 2, refused);
+    const forced = await writer.maybeHandoff(session, { force: true });
+    check('--force：无视阈值写出', forced.written === true && forced.reason === 'written', forced);
+    check('force 写出的文件带真实压缩次数（c1）', readdirSync(dir).some((f) => f.startsWith('HANDOFF-context-acp-55555555-c1-')), readdirSync(dir));
+    const forcedAgain = await writer.maybeHandoff(session, { force: true });
+    check('--force 重复调用不再写第二份', forcedAgain.written === true && forcedAgain.reason === 'cached' && readdirSync(dir).length === 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── 7. 静态接线检查 ────────────────────────────────────────────────────
+console.log('\n接线检查（源码）');
 const indexSrc = readFileSync(join(PACK, 'plugins', 'dsh-context-acp', 'lib', 'index.js'), 'utf8');
+const handoffSrc = readFileSync(join(PACK, 'plugins', 'dsh-context-acp', 'lib', 'handoff.mjs'), 'utf8');
 const clientSrc = readFileSync(join(PACK, 'plugins', 'dsh-context-acp', 'client.js'), 'utf8');
 const runtime = JSON.parse(readFileSync(join(PACK, 'plugins', 'dsh-context-acp', 'config', 'runtime.json'), 'utf8'));
 check('根插件在装配时创建 handoff 写入器', /deps\.handoff = createHandoff\(/.test(indexSrc));
-check('handoff 挂在 agent 作用域（根看不到 scoped session/event）',
-  /agent\.ctx\.on\('session\/event'/.test(indexSrc));
-check('只在 turn/end 上检查（不做步级写盘）', /event\?\.type !== 'turn\/end'/.test(indexSrc));
+check('根插件装配的是 handoff.mjs 里的 hook', /yield installHandoffHook\(deps\)/.test(indexSrc));
+check('hook 挂在 agent 作用域（根看不到 scoped session/event）',
+  /agent\.ctx\.on\('session\/event'/.test(handoffSrc));
+check('hook 用共享的触发判定，不硬编码单个事件类型',
+  /isHandoffTriggerEvent\(event\)/.test(handoffSrc) && !/event\?\.type !== 'turn\/end'/.test(handoffSrc));
 check('runtime.json 的 handoff 配置存在且默认 2 次',
   runtime?.handoff?.enabled === true && runtime?.handoff?.afterCompactions === 2);
 check('面板显示交接文档状态', /panel\.handoff/.test(clientSrc) && /handoffNotWritten/.test(clientSrc));
