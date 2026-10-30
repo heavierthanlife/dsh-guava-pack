@@ -39,6 +39,7 @@ import {
   closeSync,
   existsSync,
   fsyncSync,
+  lstatSync,
   mkdirSync,
   openSync,
   readFileSync,
@@ -528,8 +529,349 @@ export function planDigest(plan, { attachments = false, mode = 'trash' } = {}) {
     ids,
     attachments: attachments === true,
     mode: mode === 'hard' ? 'hard' : 'trash',
+    // 回滚区清理也必须绑进指纹：用户看到的是"这批会话 + 这些过期回滚点"，
+    // 执行时不能变成另一批。只绑名字与策略，不绑体积（体积会随写入变化）。
+    ...(plan?.trash === undefined || plan.trash === null
+      ? {}
+      : {
+          trash: {
+            evict: plan.trash.evicted.map((e) => e.name).sort(),
+            all: plan.trash.all === true,
+            policy: plan.trash.policy,
+          },
+        }),
   });
   return createHash('sha256').update(payload).digest('hex');
+}
+
+// ── 回滚区（.purge-trash）保留策略与清理 ────────────────────────────────
+//
+// 背景：`trash` 模式把会话目录/投影缓存/附件 rename 到
+// `$DSH_HOME/.purge-trash/<时间戳>/`，**以前没有任何清理逻辑**，只会无限期增长。
+// 这里补上保留策略：默认 7 天 / 2 GiB / 最多 10 个回滚点，任一超限就删最旧的，
+// 且**永远保留最新 1 个**（一次误配置不至于把最后的回滚点也清掉）。
+//
+// 安全边界（每一条都是硬规则）：
+//   · 只认 14 位 UTC 时间戳目录名（可带 -2/-3 去重后缀），其它名字一律不动；
+//   · `.purge-trash/*.md` 是清单/跨会话交接载体（附件引用扫描要读），永不清理；
+//   · 符号链接不跟随、不删除；只删真实目录；
+//   · `--all` 是显式"清空全部"（仍只匹配我们自己的命名）。
+
+/** 回滚区默认保留策略（0 = 关闭该维度）。 */
+export const TRASH_DEFAULTS = Object.freeze({
+  maxAgeDays: 7,
+  maxBytes: 2 * 1024 ** 3,
+  maxEntries: 10,
+});
+
+/** 面板/CLI 可接受的上限，夹取而不是报错（设置面板语义）。 */
+export const TRASH_LIMITS = Object.freeze({
+  maxAgeDays: [0, 365],
+  maxBytes: [0, 100 * 1024 ** 3],
+  maxEntries: [0, 100],
+});
+
+/** 回滚点目录名：14 位 UTC 时间戳，可选 `-2`/`-3` 去重后缀。 */
+const TRASH_DIR_RE = /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(?:-\d+)?$/;
+
+/** 回滚区根目录。 */
+export function trashDir(home = dshHome()) {
+  return join(home, '.purge-trash');
+}
+
+/** 解析回滚点目录名 → UTC 毫秒；不是我们创建的目录返回 undefined。 */
+export function parseTrashName(name) {
+  const match = TRASH_DIR_RE.exec(String(name ?? ''));
+  if (match === null) return undefined;
+  const [, y, mo, d, h, mi, sec] = match.map(Number);
+  const at = Date.UTC(y, mo - 1, d, h, mi, sec);
+  const dt = new Date(at);
+  // 日期必须能原样往返（拒绝 20261332… 这类看起来像时间戳的名字）。
+  if (
+    dt.getUTCFullYear() !== y ||
+    dt.getUTCMonth() !== mo - 1 ||
+    dt.getUTCDate() !== d ||
+    dt.getUTCHours() !== h ||
+    dt.getUTCMinutes() !== mi ||
+    dt.getUTCSeconds() !== sec
+  ) {
+    return undefined;
+  }
+  return at;
+}
+
+/** 把任意来源（patch config / 设置文件 / CLI）的策略夹成合法值。 */
+export function normalizeTrashPolicy(raw = {}) {
+  const pick = (key) => {
+    const [min, max] = TRASH_LIMITS[key];
+    const n = Number(raw?.[key]);
+    if (!Number.isFinite(n) || n < 0) return TRASH_DEFAULTS[key];
+    return Math.min(max, Math.max(min, Math.floor(n)));
+  };
+  return {
+    maxAgeDays: pick('maxAgeDays'),
+    maxBytes: pick('maxBytes'),
+    maxEntries: pick('maxEntries'),
+  };
+}
+
+/** 设置文件路径（与面板落盘约定一致）。 */
+export function trashSettingsPath(home = dshHome()) {
+  return join(home, 'session-purge.json');
+}
+
+/** 读面板保存的回滚区策略；没有/坏文件返回 null（调用方用默认）。 */
+export function readTrashSettings(home = dshHome()) {
+  try {
+    const raw = JSON.parse(readFileSync(trashSettingsPath(home), 'utf8'));
+    return raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 保存回滚区策略（保留文件里的其它字段；原子写）。 */
+export function saveTrashSettings(home, trashPolicy) {
+  const current = readTrashSettings(home) ?? {};
+  const next = { ...current, trash: normalizeTrashPolicy(trashPolicy) };
+  writeFileAtomicSync(trashSettingsPath(home), `${JSON.stringify(next, null, 2)}\n`);
+  return next.trash;
+}
+
+/**
+ * 合并各方来源后的生效策略：默认值 ← patch 配置 ← 设置文件 ← CLI/面板覆盖。
+ *
+ * @param {{home?: string, config?: object, flags?: object, overrides?: object}} [options]
+ */
+export function resolveTrashPolicy({ home = dshHome(), config, flags, overrides } = {}) {
+  const saved = readTrashSettings(home)?.trash;
+  return normalizeTrashPolicy({ ...TRASH_DEFAULTS, ...(config ?? {}), ...(saved ?? {}), ...(flags ?? {}), ...(overrides ?? {}) });
+}
+
+/** 目录树字节数（generator：每处理完一层 yield 一次，供异步驱动让出事件循环）。 */
+function* dirBytesSteps(dir) {
+  let total = 0;
+  const stack = [dir];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    let entries;
+    try {
+      entries = readdirSync(current, { withFileTypes: true });
+    } catch {
+      yield;
+      continue;
+    }
+    for (const entry of entries) {
+      const child = join(current, entry.name);
+      try {
+        if (entry.isDirectory()) stack.push(child);
+        else if (entry.isFile()) total += statSync(child).size;
+      } catch {
+        /* 删不掉的杂项不影响统计 */
+      }
+    }
+    yield;
+  }
+  return total;
+}
+
+/**
+ * 枚举回滚点（不回滚/不修改）。返回 `{root, entries, invalid}`。
+ *
+ * entries 按时间**新→旧**排序：`{name, path, at, bytes}`。
+ * invalid 里是"不是我们创建的东西"（未知命名、文件、符号链接）—— 永不清理。
+ */
+function* collectTrashEntriesSteps(home = dshHome()) {
+  const root = trashDir(home);
+  let names;
+  try {
+    names = readdirSync(root);
+  } catch {
+    return { root, entries: [], invalid: [] };
+  }
+  const entries = [];
+  const invalid = [];
+  for (const name of names) {
+    // 清单/交接文档：附件引用扫描要读，绝不清理，也不算回滚点。
+    if (name.endsWith('.md')) continue;
+    const at = parseTrashName(name);
+    const path = join(root, name);
+    let st;
+    try {
+      st = lstatSync(path);
+    } catch {
+      continue;
+    }
+    if (st.isSymbolicLink() || !st.isDirectory() || at === undefined) {
+      invalid.push(name);
+      continue;
+    }
+    const bytes = yield* dirBytesSteps(path);
+    entries.push({ name, path, at, bytes });
+  }
+  entries.sort((a, b) => b.at - a.at || b.name.localeCompare(a.name));
+  return { root, entries, invalid };
+}
+
+/** 枚举回滚点（同步；CLI 用）。 */
+export function collectTrashEntries(home = dshHome()) {
+  return driveSync(collectTrashEntriesSteps(home));
+}
+
+/** 枚举回滚点（异步让出；host 路由用）。 */
+export async function collectTrashEntriesAsync(home = dshHome()) {
+  return await driveAsync(collectTrashEntriesSteps(home));
+}
+
+/**
+ * 纯函数：按策略选出要删的回滚点。
+ *
+ * 规则：从**最旧**开始逐条判断，满足任一"超限"就删；`maxAgeDays/maxBytes/maxEntries`
+ * 为 0 表示该维度关闭。**最新 1 个永远保留**（`all:true` 除外）。
+ *
+ * @param {{name:string, at:number, bytes:number}[]} entries 新→旧
+ * @param {object} policy
+ * @param {{now?: number, all?: boolean}} [options]
+ * @returns {{evicted: object[], kept: object[], reasons: Record<string,string[]>}}
+ */
+export function selectTrashEvictions(entries, policy, { now = Date.now(), all = false } = {}) {
+  const sorted = [...(entries ?? [])].sort((a, b) => b.at - a.at || b.name.localeCompare(a.name));
+  const reasons = {};
+  if (all === true) {
+    const evicted = sorted.map((entry) => ({ ...entry, reasons: ['all'] }));
+    return { evicted, kept: [], reasons: Object.fromEntries(evicted.map((e) => [e.name, ['all']])) };
+  }
+  if (sorted.length === 0) return { evicted: [], kept: [], reasons };
+
+  const p = normalizeTrashPolicy(policy);
+  const day = 24 * 60 * 60 * 1000;
+  const newest = sorted[0];
+  const ageExpired = (entry) => p.maxAgeDays > 0 && now - entry.at > p.maxAgeDays * day;
+
+  // 「最新一个」的保护只在它**本身没过期**时生效：
+  // 单条一年前的回滚点如果因为"永远留最新"而永不清理，就违背了保留策略的意义。
+  // 过期的最新项照删；未过期的最新项不会被数量/体积规则删掉（保证至少留着最近一次回滚）。
+  const protectNewest = !ageExpired(newest);
+
+  const keptSet = new Set(sorted);
+  let totalBytes = sorted.reduce((sum, entry) => sum + entry.bytes, 0);
+  const evicted = [];
+  // 从最旧开始删，保证"删最旧、留最新"。
+  for (const entry of [...sorted].reverse()) {
+    if (entry === newest && protectNewest) continue;
+    const hits = [];
+    if (ageExpired(entry)) hits.push('age');
+    if (p.maxEntries > 0 && keptSet.size > p.maxEntries) hits.push('entries');
+    if (p.maxBytes > 0 && totalBytes > p.maxBytes) hits.push('bytes');
+    if (hits.length === 0) continue;
+    keptSet.delete(entry);
+    totalBytes -= entry.bytes;
+    evicted.push({ ...entry, reasons: hits });
+    reasons[entry.name] = hits;
+  }
+  const kept = sorted.filter((entry) => keptSet.has(entry));
+  return { evicted, kept, reasons };
+}
+
+/** 组装回滚区计划（含策略、候选、将删、保留、忽略项）。 */
+function* buildTrashPlanSteps({ home = dshHome(), policy, now = Date.now(), all = false } = {}) {
+  const resolved = normalizeTrashPolicy(policy);
+  const collected = yield* collectTrashEntriesSteps(home);
+  const listed = collected.entries.map((entry) => ({
+    ...entry,
+    ageDays: Math.max(0, (now - entry.at) / (24 * 60 * 60 * 1000)),
+  }));
+  const selection = selectTrashEvictions(listed, resolved, { now, all });
+  const evictSet = new Set(selection.evicted.map((entry) => entry.name));
+  return {
+    root: collected.root,
+    policy: resolved,
+    all: all === true,
+    now,
+    entries: listed,
+    invalid: collected.invalid,
+    evicted: selection.evicted,
+    kept: listed.filter((entry) => !evictSet.has(entry.name)),
+    totals: {
+      count: listed.length,
+      bytes: listed.reduce((sum, entry) => sum + entry.bytes, 0),
+      evictCount: selection.evicted.length,
+      evictBytes: selection.evicted.reduce((sum, entry) => sum + entry.bytes, 0),
+    },
+  };
+}
+
+/** 生成回滚区计划（同步；CLI 用）。 */
+export function buildTrashPlan(options = {}) {
+  return driveSync(buildTrashPlanSteps(options));
+}
+
+/** 生成回滚区计划（异步让出；host 路由用）。 */
+export async function buildTrashPlanAsync(options = {}) {
+  return await driveAsync(buildTrashPlanSteps(options));
+}
+
+/**
+ * 执行回滚区清理（**唯一真正删文件的地方**）。
+ *
+ * 删除前逐条复核：路径必须仍在回滚区根目录下、名字必须仍匹配我们的命名、
+ * 必须是真实目录（不跟随符号链接）。单条失败只记录，不中断其余。
+ */
+export function applyTrashPlan(plan) {
+  const removed = [];
+  const failures = [];
+  if (plan === undefined || plan === null) return { removed, failures, freedBytes: 0 };
+  const root = plan.root;
+  for (const entry of plan.evicted ?? []) {
+    const name = basename(entry.path);
+    if (dirname(entry.path) !== root || parseTrashName(name) === undefined) {
+      failures.push({ name, error: 'name-mismatch（不是回滚区里的回滚点名，拒绝删除）' });
+      continue;
+    }
+    let st;
+    try {
+      st = lstatSync(entry.path);
+    } catch {
+      failures.push({ name, error: 'not-found' });
+      continue;
+    }
+    if (st.isSymbolicLink() || !st.isDirectory()) {
+      failures.push({ name, error: 'not-a-directory' });
+      continue;
+    }
+    try {
+      rmSync(entry.path, { recursive: true, force: true });
+      removed.push({ name, bytes: entry.bytes, reasons: entry.reasons ?? [] });
+    } catch (error) {
+      failures.push({ name, error: String(error?.message ?? error) });
+    }
+  }
+  return {
+    removed,
+    failures,
+    freedBytes: removed.reduce((sum, entry) => sum + entry.bytes, 0),
+  };
+}
+
+/** 回滚区计划的可读输出（CLI）。 */
+export function renderTrashPlan(trash) {
+  const lines = [];
+  lines.push(`回滚区：${trash.root}`);
+  lines.push(
+    `  共 ${trash.totals.count} 个回滚点 · ${human(trash.totals.bytes)}；策略：${trash.policy.maxAgeDays === 0 ? '天数不限' : `${trash.policy.maxAgeDays} 天`} / ${trash.policy.maxBytes === 0 ? '体积不限' : human(trash.policy.maxBytes)} / ${trash.policy.maxEntries === 0 ? '数量不限' : `最多 ${trash.policy.maxEntries} 个`}${trash.all ? '（--all：清空全部）' : ''}`,
+  );
+  if (trash.totals.count === 0) lines.push('  （空）');
+  if (trash.invalid.length > 0) lines.push(`  忽略 ${trash.invalid.length} 个非回滚点条目：${trash.invalid.join(', ')}`);
+  if (trash.evicted.length === 0) {
+    if (trash.totals.count > 0) lines.push('  没有需要清理的回滚点。');
+  } else {
+    lines.push(`  将清理 ${trash.totals.evictCount} 个 · ${human(trash.totals.evictBytes)}：`);
+    for (const entry of trash.evicted) {
+      lines.push(`    ${entry.name}  ${human(entry.bytes)}  ${entry.ageDays.toFixed(1)} 天  [${(entry.reasons ?? []).join(',')}]`);
+    }
+  }
+  if (trash.kept.length > 0) lines.push(`  保留 ${trash.kept.length} 个（最新${trash.all ? '' : '/未超限'}）`);
+  return lines.join('\n');
 }
 
 /** 附件对象路径。 */
@@ -709,7 +1051,7 @@ export function renderManifest(entry, plan) {
  */
 export function executePlan(
   plan,
-  { mode = 'trash', attachments = false, cleanRoster = false, rosterOnly = false, ignoreLocks = false } = {},
+  { mode = 'trash', attachments = false, cleanRoster = false, rosterOnly = false, ignoreLocks = false, trashPlan = null } = {},
 ) {
   const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
   const results = [];
@@ -841,6 +1183,10 @@ export function executePlan(
     writeFileAtomicSync(plan.workspaceFile, rosterPlan.text);
   }
 
+  // 回滚区清理放在**会话处理完之后**：本次执行刚创建的新回滚点不在 plan 的名单里，
+  // 所以永远不会被这一趟删掉（计划在移动之前就固定了将删名单）。
+  const trashResult = rosterOnly || trashPlan === null || trashPlan === undefined ? null : applyTrashPlan(trashPlan);
+
   return {
     mode: rosterOnly ? 'roster-only' : mode,
     trashRoot: !rosterOnly && mode === 'trash' ? trashRoot : null,
@@ -857,6 +1203,8 @@ export function executePlan(
     removeFailures: results
       .filter((r) => r.removeError !== null)
       .map((r) => ({ id: r.id, error: r.removeError })),
+    // 回滚区清理结果（null = 本次没有提供回滚区计划）。
+    trash: trashResult,
   };
 }
 
@@ -910,6 +1258,10 @@ export function renderPlan(plan, { attachments = false } = {}) {
   if (plan.missing.length > 0) lines.push(`⚠️ 请求的会话在磁盘上找不到: ${plan.missing.join(', ')}`);
   if (plan.entries.length === 0) {
     lines.push('没有可清理的会话。');
+    if (plan.trash !== undefined) {
+      lines.push('');
+      lines.push(renderTrashPlan(plan.trash));
+    }
     return lines.join('\n');
   }
   for (const e of plan.entries) {
@@ -930,6 +1282,10 @@ export function renderPlan(plan, { attachments = false } = {}) {
   lines.push('');
   lines.push(`合计：会话记录 ${human(plan.totals.bytes)}${attachments ? ` + 可删附件 ${human(plan.totals.attachmentBytes)} (${plan.totals.deletableAttachments} 个)` : ''}`);
   if (attachments && plan.attachmentRefScan.failedOn) lines.push(`⚠️ 扫描引用时 ${plan.attachmentRefScan.failedOn} 解不开 → 已改为不删任何附件`);
+  if (plan.trash !== undefined) {
+    lines.push('');
+    lines.push(renderTrashPlan(plan.trash));
+  }
   return lines.join('\n');
 }
 
@@ -943,7 +1299,38 @@ function main(argv) {
   const ids = value('--id') ? [value('--id')] : undefined;
   const attachments = flag('--attachments');
   const rosterOnly = flag('--roster-only');
-  const plan = buildPlan({ ids, attachments });
+  const home = dshHome();
+
+  // 回滚区策略：优先级 CLI 显式参数 > 面板保存 > patch 配置 > 默认值。
+  // （patch 配置由 host 传入 core；CLI 直接跑时没有 patch 配置，只有设置文件。）
+  const trashFlags = {};
+  if (value('--trash-days') !== undefined) trashFlags.maxAgeDays = Number(value('--trash-days'));
+  if (value('--trash-max-mb') !== undefined) trashFlags.maxBytes = Number(value('--trash-max-mb')) * 1024 ** 2;
+  if (value('--trash-max-entries') !== undefined) trashFlags.maxEntries = Number(value('--trash-max-entries'));
+  const trashPolicy = resolveTrashPolicy({ home, flags: trashFlags });
+
+  // ── 只清回滚区（不碰任何会话）─────────────────────────────────────────
+  if (flag('--gc-trash')) {
+    const trash = buildTrashPlan({ home, policy: trashPolicy, all: flag('--all') });
+    console.log(renderTrashPlan(trash));
+    if (!flag('--confirm')) {
+      console.log('');
+      console.log('这是 dry-run（没有删任何东西）。执行：');
+      console.log(`  node ${process.argv[1]} --gc-trash --confirm${flag('--all') ? ' --all' : ''}`);
+      return 0;
+    }
+    const result = applyTrashPlan(trash);
+    console.log('');
+    console.log(`✅ 回滚区清理完成：删掉 ${result.removed.length} 个 · 释放 ${human(result.freedBytes)}`);
+    if (result.failures.length > 0) {
+      console.warn(`⚠️  ${result.failures.length} 个回滚点没删掉：`);
+      for (const f of result.failures) console.warn(`   ${f.name}：${f.error}`);
+    }
+    return 0;
+  }
+
+  const plan = buildPlan({ ids, attachments, home });
+  plan.trash = buildTrashPlan({ home, policy: trashPolicy });
 
   console.log(renderPlan(plan, { attachments }));
 
@@ -981,6 +1368,7 @@ function main(argv) {
     cleanRoster: rosterOnly || flag('--clean-roster') || running === 'stopped',
     rosterOnly,
     ignoreLocks: flag('--ignore-locks'),
+    trashPlan: plan.trash,
   });
   console.log('');
   if (result.rosterOnly) {
@@ -989,7 +1377,13 @@ function main(argv) {
     console.log(
       `✅ 完成：${result.results.length} 个会话，模式 ${result.mode}${result.cleanRoster ? ` + 已清理花名册（${result.rosterRemoved} 个 id）` : ''}`,
     );
-    if (result.trashRoot) console.log(`   回滚点：${result.trashRoot}（确认无误后自行删除）`);
+    if (result.trashRoot) console.log(`   回滚点：${result.trashRoot}（按保留策略自动清理；/acp 无关，见 --gc-trash）`);
+    if (result.trash !== null) {
+      console.log(`   回滚区：清理 ${result.trash.removed.length} 个旧回滚点，释放 ${human(result.trash.freedBytes)}`);
+      if (result.trash.failures.length > 0) {
+        for (const f of result.trash.failures) console.warn(`   ⚠️ ${f.name}：${f.error}`);
+      }
+    }
   }
   if (result.skippedLocked.length > 0) {
     // 这是**保护**而不是失败：被跳过的会话还在原地，随时可以停服后再来一次。

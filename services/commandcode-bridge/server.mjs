@@ -179,10 +179,62 @@ function sanitizeControlTokens(str) {
     .replace(/<\/?rfl:[a-zA-Z0-9_:.\- ]+?>/g, " ");
 }
 
+
+/**
+ * 合并模型（尤其是 Beam/Reflection 等）因提示词将沙箱提权误解为多次调用而裂开的并行 tool calls：
+ * 例如 call 1: { command: "...", justification: "..." }
+ *      call 2: { command: "...", sandbox_permissions: "danger-full-access" }
+ * 将它们合并为一个包含两者完整参数的单一调用，避免 DSH 校验失败并陷入循环。
+ */
+function mergeSplitToolCalls(calls) {
+  if (!Array.isArray(calls) || calls.length <= 1) return { calls: calls || [], droppedIds: new Set() };
+  const merged = [];
+  const skip = new Set();
+  const droppedIds = new Set();
+
+  for (let i = 0; i < calls.length; i++) {
+    if (skip.has(i)) continue;
+    let curr = { ...calls[i] };
+    const currName = curr.function?.name ?? curr.name ?? "";
+    let currArgs = safeParse(curr.function?.arguments ?? curr.args ?? curr.arguments);
+
+    for (let j = i + 1; j < calls.length; j++) {
+      if (skip.has(j)) continue;
+      const other = calls[j];
+      const otherName = other.function?.name ?? other.name ?? "";
+      if (currName && currName === otherName) {
+        const otherArgs = safeParse(other.function?.arguments ?? other.args ?? other.arguments);
+        const sameCmd = currArgs.command && otherArgs.command && currArgs.command.trim() === otherArgs.command.trim();
+        const sameFile = currArgs.file_path && otherArgs.file_path && currArgs.file_path.trim() === otherArgs.file_path.trim();
+        const isEscalationSplit = (currArgs.justification && otherArgs.sandbox_permissions) ||
+                                  (currArgs.sandbox_permissions && otherArgs.justification);
+        if ((sameCmd || sameFile || (!currArgs.command && !currArgs.file_path)) && isEscalationSplit) {
+          currArgs = { ...currArgs, ...otherArgs };
+          if (curr.function) {
+            curr.function = { ...curr.function, arguments: JSON.stringify(currArgs) };
+          }
+          if (curr.args !== undefined) {
+            curr.args = JSON.stringify(currArgs);
+          }
+          if (curr.arguments !== undefined) {
+            curr.arguments = JSON.stringify(currArgs);
+          }
+          skip.add(j);
+          const otherId = other.id || other.toolCallId;
+          if (otherId) droppedIds.add(otherId);
+        }
+      }
+    }
+    merged.push(curr);
+  }
+  return { calls: merged, droppedIds };
+}
+
 /** OpenAI messages → Vercel-AI-SDK 形态的 ModelMessage[]（上游要的形状）。 */
 function toWireMessages(messages, model) {
   const isBeam = /beam/i.test(model || "");
   const out = [];
+  const droppedToolIds = new Set();
   for (const m of messages || []) {
     if (m.role === "system" || m.role === "developer") continue; // 已并入 system
     if (m.role === "user") {
@@ -221,21 +273,27 @@ function toWireMessages(messages, model) {
 
       const t = sanitizeControlTokens(textOf(m.content)).trim();
       if (t) parts.push({ type: "text", text: t });
-      for (const tc of m.tool_calls || []) {
+      const rawCalls = m.tool_calls || [];
+      const { calls: cleanCalls, droppedIds } = mergeSplitToolCalls(rawCalls);
+      for (const id of droppedIds) droppedToolIds.add(id);
+
+      for (const tc of cleanCalls) {
         parts.push({
           type: "tool-call",
           toolCallId: tc.id || randomUUID(),
           toolName: tc.function?.name ?? tc.name ?? "",
-          input: safeParse(tc.function?.arguments ?? tc.arguments),
+          input: safeParse(tc.function?.arguments ?? tc.arguments ?? tc.args),
         });
       }
       out.push({ role: "assistant", content: parts });
     } else if (m.role === "tool") {
+      const toolCallId = m.tool_call_id || m.id || "";
+      if (droppedToolIds.has(toolCallId)) continue;
       out.push({
         role: "tool",
         content: [{
           type: "tool-result",
-          toolCallId: m.tool_call_id || m.id || "",
+          toolCallId,
           toolName: m.name || "",
           output: { type: "text", value: textOf(m.content) },
         }],
@@ -311,9 +369,20 @@ function chunk(model, delta, finish = null) {
   };
 }
 
+/** 获取当前生效的 API Key：优先使用请求头中的 Authorization（DSH 设置面板更新即生效，无需重启桥接），回落到环境变量 */
+function resolveApiKey(req) {
+  const auth = req?.headers?.authorization;
+  if (typeof auth === "string" && auth.trim()) {
+    const m = auth.trim().replace(/^Bearer\s+/i, "");
+    if (m) return m;
+  }
+  return API_KEY;
+}
+
 /** 一个 OpenAI 请求 → 上游 NDJSON → 客户端 SSE / JSON。 */
 async function handleChat(req, res, body) {
-  if (!API_KEY) {
+  const activeKey = resolveApiKey(req);
+  if (!activeKey) {
     res.writeHead(500, { "content-type": "application/json" });
     return res.end(JSON.stringify({ error: { message: "bridge misconfigured: COMMANDCODE_API_KEY missing" } }));
   }
@@ -329,7 +398,7 @@ async function handleChat(req, res, body) {
     upstream = await fetchWithRetry(GENERATE, {
       method: "POST",
       headers: {
-        authorization: `Bearer ${API_KEY}`,
+        authorization: `Bearer ${activeKey}`,
         "content-type": "application/json",
         accept: "application/x-ndjson",
         "x-cli-environment": "production",
@@ -403,23 +472,12 @@ async function handleChat(req, res, body) {
         break;
       }
       case "tool-input-start": {
-        const tc = ensureTool(ev.id, ev.toolName);
-        if (wantsStream) {
-          sse(res, chunk(model, {
-            tool_calls: [{ index: tc.index, id: tc.id, type: "function",
-                           function: { name: tc.name, arguments: "" } }],
-          }));
-        }
+        ensureTool(ev.id, ev.toolName);
         break;
       }
       case "tool-input-delta": {
         const tc = ensureTool(ev.id);
         tc.args += ev.delta || "";
-        if (wantsStream) {
-          sse(res, chunk(model, {
-            tool_calls: [{ index: tc.index, function: { arguments: ev.delta || "" } }],
-          }));
-        }
         break;
       }
       case "tool-call": {
@@ -428,12 +486,6 @@ async function handleChat(req, res, body) {
         const args = typeof ev.input === "string" ? ev.input : JSON.stringify(ev.input ?? {});
         if (!tc.args) {
           tc.args = args;
-          if (wantsStream) {
-            sse(res, chunk(model, {
-              tool_calls: [{ index: tc.index, id: tc.id, type: "function",
-                             function: { name: tc.name, arguments: args } }],
-            }));
-          }
         }
         break;
       }
@@ -475,14 +527,17 @@ async function handleChat(req, res, body) {
     completion_tokens_details: { reasoning_tokens: usage?.outputTokenDetails?.reasoningTokens ?? 0 },
   };
 
+  // 合并提权拆分的 tool_calls 并清理孤立调用
+  const { calls: finalToolCalls } = mergeSplitToolCalls(toolCalls);
+
   if (!wantsStream) {
-    if (errored && !text && !toolCalls.length) {
+    if (errored && !text && !finalToolCalls.length) {
       res.writeHead(502, { "content-type": "application/json" });
       return res.end(JSON.stringify({ error: { message: errored } }));
     }
     const message = { role: "assistant", content: text || null };
-    if (toolCalls.length) {
-      message.tool_calls = toolCalls.map((t) => ({
+    if (finalToolCalls.length) {
+      message.tool_calls = finalToolCalls.map((t, idx) => ({
         id: t.id, type: "function", function: { name: t.name, arguments: t.args || "{}" },
       }));
       message.content = text || null;
@@ -496,17 +551,32 @@ async function handleChat(req, res, body) {
       choices: [{
         index: 0,
         message,
-        finish_reason: toolCalls.length ? "tool_calls" : finishReason,
+        finish_reason: finalToolCalls.length ? "tool_calls" : finishReason,
       }],
       usage: usageOut,
     }));
   }
 
+  // 流式输出完整/已合并的 tool_calls
+  if (finalToolCalls.length) {
+    for (let idx = 0; idx < finalToolCalls.length; idx++) {
+      const t = finalToolCalls[idx];
+      sse(res, chunk(model, {
+        tool_calls: [{
+          index: idx,
+          id: t.id,
+          type: "function",
+          function: { name: t.name, arguments: t.args || "{}" }
+        }],
+      }));
+    }
+  }
+
   // 流式收尾
-  if (errored && !text && !reasoning && !toolCalls.length) {
+  if (errored && !text && !reasoning && !finalToolCalls.length) {
     sse(res, { error: { message: errored, type: "upstream_error" } });
   } else {
-    sse(res, chunk(model, {}, toolCalls.length ? "tool_calls" : finishReason));
+    sse(res, chunk(model, {}, finalToolCalls.length ? "tool_calls" : finishReason));
   }
   sse(res, {
     id: "chatcmpl-" + randomUUID(), object: "chat.completion.chunk",
@@ -531,8 +601,9 @@ const server = http.createServer(async (req, res) => {
   // DSH 可能来拉模型列表：直接透传上游（该端点不受套餐限制）
   if (req.method === "GET" && (url.pathname === "/v1/models" || url.pathname === "/models")) {
     try {
+      const activeKey = resolveApiKey(req);
       const r = await fetchWithRetry(MODELS, {
-        headers: { authorization: `Bearer ${API_KEY}`, accept: "application/json" },
+        headers: { authorization: `Bearer ${activeKey}`, accept: "application/json" },
       });
       const t = await r.text();
       res.writeHead(r.status, { "content-type": "application/json" });

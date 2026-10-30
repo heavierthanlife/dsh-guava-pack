@@ -15,7 +15,25 @@
  */
 
 import { randomBytes } from 'node:crypto';
-import { buildPlan, buildPlanAsync, executePlan, planDigest, readStaleIds, renderPlan } from './lib/core.mjs';
+import {
+  TRASH_DEFAULTS,
+  TRASH_LIMITS,
+  applyTrashPlan,
+  buildPlan,
+  buildPlanAsync,
+  buildTrashPlan,
+  buildTrashPlanAsync,
+  dshHome,
+  executePlan,
+  human,
+  normalizeTrashPolicy,
+  planDigest,
+  readStaleIds,
+  renderPlan,
+  resolveTrashPolicy,
+  saveTrashSettings,
+  trashSettingsPath,
+} from './lib/core.mjs';
 
 /** Cordis 插件名。 */
 const name = 'session-purge';
@@ -119,11 +137,78 @@ function planForPanel(plan) {
   };
 }
 
+/** 回滚区计划瘦身成面板够用的形状。 */
+function trashForPanel(trash) {
+  return {
+    root: trash.root,
+    count: trash.totals.count,
+    bytes: trash.totals.bytes,
+    evictCount: trash.totals.evictCount,
+    evictBytes: trash.totals.evictBytes,
+    policy: trash.policy,
+    evicted: trash.evicted.map((entry) => ({
+      name: entry.name,
+      bytes: entry.bytes,
+      ageDays: Number(entry.ageDays.toFixed(1)),
+      reasons: entry.reasons,
+    })),
+    keptCount: trash.kept.length,
+    invalid: trash.invalid,
+    all: trash.all === true,
+  };
+}
+
+/** 由普通计划派生「清空全部」计划（复用同一份扫描，避免二次 IO）。 */
+function allTrashPlanFrom(trash) {
+  const evicted = trash.entries.map((entry) => ({ ...entry, reasons: ['all'] }));
+  return {
+    ...trash,
+    all: true,
+    evicted,
+    kept: [],
+    totals: {
+      ...trash.totals,
+      evictCount: evicted.length,
+      evictBytes: evicted.reduce((sum, entry) => sum + entry.bytes, 0),
+    },
+  };
+}
+
+/**
+ * 回滚区统计缓存（与计划缓存同寿命）。
+ *
+ * 为什么需要：目录体积要递归 stat（一个回滚点可能有几百 MB / 上千文件），
+ * 面板每次打开都算一遍会明显卡。计划缓存 30 秒，回滚区缓存也跟它一致；
+ * GC / 面板改设置时主动作废。
+ */
+const trashCache = new Map();
+const TRASH_TTL_MS = PLAN_TTL_MS;
+
+async function trashPlanCached(policy, all = false) {
+  const key = `${policy.maxAgeDays}/${policy.maxBytes}/${policy.maxEntries}/${all === true ? 'all' : 'normal'}`;
+  const hit = trashCache.get(key);
+  const now = Date.now();
+  if (hit !== undefined && now - hit.at < TRASH_TTL_MS) return hit.trash;
+  const trash = await buildTrashPlanAsync({ policy, all });
+  trashCache.set(key, { at: now, trash });
+  return trash;
+}
+
+function invalidateTrashCache() {
+  trashCache.clear();
+}
+
+/** 回滚区计划指纹（只绑"将删哪些 + 策略 + all"；与 planDigest 的会话指纹分开算）。 */
+function trashDigest(trash) {
+  return planDigest({ entries: [], trash }, { mode: 'trash' });
+}
+
 /**
  * 注册 `/purge` 命令与面板路由。
  * @param ctx - 带有 commands 的上下文。
+ * @param config - 插件行配置（`trash` 段提供回滚区默认策略）。
  */
-async function apply(ctx) {
+async function apply(ctx, config = {}) {
   let definitionId = 'dsh-session-purge';
   try {
     const brand = await import('@deepseek-ai/dsh-commands/brand');
@@ -133,6 +218,10 @@ async function apply(ctx) {
   }
 
   const cli = new URL('./lib/core.mjs', import.meta.url).pathname;
+
+  // 回滚区策略：默认值 ← 插件行配置（cordis.patch.yml）← 面板保存（session-purge.json）。
+  // 面板改设置时只改这个闭包变量 + 落盘，工具/面板立刻生效。
+  let trashPolicy = resolveTrashPolicy({ config: config?.trash });
 
   ctx.effect(function* () {
     yield ctx.commands.register({
@@ -144,6 +233,7 @@ async function apply(ctx) {
           const argv = String(invocation?.rawInput ?? '').trim().split(/\s+/).filter(Boolean);
           const attachments = argv.includes('--attachments');
           const plan = buildPlan({ attachments });
+          plan.trash = buildTrashPlan({ home: plan.home, policy: trashPolicy });
           return {
             kind: 'success',
             text: [
@@ -204,16 +294,21 @@ async function apply(ctx) {
             const attachments = body.payload?.attachments === true;
             const mode = body.payload?.mode === 'hard' ? 'hard' : 'trash';
             const plan = await planCached(attachments);
+            const trash = await trashPlanCached(trashPolicy, false);
+            // 回滚区计划也绑进会话确认令牌：用户看到的是"这批会话 + 这些过期回滚点"。
+            const planWithTrash = { ...plan, trash };
             // 把 CLI 的真实路径回给面板：面板以前硬编码 `~/dsh/playground/themes/...`，
             // 装成 pack 的机器上那个路径根本不存在，用户照抄命令会 MODULE_NOT_FOUND。
             sendRpc(res, rpcId, {
               ok: true,
               value: {
-                ...planForPanel(plan),
+                ...planForPanel(planWithTrash),
+                trash: trashForPanel(trash),
+                trashPolicy,
                 cli,
-                // 确认令牌：绑到"这批会话 + 这个模式 + 这个附件开关"上。
+                // 确认令牌：绑到"这批会话 + 这个模式 + 这个附件开关 + 这批回滚点"上。
                 // `execute` 必须原样带回，且只能用一次、5 分钟内有效。
-                confirmToken: issueConfirmToken(planDigest(plan, { attachments, mode })),
+                confirmToken: issueConfirmToken(planDigest(planWithTrash, { attachments, mode })),
               },
             });
             return;
@@ -243,7 +338,9 @@ async function apply(ctx) {
               });
               return;
             }
-            const digest = planDigest(plan, { attachments, mode });
+            const trash = await trashPlanCached(trashPolicy, false);
+            const planWithTrash = { ...plan, trash };
+            const digest = planDigest(planWithTrash, { attachments, mode });
             if (digest !== pending.digest) {
               // 令牌是给另一批会话/另一个模式发的 —— 用户看到的和将要执行的不是一回事。
               confirmTokens.delete(token);
@@ -264,9 +361,10 @@ async function apply(ctx) {
               return;
             }
             // cleanRoster 保持 false：运行时改 workspace.json 会被内存态覆盖。
-            const result = executePlan(plan, { mode, attachments, cleanRoster: false });
+            const result = executePlan(plan, { mode, attachments, cleanRoster: false, trashPlan: trash });
             // 删过之后缓存必须作废，下一次计划得重新算。
             invalidatePlanCache();
+            invalidateTrashCache();
             sendRpc(res, rpcId, {
               ok: true,
               value: {
@@ -281,8 +379,109 @@ async function apply(ctx) {
                 removeFailures: result.removeFailures,
                 // 因写锁被跳过的会话（保护，不是失败）。
                 skippedLocked: result.skippedLocked,
+                // 回滚区：本趟顺带清理的旧回滚点（null = 没有执行）。
+                trash: result.trash === null
+                  ? null
+                  : {
+                      removed: result.trash.removed,
+                      failures: result.trash.failures,
+                      freedBytes: result.trash.freedBytes,
+                    },
               },
             });
+            return;
+          }
+
+          // ── 回滚区：统计 + 确认令牌（面板/CLI 的 GC 都走这里）──────────
+          if (endpoint === 'trash') {
+            const trash = await trashPlanCached(trashPolicy, false);
+            const allTrash = allTrashPlanFrom(trash);
+            sendRpc(res, rpcId, {
+              ok: true,
+              value: {
+                ...trashForPanel(trash),
+                confirmToken: issueConfirmToken(trashDigest(trash)),
+                confirmAllToken: issueConfirmToken(trashDigest(allTrash)),
+                settingsPath: trashSettingsPath(dshHome()),
+                cli,
+              },
+            });
+            return;
+          }
+
+          if (endpoint === 'gcTrash') {
+            const all = body.payload?.all === true;
+            const token = typeof body.payload?.confirmToken === 'string' ? body.payload.confirmToken : '';
+            const pending = token === '' ? undefined : confirmTokens.get(token);
+            if (pending === undefined || pending.expiresAt < Date.now()) {
+              if (pending !== undefined) confirmTokens.delete(token);
+              sendRpc(res, rpcId, {
+                ok: false,
+                error: {
+                  code: 'session-purge/confirm-required',
+                  message: '缺少或已过期的确认令牌：请重新点一次「清理回滚区」。',
+                },
+              });
+              return;
+            }
+            const trash = await trashPlanCached(trashPolicy, false);
+            const target = all ? allTrashPlanFrom(trash) : trash;
+            if (trashDigest(target) !== pending.digest) {
+              confirmTokens.delete(token);
+              sendRpc(res, rpcId, {
+                ok: false,
+                error: {
+                  code: 'session-purge/plan-changed',
+                  message: '回滚区内容已变化（新增/减少回滚点或策略被改）：请刷新后重新确认。',
+                },
+              });
+              return;
+            }
+            confirmTokens.delete(token);
+            const result = applyTrashPlan(target);
+            invalidatePlanCache();
+            invalidateTrashCache();
+            sendRpc(res, rpcId, {
+              ok: true,
+              value: {
+                all,
+                removed: result.removed,
+                failures: result.failures,
+                freedBytes: result.freedBytes,
+                freedHuman: human(result.freedBytes),
+              },
+            });
+            return;
+          }
+
+          // ── 回滚区保留策略：面板读写（落盘 session-purge.json）────────
+          if (endpoint === 'getSettings') {
+            sendRpc(res, rpcId, {
+              ok: true,
+              value: {
+                trash: trashPolicy,
+                defaults: TRASH_DEFAULTS,
+                limits: TRASH_LIMITS,
+                path: trashSettingsPath(dshHome()),
+              },
+            });
+            return;
+          }
+
+          if (endpoint === 'setSettings') {
+            const patch = body.payload?.trash !== null && typeof body.payload?.trash === 'object' ? body.payload.trash : {};
+            trashPolicy = normalizeTrashPolicy({ ...trashPolicy, ...patch });
+            try {
+              saveTrashSettings(dshHome(), trashPolicy);
+              invalidateTrashCache();
+              sendRpc(res, rpcId, { ok: true, value: { saved: true, trash: trashPolicy } });
+            } catch (error) {
+              invalidateTrashCache();
+              sendRpc(res, rpcId, {
+                ok: true,
+                value: { saved: false, saveError: String(error?.message ?? error), trash: trashPolicy },
+              });
+            }
             return;
           }
 

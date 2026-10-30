@@ -10,7 +10,7 @@
   },
   "exports": { ".": "./index.js", "./client": "./client.js" },
   "scripts": {
-    "test": "node tests/sync-async.mjs"
+    "test": "node tests/sync-async.mjs && node tests/trash-retention.mjs"
   },
   "dsh": {
     "bundle": { "patch": "./cordis.patch.yml" },

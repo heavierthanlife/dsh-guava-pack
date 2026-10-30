@@ -50,6 +50,25 @@ window.__ModuleLoader__.load({
         copyCmds: '复制命令',
         copied: '已复制',
         deletedMarker: '记录已删除（仅剩花名册条目）',
+        trashTitle: '回滚区',
+        trashSummary: '{count} 个回滚点 · {size}',
+        trashPolicyLine: '{days} / {size} / 最多 {n} 个',
+        trashUnlimited: '不限',
+        trashInvalid: '忽略 {count} 个非回滚点条目（清单/未知目录，永不清理）',
+        trashEvict: '将清理 {count} 个 · {size}',
+        trashNone: '没有需要清理的回滚点',
+        trashGc: '清理过期回滚点（{count} 个 / {size}）',
+        trashGcAll: '清空全部回滚点',
+        trashGcConfirm: '再点一次确认清空',
+        trashGcDone: '回滚区已清理 {count} 个 · 释放 {size}',
+        trashGcFailed: '⚠️ {count} 个回滚点删除失败（其余已清理）',
+        trashSettings: '保留策略（0 = 不限）',
+        trashDays: '保留天数',
+        trashMb: '体积上限 (MB)',
+        trashEntries: '最多保留 (个)',
+        trashSave: '保存策略',
+        trashSaved: '策略已保存',
+        trashSaveFailed: '策略保存失败：{message}',
       },
       en: {
         title: 'Purge archived sessions',
@@ -82,6 +101,25 @@ window.__ModuleLoader__.load({
         copyCmds: 'Copy commands',
         copied: 'Copied',
         deletedMarker: 'record deleted (roster entry only)',
+        trashTitle: 'Rollback trash',
+        trashSummary: '{count} rollback points · {size}',
+        trashPolicyLine: '{days} / {size} / max {n}',
+        trashUnlimited: 'unlimited',
+        trashInvalid: 'ignoring {count} non-rollback entries (manifests/unknown dirs are never deleted)',
+        trashEvict: 'will delete {count} · {size}',
+        trashNone: 'nothing to clean up',
+        trashGc: 'Clean expired ({count} / {size})',
+        trashGcAll: 'Delete all rollback points',
+        trashGcConfirm: 'Click again to confirm',
+        trashGcDone: 'trash cleaned: {count} removed · {size} freed',
+        trashGcFailed: '⚠️ {count} rollback points failed to delete (the rest were cleaned)',
+        trashSettings: 'Retention (0 = unlimited)',
+        trashDays: 'keep days',
+        trashMb: 'size cap (MB)',
+        trashEntries: 'max entries',
+        trashSave: 'Save policy',
+        trashSaved: 'policy saved',
+        trashSaveFailed: 'failed to save policy: {message}',
       },
     };
 
@@ -134,6 +172,19 @@ window.__ModuleLoader__.load({
   background:var(--dsw-specific-menu);color:var(--dsw-alias-label-secondary);
   font-size:11px;line-height:16px;white-space:pre;overflow-x:auto}
 .spurge_mark{color:var(--dsw-alias-label-primary);font-size:11px;line-height:16px}
+.spurge_trash{display:flex;flex-direction:column;gap:4px;padding:6px 8px;
+  border-radius:var(--dsw-radius-sm);background:var(--dsw-alias-bg-layer-1);
+  border:1px solid var(--dsw-alias-border-l1)}
+.spurge_trashset{display:flex;flex-wrap:wrap;gap:6px;align-items:flex-end}
+.spurge_field{display:flex;flex-direction:column;gap:2px;color:var(--dsw-alias-label-tertiary);
+  font-size:11px;line-height:15px}
+.spurge_field input{width:76px;padding:3px 6px;border:1px solid var(--dsw-alias-border-l1);
+  border-radius:var(--dsw-radius-sm);background:var(--dsw-specific-menu);
+  color:var(--dsw-alias-label-primary);font:inherit;font-size:12px}
+.spurge_trashset button{padding:3px 8px;border:0;border-radius:var(--dsw-radius-sm);
+  background:var(--dsw-alias-button-tool-bar-fill);color:var(--dsw-alias-label-primary);
+  font:inherit;font-size:12px;cursor:pointer}
+.spurge_trashset button:disabled{opacity:.5;cursor:default}
 `;
 
     /** 人类可读体积。 */
@@ -244,6 +295,19 @@ window.__ModuleLoader__.load({
       const [copied, setCopied] = React.useState(false);
       const stale = useStale();
 
+      // ── 回滚区（.purge-trash）状态 ──────────────────────────────────
+      const [trash, setTrash] = React.useState(null);          // 计划里带的回滚区摘要
+      const [trashPolicy, setTrashPolicyState] = React.useState(null);
+      const [trashInputs, setTrashInputs] = React.useState({ days: '', mb: '', entries: '' });
+      const [trashBusy, setTrashBusy] = React.useState(false);
+      const [trashError, setTrashError] = React.useState(null);
+      const [trashDone, setTrashDone] = React.useState(null);
+      const [trashSaved, setTrashSaved] = React.useState(null);
+      const [trashConfirmAll, setTrashConfirmAll] = React.useState(false);
+      // 用户改过输入后，刷新计划不要再覆盖他的草稿。
+      const trashDirtyRef = React.useRef(false);
+      const trashConfirmTimer = React.useRef(undefined);
+
       const tr = (key, params) => {
         let text;
         if (typeof t === 'function') {
@@ -265,6 +329,18 @@ window.__ModuleLoader__.load({
           const value = await call('plan', { attachments: withAttachments === true });
           if (typeof value?.cli === 'string' && value.cli) hostCliPath = value.cli;
           setPlan(value);
+          setTrash(value?.trash ?? null);
+          const policy = value?.trashPolicy ?? value?.trash?.policy ?? null;
+          if (policy !== null && policy !== undefined) {
+            setTrashPolicyState(policy);
+            if (!trashDirtyRef.current) {
+              setTrashInputs({
+                days: String(policy.maxAgeDays ?? 0),
+                mb: String(Math.round((policy.maxBytes ?? 0) / (1024 ** 2))),
+                entries: String(policy.maxEntries ?? 0),
+              });
+            }
+          }
           setStale(value?.missing ?? []);
         } catch (e) {
           setError(String(e?.message ?? e));
@@ -309,6 +385,14 @@ window.__ModuleLoader__.load({
           setConfirmToken('');
           setPlan(null);
           void refreshStale();
+          // 会话清理可能顺带清了旧回滚点：面板上的回滚区摘要要跟着刷新。
+          try {
+            const info = await call('trash', {});
+            setTrash(info);
+            if (info?.policy) setTrashPolicyState(info.policy);
+          } catch {
+            /* 回滚区摘要刷新失败不影响主力流程 */
+          }
         } catch (e) {
           // 已知失败翻成当前语言；其余照原样显示。
           const code = e?.code ?? '';
@@ -324,6 +408,63 @@ window.__ModuleLoader__.load({
           setConfirmToken('');
         } finally {
           setBusy(false);
+        }
+      };
+
+      /**
+       * 清理回滚区：先取新的确认令牌，再执行。
+       *
+       * 为什么两步：GC 会真删磁盘目录，令牌绑定"当前这批回滚点 + 策略 + all"，
+       * 和会话清理同一套一次性、5 分钟有效、绑指纹的闸门。
+       */
+      const gcTrash = async (all) => {
+        setTrashBusy(true);
+        setTrashError(null);
+        setTrashDone(null);
+        try {
+          const info = await call('trash', {});
+          const token = all === true ? info?.confirmAllToken : info?.confirmToken;
+          const value = await call('gcTrash', { all: all === true, confirmToken: token });
+          setTrashDone(value);
+          setTrashConfirmAll(false);
+          if (trashConfirmTimer.current !== undefined) clearTimeout(trashConfirmTimer.current);
+          // 清完刷新计划（回滚区摘要要跟着变）。
+          const fresh = await call('plan', { attachments });
+          setPlan(fresh);
+          setTrash(fresh?.trash ?? null);
+          if (fresh?.trashPolicy) setTrashPolicyState(fresh.trashPolicy);
+        } catch (e) {
+          setTrashError(String(e?.message ?? e));
+          setTrashConfirmAll(false);
+        } finally {
+          setTrashBusy(false);
+        }
+      };
+
+      /** 保存保留策略（落盘 + host 立刻生效）。 */
+      const saveTrashPolicy = async () => {
+        setTrashBusy(true);
+        setTrashError(null);
+        setTrashSaved(null);
+        try {
+          const value = await call('setSettings', {
+            trash: {
+              maxAgeDays: Number(trashInputs.days) || 0,
+              maxBytes: (Number(trashInputs.mb) || 0) * 1024 ** 2,
+              maxEntries: Number(trashInputs.entries) || 0,
+            },
+          });
+          if (value?.saved !== true) throw new Error(String(value?.saveError ?? 'save failed'));
+          trashDirtyRef.current = false;
+          setTrashPolicyState(value.trash ?? null);
+          setTrashSaved(value.trash ?? null);
+          const fresh = await call('plan', { attachments });
+          setPlan(fresh);
+          setTrash(fresh?.trash ?? null);
+        } catch (e) {
+          setTrashError(String(e?.message ?? e));
+        } finally {
+          setTrashBusy(false);
         }
       };
 
@@ -513,6 +654,149 @@ window.__ModuleLoader__.load({
               : null,
 
             error !== null ? h('div', { key: 'err', className: 'spurge_err' }, tr('failed', { message: error })) : null,
+
+            // ── 回滚区：统计 / 过期清理 / 清空全部 / 保留策略 ──────────────
+            h('div', { key: 'trash', className: 'spurge_trash' }, [
+              h('div', { key: 'title', className: 'spurge_sum' }, tr('trashTitle')),
+              trash === null
+                ? h('div', { key: 'loading', className: 'spurge_hint' }, tr('loading'))
+                : h('div', { key: 'sum', className: 'spurge_hint' }, tr('trashSummary', { count: trash.count, size: human(trash.bytes) })),
+              trash !== null && trashPolicy !== null
+                ? h('div', { key: 'policy', className: 'spurge_hint', title: tr('trashPolicyLine', {
+                    days: trashPolicy.maxAgeDays === 0 ? tr('trashUnlimited') : `${trashPolicy.maxAgeDays}`,
+                    size: trashPolicy.maxBytes === 0 ? tr('trashUnlimited') : human(trashPolicy.maxBytes),
+                    n: trashPolicy.maxEntries === 0 ? tr('trashUnlimited') : `${trashPolicy.maxEntries}`,
+                  }) }, tr('trashPolicyLine', {
+                    days: trashPolicy.maxAgeDays === 0 ? tr('trashUnlimited') : `${trashPolicy.maxAgeDays} 天`,
+                    size: trashPolicy.maxBytes === 0 ? tr('trashUnlimited') : human(trashPolicy.maxBytes),
+                    n: trashPolicy.maxEntries === 0 ? tr('trashUnlimited') : `${trashPolicy.maxEntries}`,
+                  }))
+                : null,
+              trash !== null && trash.invalid.length > 0
+                ? h('div', { key: 'invalid', className: 'spurge_hint' }, tr('trashInvalid', { count: trash.invalid.length }))
+                : null,
+              trash !== null && trash.evicted.length > 0
+                ? h(
+                    'div',
+                    { key: 'evicted', className: 'spurge_list' },
+                    trash.evicted.map((entry) =>
+                      h('div', { key: entry.name, className: 'spurge_item' }, [
+                        h('b', { key: 'n', title: entry.name }, entry.name),
+                        h('span', { key: 'b' }, human(entry.bytes)),
+                        h('span', { key: 'a' }, `${entry.ageDays}d · ${(entry.reasons ?? []).join(',')}`),
+                      ]),
+                    ),
+                  )
+                : trash !== null
+                  ? h('div', { key: 'nothing', className: 'spurge_hint' }, tr('trashNone'))
+                  : null,
+              h('div', { key: 'acts', className: 'spurge_actions' }, [
+                h(
+                  'button',
+                  {
+                    key: 'gc',
+                    type: 'button',
+                    disabled: trashBusy || !(trash?.evictCount > 0),
+                    onClick: () => {
+                      void gcTrash(false);
+                    },
+                  },
+                  trashBusy
+                    ? tr('running')
+                    : tr('trashGc', { count: trash?.evictCount ?? 0, size: human(trash?.evictBytes ?? 0) }),
+                ),
+                trash !== null && trash.count > 0
+                  ? h(
+                      'button',
+                      {
+                        key: 'all',
+                        type: 'button',
+                        disabled: trashBusy,
+                        'data-primary': trashConfirmAll ? 'true' : 'false',
+                        onClick: () => {
+                          if (!trashConfirmAll) {
+                            setTrashConfirmAll(true);
+                            if (trashConfirmTimer.current !== undefined) clearTimeout(trashConfirmTimer.current);
+                            trashConfirmTimer.current = setTimeout(() => setTrashConfirmAll(false), 4000);
+                            return;
+                          }
+                          void gcTrash(true);
+                        },
+                      },
+                      trashConfirmAll ? tr('trashGcConfirm') : tr('trashGcAll'),
+                    )
+                  : null,
+              ]),
+              h('div', { key: 'settings', className: 'spurge_trashset' }, [
+                h('div', { key: 'label', className: 'spurge_hint' }, tr('trashSettings')),
+                h(
+                  'label',
+                  { key: 'days', className: 'spurge_field' },
+                  tr('trashDays'),
+                  h('input', {
+                    type: 'number',
+                    min: 0,
+                    max: 365,
+                    value: trashInputs.days,
+                    onChange: (event) => {
+                      trashDirtyRef.current = true;
+                      setTrashInputs((value) => ({ ...value, days: event.target.value }));
+                    },
+                  }),
+                ),
+                h(
+                  'label',
+                  { key: 'mb', className: 'spurge_field' },
+                  tr('trashMb'),
+                  h('input', {
+                    type: 'number',
+                    min: 0,
+                    max: 102400,
+                    step: 256,
+                    value: trashInputs.mb,
+                    onChange: (event) => {
+                      trashDirtyRef.current = true;
+                      setTrashInputs((value) => ({ ...value, mb: event.target.value }));
+                    },
+                  }),
+                ),
+                h(
+                  'label',
+                  { key: 'entries', className: 'spurge_field' },
+                  tr('trashEntries'),
+                  h('input', {
+                    type: 'number',
+                    min: 0,
+                    max: 100,
+                    value: trashInputs.entries,
+                    onChange: (event) => {
+                      trashDirtyRef.current = true;
+                      setTrashInputs((value) => ({ ...value, entries: event.target.value }));
+                    },
+                  }),
+                ),
+                h(
+                  'button',
+                  { key: 'save', type: 'button', disabled: trashBusy, onClick: () => { void saveTrashPolicy(); } },
+                  tr('trashSave'),
+                ),
+              ]),
+              trashSaved !== null ? h('div', { key: 'saved', className: 'spurge_ok' }, tr('trashSaved')) : null,
+              trashDone !== null
+                ? h(
+                    'div',
+                    { key: 'done', className: 'spurge_ok' },
+                    tr('trashGcDone', {
+                      count: trashDone.removed?.length ?? 0,
+                      size: trashDone.freedHuman ?? human(trashDone.freedBytes ?? 0),
+                    }),
+                  )
+                : null,
+              trashDone !== null && (trashDone.failures?.length ?? 0) > 0
+                ? h('div', { key: 'failed', className: 'spurge_err' }, tr('trashGcFailed', { count: trashDone.failures.length }))
+                : null,
+              trashError !== null ? h('div', { key: 'error', className: 'spurge_err' }, tr('failed', { message: trashError })) : null,
+            ]),
 
             h('div', { key: 'roster', className: 'spurge_hint' }, tr('rosterNote')),
           ]),

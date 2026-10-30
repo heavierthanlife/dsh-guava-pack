@@ -9,3 +9,10 @@
 - insert:
     - id: session-purge
       name: 'dsh-session-purge'
+      config:
+        # 回滚区（$DSH_HOME/.purge-trash）保留策略。0 = 关闭该维度。
+        # 优先级：默认值 ← 这里 ← 面板保存（$DSH_HOME/session-purge.json）。
+        trash:
+          maxAgeDays: 7            # 超过 7 天的回滚点清理
+          maxBytes: 2147483648     # 总量上限 2 GiB
+          maxEntries: 10           # 最多保留 10 个回滚点
