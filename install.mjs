@@ -131,6 +131,7 @@ const REQUIRED = [
   'tools/tests/model-policy.mjs',
   'tools/tests/web-search-switch.mjs',
   'tools/tests/provider-router-adaptive.mjs',
+  'tools/tests/code-theme-selectors.mjs',
   'tools/tests/context-guard-trigger.mjs',
   'tools/tests/mobile-ui-guards.mjs',
   'tools/mobile-audit.mjs',
@@ -143,6 +144,7 @@ const REQUIRED = [
   'config/model-policy.yml',
   'patches/apply-required-array.sh',
   'patches/apply-anthropic-tool-fixes.sh',
+  'patches/apply-code-highlight-eager.sh',
 ];
 
 /**
@@ -217,6 +219,7 @@ const MIN_BYTES = {
   'tools/tests/model-policy.mjs': 2000,
   'tools/tests/web-search-switch.mjs': 2000,
   'tools/tests/provider-router-adaptive.mjs': 2000,
+  'tools/tests/code-theme-selectors.mjs': 1500,
   'tools/tests/context-guard-trigger.mjs': 2000,
   'tools/tests/mobile-ui-guards.mjs': 2500,
   'tools/mobile-audit.mjs': 3000,
@@ -227,6 +230,7 @@ const MIN_BYTES = {
   'config/model-policy.yml': 1000,
   'patches/apply-required-array.sh': 300,
   'patches/apply-anthropic-tool-fixes.sh': 500,
+  'patches/apply-code-highlight-eager.sh': 800,
 };
 
 /**
@@ -256,6 +260,13 @@ const PATCHES = [
     // 只认一个的话，机器上只有 Fix A 时会被误判成「已打」，Fix B 永远补不上。
     markers: ['enforceToolResultAdjacency', 'tool_use always trails'],
     why: '修 400 tool_use ids were found without tool_result blocks',
+  },
+  {
+    name: '客户端代码块立即高亮（不等视口）',
+    script: 'patches/apply-code-highlight-eager.sh',
+    file: join(DSH_HOME, 'node_modules/@deepseek-ai/dsh-client-ui-primitives/lib/index.js'),
+    marker: 'guava: eager code highlight',
+    why: '聊天/思考区代码块原本进入视口才激活 Shiki；没滚到的块只有单一前景色（看着像正文同色）',
   },
 ];
 

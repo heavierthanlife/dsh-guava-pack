@@ -33,11 +33,11 @@
 以上游 v0.1.0 的 13 条断言为基底、追加本副本的 9 条（现 **22 passed / 0 failed**），所以 `npm test` 可以跑。
 上游出新的话，`lib/` 与 `tests/` 都要一起比对更新（本副本的 diff 很小，见 LICENSES §2）。
 
-> ⏸ **运行期未验证**：上面这条改装「真正发出的头值是什么」尚未在活进程里观测过
-> （当前没有 `opencode-go` 订阅流量；且日志不落该插件的 info 行、沙箱看不到宿主进程）。
-> 注意 profile 里还有一条静态兜底 `x-opencode-session`，它会**掩盖**注入失效——
-> 「能用」不等于「插件生效」。开通订阅后照 [`PENDING-VERIFICATION.md`](PENDING-VERIFICATION.md)
-> §1 的 echo 配方验一次（含「两个会话头值是否不同」）。
+> ✅ **运行期已验证（2026-11-02）**：在活进程里实测到 `x-opencode-session=session-<会话id>`，
+> 且两个不同会话拿到**不同**的值 —— 注入生效、按会话隔离成立（不是 profile 里那条静态兜底）。
+> 注意 profile 仍保留静态 `x-opencode-session` 作为插件被关掉时的垫底，所以
+> **「能用」本身不等于「插件生效」**；要复验请看 [`PENDING-VERIFICATION.md`](PENDING-VERIFICATION.md)
+> §1 的配方 D（路由代理探针，不必改 profile、不必重启 DSH）。
 
 > `ops/bootstrap-machine.sh` 是 **DSH 主仓库根目录**那份 bootstrap 的副本：它 clone DSH 仓库、
 > 对仓库根与 `profiles/web` 各跑一次 `pnpm install`，并假定在 DSH 仓库根目录下执行。

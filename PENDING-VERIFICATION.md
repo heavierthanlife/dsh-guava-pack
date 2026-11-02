@@ -8,10 +8,31 @@
 
 ## 1. `dsh-opencode-session-header`：运行期真正发出的 `x-opencode-session` 头值
 
-**状态**：⏸ 阻塞于「OpenCode Go 订阅尚未开通」——当前主力是 commandcode 订阅，
-`opencode-go` 的 provider 配置与路由条目都还在，但**没有流量**，所以无法观测。
+**状态**：✅ 已验证（2026-11-02，oc-go 订阅开通后实测）。结论：**注入生效，且按会话隔离**。
 
-**记录日期**：2026-10-28
+**记录日期**：2026-10-28（提出） / 2026-11-02（验证并通过）
+
+### 验证结果（2026-11-02，已完成）
+
+方法：在 `provider-router/lib/router.mjs` 里临时加一行探针（仅当 `provider === 'opencode-go'`
+时把 `x-opencode-session` 追加到 `session-probe.log`），**只重启路由代理**（不动 DSH），
+然后在会话 A（旧）与会话 B（新开）各发一句话。抓到：
+
+```text
+2026-11-02T09:11:27Z POST /chat/completions x-opencode-session=session-58d1587d-8981-4818-ac53-e01c3425bd07  ← 会话 A
+2026-11-02T09:13:55Z POST /chat/completions x-opencode-session=session-63f1f374-a76b-446f-b12f-95fd07c99b3b  ← 会话 B
+```
+
+判据三条全部命中：
+
+1. 头值是 `session-…`，**不是** profile 里的静态 `9e6a6e91-…` → 插件确实覆盖了兜底；
+2. 两个会话的头值**不同** → 按会话隔离成立（上游能按会话做路由亲和/前缀缓存）；
+3. 会话 A 的值与 `~/dsh/sessions/--home-guava5tar_-dsh-playground-themes--/session-58d1587d-…`
+   目录名逐字一致 → 注入的是 DSH 会话 id 本身。
+
+收尾：探针代码已从内存副本与 pack 副本**删除并还原**（两份逐字节一致、`git status` 对
+`router.mjs` 无改动），`session-probe.log` 已删。**注意**：验证结束时正在运行的 router
+进程里仍带着探针，直到它下次重启；重启后即完全干净（不再写该日志）。
 
 ### 已经验证到什么程度
 
@@ -101,13 +122,51 @@ systemctl --user restart dsh.service
 订阅开通后，如果 OpenCode 控制台/用量页能按 session 维度看，直接比对两个会话是否各占一条即可。
 这是唯一「不依赖本地观测」的确认方式。
 
-### 开通订阅后的 checklist
+### 验证配方 D（路由代理探针 —— 2026-11-02 实际用这个，最省事）
 
-- [ ] 起 echo，走配方 A，确认头值是 `session-…` 而不是静态 UUID
-- [ ] 两个会话各发一句，确认头值不同
-- [ ] baseURL 改回 `8318/opencode-go`，重启，删 echo
+不需要改 profile、不需要重启 DSH、也不需要 echo：只让**路由代理**把收到的头记一行。
+代价是重启一次 router（几秒；DSH 会话不受影响），因为路由代理是独立进程。
+
+1. 在 `provider-router/lib/router.mjs` 的 `headers.host = target.host;` 之后插入：
+
+```js
+    if (provider === 'opencode-go') {
+      try {
+        await appendFile(
+          join(HERE, 'session-probe.log'),
+          `${new Date().toISOString()} ${req.method} ${upstreamPath} x-opencode-session=${headers['x-opencode-session'] ?? '(none)'}\n`,
+        );
+      } catch {}
+    }
+```
+
+   并把顶部 import 改成 `import { readFile, writeFile, mkdir, readdir, rm, appendFile } from 'node:fs/promises';`
+
+2. 宿主终端里重启路由代理（**不要**重启 DSH）：
+
+```sh
+cd /home/guava5tar_/dsh/playground/themes/dsh-guava-pack/plugins/provider-router && bash start.sh --force
+```
+
+   ⚠️ 这一步必须在**宿主**终端跑：DSH 的 bash 工具在 `bwrap --unshare-pid` 沙箱里，
+   看不到也杀不掉宿主上的 router 进程（`kill` 无声失败、自起的实例会 `EADDRINUSE` 退出）。
+
+3. 在新旧两个会话各发一句话，然后看 `plugins/provider-router/session-probe.log`。
+4. 判据同配方 A 的表；「两条头值不同」= 每会话隔离成立。
+5. 收尾：删掉探针段、还原 `router.mjs`、删 `session-probe.log`，再 `bash start.sh --force` 一次
+   让探针从运行中的进程里消失。
+
+> 若 `session-probe.log` 没出现，先看 `router.log` 是否有 `EADDRINUSE` —— 那说明旧进程没退出，
+> 新实例没抢到端口，跑的还是旧代码（本副本没探针）。
+
+### 开通订阅后的 checklist（2026-11-02 已完成）
+
+- [x] 确认头值是 `session-…` 而不是静态 UUID（用配方 D）
+- [x] 两个会话各发一句，确认头值不同（`58d1587d…` vs `63f1f374…`）
+- [x] 探针代码已回滚、`session-probe.log` 已删（无需改 baseURL，未走配方 A/B）
 - [ ] 留意 `~/dsh/logs/web-run.log` 是否出现 `loopbackPrefixes=opencode-go` 的 info 行
-- [ ] 全部通过后删掉本节
+      （info 级未落盘，迄今没出现；不影响结论，只当免费信号）
+- [x] 本节保留作为「日后复验配方」，结论已达成
 
 ---
 

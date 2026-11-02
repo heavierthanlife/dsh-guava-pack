@@ -55,17 +55,25 @@ window.__ModuleLoader__.load({
 
     /**
      * 代码容器选择器。
-     * `pre`/`code` 是稳定元素；带下划线的类名是 CSS-module 的（`o3BgMG_codeBody` 这种，
-     * 哈希会随构建变），所以用 `[class*="_xxx"]` 匹配后缀 —— 匹配不到也不影响前两个。
+     *
+     * 只用**稳定锚点**，不要匹配 CSS Module 的类名：`_codeBody_1a2b3` 这种哈希随构建变，
+     * 旧白名单里的 `[class*="_codeBody"]` / `_codeBlock` / `_ioCard` / `_diffBody` /
+     * `_terminalBody` 在 DSH 0.2.x 的产物里**一个都不存在**（全是死选择器），于是实际
+     * 只有 `pre` 生效 —— 工具卡（ReadBlock / DiffBlock / TerminalBlock 都是 div 型）
+     * 全部漏掉，token 回落到宿主默认深色表，看起来像“换了个主题”。
+     *
+     * 现在的锚点（都是宿主自己 emit 的语义属性，比类名哈希稳定）：
+     *   · `pre` / `code`     —— Markdown 围栏（含流式预览臂）与行内代码
+     *   · `[data-read]`      —— 读取卡（ReadBlock：div 行 + 每行 token span）
+     *   · `[data-diff]`      —— 差异卡（DiffBlock）
+     *   · `[data-terminal]`  —— 终端卡（TerminalBlock，ANSI 映射到同一批 token 变量）
      */
     const CODE_SEL = [
       'pre',
       'code',
-      '[class*="_codeBody"]',
-      '[class*="_codeBlock"]',
-      '[class*="_ioCard"]',
-      '[class*="_diffBody"]',
-      '[class*="_terminalBody"]',
+      '[data-read]',
+      '[data-diff]',
+      '[data-terminal]',
     ].join(',');
 
     /**
@@ -406,6 +414,20 @@ window.__ModuleLoader__.load({
       return out.join(';');
     }
 
+    /**
+     * 只含 `--shiki-*` 的声明（不含别名字色、不含字体、不含 `color`）。
+     *
+     * 为什么单独抽一份：`--shiki-token-*` **只**被 Shiki 的 token span 读取，做成
+     * 全局声明是安全的，而且能覆盖**所有**代码面 —— 包括将来 DSH 新加的、我们还没用
+     * 选择器覆盖到的容器（ReadBlock 就是这样漏掉的）。别名字色（代码底色/行内代码/
+     * diff 底色）仍留在容器层：它们影响卡片外观，不该全局改。
+     */
+    function tokenVarsFor(mode) {
+      const out = [`--shiki-foreground:${mode.foreground}`, `--shiki-background:${mode.background}`];
+      for (const key of SHIKI_TOKENS) out.push(`--shiki-token-${key}:${mode[key]}`);
+      return out.join(';');
+    }
+
     /** 给选择器列表统一加作用域前缀。 */
     function scope(prefix, selector) {
       return selector
@@ -415,15 +437,19 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * 生成整份样式表（只含代码容器选择器）。
+     * 生成整份样式表（代码容器 + 全局 token 层）。
      *
-     * 两个关键点：
+     * 三个关键点：
      *
      * 1. **必须同时设 `color`，不能只设 `--shiki-*`。** 没有语言标签的代码块不会分词
      *    （Shiki 不产出 token span），那段文字的颜色只由容器的 `color` 决定 —— 不设
      *    就会被主题自己的 `code{color:…}` 接管（赛博主题就是明黄 #fcee0a）。
      * 2. **用 `:root` 前缀提权。** 主题也写 `code{color:…}`，同特异性时胜负取决于样式表
      *    顺序，不可靠；`:root code` 稳定压过 `code`。
+     * 3. **token 变量要有一条全局层。** 容器白名单总有漏（ReadBlock 就是 div 型，
+     *    曾经整块回落到宿主默认表）；`--shiki-token-*` 只被 token span 读取，全局声明
+     *    没有副作用，所以额外写 `:root:root` / `:root body[data-ds-dark-theme]` 两条 ——
+     *    各比宿主的 `:root` / `body[data-ds-dark-theme]` 多一层特异性，不依赖顺序。
      */
     function buildCss(paletteId, scheme, codeFont) {
       const palette = PALETTES[paletteId] ?? PALETTES[DEFAULT_PREF.palette];
@@ -442,6 +468,9 @@ window.__ModuleLoader__.load({
         // 永远走回退值。定义它就一次性统一了这些等宽区域。
         // `:root:root` 双写提权，压过基础样式表可能存在的同名定义。
         ...(codeFont ? [`:root:root{--dsw-font-mono:${CODE_FONT}}`] : []),
+        // 全局 token 层：覆盖所有代码面（含未被 CODE_SEL 命中的 div 型卡片）。
+        `:root:root{${tokenVarsFor(palette.light)}}`,
+        `:root body[data-ds-dark-theme]{${tokenVarsFor(palette.dark)}}`,
         `${scope(':root', CODE_SEL)}{${decls(palette.light)}}`,
         `${scope(':root body[data-ds-dark-theme]', CODE_SEL)}{${decls(palette.dark)}}`,
         `:root :not(pre) > code{color:${palette.light.foreground};background:${palette.light.inline}}`,
@@ -451,6 +480,8 @@ window.__ModuleLoader__.load({
         const forced = scheme === 'dark' ? palette.dark : palette.light;
         // 类名写两遍 + :root 前缀 → 特异性 (0,3,2)，压过上面的深色规则 (0,2,2)。
         const prefix = `:root body.dct-force-${scheme}.dct-force-${scheme}`;
+        // 强制明暗时全局 token 层也要跟着走（否则未命中的容器仍是另一套色）。
+        lines.push(`${prefix}{${tokenVarsFor(forced)}}`);
         lines.push(`${scope(prefix, CODE_SEL)}{${decls(forced)}}`);
         lines.push(`${prefix} :not(pre) > code{color:${forced.foreground};background:${forced.inline}}`);
       }

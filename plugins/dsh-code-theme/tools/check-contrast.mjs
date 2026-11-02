@@ -110,13 +110,32 @@ function checkCss() {
         const open = (css.match(/\{/g) ?? []).length;
         const close = (css.match(/\}/g) ?? []).length;
         if (open !== close) problems.push(`花括号不平衡 ${open}/${close}`);
-        for (const block of css.match(/\{[^}]*\}/g) ?? []) {
-          // 语义规则：凡声明了 --shiki-* 的块都必须同时给容器 color。
-          // 全局字体变量块（--dsw-font-mono）不在此列。
-          if (block.includes('--shiki-') && !block.includes('color:')) {
-            problems.push('有 token 声明块缺少 color');
+        // 逐条规则（选择器 + 声明块）检查，因为「要不要带 color」取决于选择器：
+        //   · 代码容器（pre/code/[data-*]）声明了 --shiki-* → 必须同时给 color，
+        //     否则未分词的代码文本会被主题的 code{color:…} 接管（真实踩过的坑）；
+        //   · 全局 token 层（`:root:root` / `:root body[data-ds-dark-theme]`）是给
+        //     **所有**代码面兜底的变量，绝不能设全局 color（会染到正文），所以
+        //     只要求它存在、且只声明 --shiki-*。
+        // 注释里也含 "dsh-code-theme"，会被 \bcode\b 误判成容器选择器 —— 先剥掉注释
+        // 再做规则匹配（花括号平衡仍用原文）。
+        const cssNoComments = css.replace(/\/\*[\s\S]*?\*\//g, '');
+        const rules = cssNoComments.match(/[^{}]+\{[^}]*\}/g) ?? [];
+        let sawGlobalTokenLayer = false;
+        for (const rule of rules) {
+          const brace = rule.indexOf('{');
+          const selector = rule.slice(0, brace).trim();
+          const block = rule.slice(brace);
+          if (!block.includes('--shiki-')) continue;
+          const isContainer = /\bpre\b|\bcode\b|\[data-read\]|\[data-diff\]|\[data-terminal\]/.test(selector);
+          if (isContainer) {
+            if (!block.includes('color:')) problems.push(`代码容器块缺少 color：${selector.slice(0, 60)}`);
+          } else {
+            sawGlobalTokenLayer = true;
+            // 全局层只允许变量声明，出现 color/background 就是写错了层级。
+            if (/(^|;|\s)color:/.test(block)) problems.push(`全局 token 层不应设 color：${selector.slice(0, 60)}`);
           }
         }
+        if (!sawGlobalTokenLayer) problems.push('缺少全局 token 兜底层（:root:root）');
         for (const token of TOKENS) {
           if (!css.includes(`--shiki-token-${token}:`)) problems.push(`缺 --shiki-token-${token}`);
         }
