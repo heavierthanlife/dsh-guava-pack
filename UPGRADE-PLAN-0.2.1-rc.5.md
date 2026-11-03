@@ -1,5 +1,7 @@
 # 升级预演：0.2.1-alpha.3 → 0.2.1-rc.5
 
+> ✅ **已于 2026-11-03 执行完毕**（0.2.1-alpha.3 → 0.2.1-rc.5）。执行结果与本文预演的差异见 §6。
+>
 > 日期：2026-11-03 · 预演方式：把 rc.5 的相关包从 npm 拉下来，与当前 alpha.3 逐项比对，
 > 并对两个 `node_modules` 补丁做了**真实干跑**（不是读代码猜）。
 > 结论：**可以升**，但有 4 件事必须做，其中 2 件不做会静默失效。
@@ -26,16 +28,16 @@
 
 | # | 项 | 说明 |
 |---|---|---|
-| C | **重打三个 node_modules 补丁** | 升级会覆盖 `dsh-tools` / `pi-ai` / `dsh-client-ui-primitives`。干跑结果：required:[] 补丁 ✅ 通过；Anthropic 补丁修锚点后 ✅；eager-highlight 锚点 `function useViewportHighlighting(target, lang) {` ✅ 仍在 |
+| C | **重打两个 node_modules 补丁** | 升级会覆盖 `dsh-tools` / `pi-ai`。干跑：required:[] ✅；Anthropic 修锚点后 ✅。⚠️ 第三个补丁（eager-highlight）**已失效**：rc.5 不再安装 `dsh-client-ui-primitives`（见 §6） |
 | D | **重启 DSH + 刷新页面** | host 侧（压缩引擎、preset）与 client 侧（代码配色、面板）都要重新加载 |
 
 ### 1.3 已核对、无变化（可以放心）
 
 | 类别 | 检查项 | 结果 |
 |---|---|---|
-| 代码高亮 | `data-read` / `data-diff` / `data-terminal` 语义锚点 | ✅ 全在 |
-| 代码高亮 | `SHIKI_PRE_PROPS`、`createCssVariablesTheme(variablePrefix:"--shiki-")`、`highlightLines` | ✅ 全在 |
-| 代码高亮 | `--shiki-token-keyword` 套餐 | ✅ 仍在 `dsh-client-ui-theme` |
+| 代码高亮 | `data-read` / `data-diff` / `data-terminal` 语义锚点 | ✅ 全在（rc.5 起位于**预构建** `dsh-web-frontend/dist/assets/index-*.js`，不再是源码包） |
+| 代码高亮 | css-variables 主题（`--shiki-` 前缀） | ✅ 仍在，bundle 里 `css-variables` 出现 6 次 |
+| 代码高亮 | `SHIKI_PRE_PROPS` / `useViewportHighlighting` | ⚠️ 源码包已不存在，这两个名字在 rc.5 全树 0 命中（详见 §6） |
 | 压缩引擎 | `compactNow` / `compactIfNeeded` / `compactRegion` / `this.summarize(` / `static Config` | ✅ 数量与 alpha.3 完全一致 |
 | 压缩引擎 | `summarize(input, agent, signal)` 签名 | ✅ 仍是 `protected`，未改 |
 | 压缩包导出 | `toolPairingBalancedBefore/After`、`isCompactCheckpointSource` | ✅ 全在 |
@@ -128,3 +130,38 @@ systemctl --user restart dsh.service
 | 真机 UI 未验证 | 无浏览器控制，只能靠你刷新后肉眼确认；本次已核对的选择器/槽位是静态证据 |
 | 0.2.2-alpha.2 未预演 | 若你更想跟 alpha 线，需要再做一次同样的预演（尤其 preset 与 primitives） |
 | `node_modules` 补丁会被覆盖 | 任何 `pnpm install` 之后都要重跑 `install.mjs --patch`——这是常态，不是升级专属 |
+
+## 6. 执行实况（2026-11-03）—— 与预演不一致的两处
+
+### 6.1 `@deepseek-ai/dsh-client-ui-primitives` 在 rc.5 已不存在
+
+- 预演时我从 npm 拉了 `dsh-client-ui-primitives@0.2.1-rc.5` 的 tarball 并确认锚点都在——
+  **但那个包已经不在 `dsh-web-app` 的依赖里**，所以 `pnpm add` 根本不会装它。
+  这是我的预演失误：验证了一个「存在但不会被安装」的包。
+- 实况：`ls node_modules/@deepseek-ai | grep primitives` → 无；取而代之
+  `dsh-client-ui-renderer`（host 侧空壳 + 78KB client）+ **预构建**
+  `dsh-web-frontend/dist/assets/index-*.js`（920KB，压缩）。代码块渲染逻辑现在只在这份
+  bundle 里，`useViewportHighlighting` 这个名字在 rc.5 全树 0 命中。
+
+后果与处理：
+
+| 项 | 处理 |
+|---|---|
+| `patches/apply-code-highlight-eager.sh`（第三个补丁） | **已从 `install.mjs` 的 REQUIRED / MIN_BYTES / PATCHES 撤掉**；脚本文件保留，仅供回滚到 alpha.x 时手工执行 |
+| `tools/tests/code-theme-selectors.mjs` | 改成**双布局兼容**：优先 `primitives`，否则回退到 `dsh-web-frontend/dist/assets/index-*.js`；锚点匹配改成容忍压缩格式（`"data-read":""`），并新增「仍是 css-variables 主题」断言 → 15 passed |
+| 视口延迟高亮是否还在 | bundle 里 `IntersectionObserver` 只剩 4-5 处，上下文分别是**吸顶标题**与通用观察器，没有直接证据表明仍按视口门控代码高亮；`_plain_` 兜底类名仍在。**需你在 UI 里看一眼**：长回复里没滚到的代码块是否已经有颜色 |
+
+### 6.2 升级后实测结果（全部通过）
+
+| 检查 | 结果 |
+|---|---|
+| `install.mjs --check` | ✅ 包完整（两个补丁状态正确） |
+| `gen-acp-preset --check` | ✅ 与上游一致（指纹 `d146da01…`，生成物已含 `tool-plugin-market` 3 处） |
+| `acp-mount`（隔离起真实 DSH） | ✅ 4/4 preset 引擎 = AcpEngine，basic 可回滚 |
+| `acp-e2e` | ✅ 压缩事务 / 账本字段 / 受保护区间全部正常 |
+| `acp-client` | ✅ client bundle 编译并可取（2.08MB），宿主无装配错误 |
+| 其余 11 个自检 | ✅ 全绿（含 `code-theme-selectors` 15、`provider-router-adaptive` 65、`web-search-switch` 74、`model-policy` 150） |
+| `check-contrast` | ✅ 30 种组合 0 问题 |
+
+> 也就是说：**ACP 在 rc.5 上工作正常**，受影响的只有「客户端代码块立即高亮」这一个
+> node_modules 补丁——它现在无处可打，且很可能已被上游的渲染器重写顺带解决。

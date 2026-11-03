@@ -1,7 +1,7 @@
 # ⚠️ 生成文件，不要手改。
 # 生成器: tools/gen-acp-preset.mjs（dsh-context-acp）
-# upstream: @deepseek-ai/dsh-web-app@0.2.1-alpha.3
-# upstream-sha256: 1c4730cc707e1596c9909e20920eadab8c9d35c2f4d63396512712054ae08ef9
+# upstream: @deepseek-ai/dsh-web-app@0.2.1-rc.5
+# upstream-sha256: d146da01715482c591e20db2b4a09c39b3fe1fcd02731d7aac76400d10f5e60f
 # backend: acp
 # 覆盖: preset-cordis, preset-minimal, preset-ptc, preset-standard
 #
@@ -164,6 +164,9 @@
         name: "@deepseek-ai/dsh-tool-present"
       - id: tool-plugin-manager
         name: "@deepseek-ai/dsh-plugin-manager/tools"
+        disabled: !!js "!ctx.get('profileContext')"
+      - id: tool-plugin-market
+        name: "@deepseek-ai/dsh-plugin-market/tools"
         disabled: !!js "!ctx.get('profileContext')"
 - id: preset-minimal
   config:
@@ -412,6 +415,9 @@
       - id: tool-plugin-manager
         name: "@deepseek-ai/dsh-plugin-manager/tools"
         disabled: true
+      - id: tool-plugin-market
+        name: "@deepseek-ai/dsh-plugin-market/tools"
+        disabled: true
 - id: preset-standard
   config:
     id: standard
@@ -560,4 +566,7 @@
         name: "@deepseek-ai/dsh-tool-present"
       - id: tool-plugin-manager
         name: "@deepseek-ai/dsh-plugin-manager/tools"
+        disabled: true
+      - id: tool-plugin-market
+        name: "@deepseek-ai/dsh-plugin-market/tools"
         disabled: true

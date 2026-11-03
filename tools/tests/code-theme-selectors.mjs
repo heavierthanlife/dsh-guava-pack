@@ -27,7 +27,7 @@
  * 用法：node tools/tests/code-theme-selectors.mjs
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -40,7 +40,30 @@ const CLIENT = join(PACK, 'plugins/dsh-code-theme/client.js');
 const REQUIRED_ANCHORS = ['data-read', 'data-diff', 'data-terminal'];
 
 const DSH_HOME = process.env.DSH_HOME || join(homedir(), 'dsh');
-const PRIMITIVES = join(DSH_HOME, 'node_modules/@deepseek-ai/dsh-client-ui-primitives/lib/index.js');
+
+/**
+ * 代码块渲染代码在哪个文件里 —— 两个时代的布局都要认：
+ *
+ *   ≤ 0.2.1-alpha.x  `@deepseek-ai/dsh-client-ui-primitives/lib/index.js`（未压缩源码）
+ *   ≥ 0.2.1-rc.5     primitives 包被移除，代码进了预构建的
+ *                    `@deepseek-ai/dsh-web-frontend/dist/assets/index-*.js`（压缩过）
+ *
+ * 只在老布局上找会让本测试在升级后**静默跳过**（正是它要防的那类事故）。
+ * @returns {{ file: string, kind: 'source'|'bundle' } | undefined}
+ */
+function resolveRenderSource() {
+  const primitives = join(DSH_HOME, 'node_modules/@deepseek-ai/dsh-client-ui-primitives/lib/index.js');
+  if (existsSync(primitives)) return { file: primitives, kind: 'source' };
+  const assets = join(DSH_HOME, 'node_modules/@deepseek-ai/dsh-web-frontend/dist/assets');
+  if (!existsSync(assets)) return undefined;
+  const candidates = readdirSync(assets)
+    .filter((name) => /^index-.*\.js$/.test(name))
+    .map((name) => join(assets, name))
+    .sort((a, b) => statSync(b).size - statSync(a).size);
+  return candidates.length === 0 ? undefined : { file: candidates[0], kind: 'bundle' };
+}
+
+const RENDER = resolveRenderSource();
 
 let passed = 0;
 let failed = 0;
@@ -78,6 +101,8 @@ if (Array.isArray(entries)) {
   for (const anchor of REQUIRED_ANCHORS) {
     check(`覆盖语义锚点 [${anchor}]`, entries.includes(`[${anchor}]`));
   }
+  // 选择器里如果出现了我们没覆盖的 data-* 锚点，测试不会知道；真正的守卫是下面
+  // 「上游仍 emit 这些锚点」——上游改名会红，提醒同步更新 CODE_SEL。
 }
 
 console.log('\n全局 token 兜底层（buildCss）');
@@ -89,16 +114,18 @@ check(
 );
 check('强制明暗时全局 token 层跟随', /lines\.push\(`\$\{prefix\}\{\$\{tokenVarsFor\(forced\)\}\}`\)/.test(source));
 
-if (!existsSync(PRIMITIVES)) {
-  console.log(`\n跳过上游锚点核对：找不到 ${PRIMITIVES}`);
+if (RENDER === undefined) {
+  console.log('\n跳过上游锚点核对：既没有 dsh-client-ui-primitives，也没有 dsh-web-frontend/dist');
   console.log(`(设 DSH_HOME 指向 DSH 安装目录可启用)\n${passed} passed, ${failed} failed`);
   process.exitCode = failed > 0 ? 1 : 0;
 } else {
-  const upstream = readFileSync(PRIMITIVES, 'utf8');
-  console.log('\n上游产物里的锚点（DSH client-ui-primitives）');
+  const upstream = readFileSync(RENDER.file, 'utf8');
+  console.log(`\n上游产物里的锚点（${RENDER.kind === 'bundle' ? '预构建前端 bundle' : 'primitives 源码'}：${RENDER.file.replace(DSH_HOME + '/', '')}）`);
+  // 压缩产物写作 "data-read":""，源码写作 "data-read": "" —— 两种都要匹配。
   for (const anchor of REQUIRED_ANCHORS) {
-    check(`上游仍 emit "${anchor}"`, upstream.includes(`"${anchor}"`));
+    check(`上游仍 emit "${anchor}"`, new RegExp(`"${anchor}"\\s*:\\s*""`).test(upstream));
   }
+  check('上游仍用 css-variables 主题（--shiki- 前缀）', upstream.includes('css-variables') || upstream.includes('--shiki-'));
   // 反向线索：如果上游出现了新的代码面锚点而我们没覆盖，给出可见警告（不判红，
   // 避免上游加个无关的 data-* 就误报；但打印出来提示人工确认）。
   const upstreamAnchors = [...upstream.matchAll(/"data-([a-z-]+)": ""/g)].map((match) => `data-${match[1]}`);

@@ -144,7 +144,6 @@ const REQUIRED = [
   'config/model-policy.yml',
   'patches/apply-required-array.sh',
   'patches/apply-anthropic-tool-fixes.sh',
-  'patches/apply-code-highlight-eager.sh',
 ];
 
 /**
@@ -230,7 +229,6 @@ const MIN_BYTES = {
   'config/model-policy.yml': 1000,
   'patches/apply-required-array.sh': 300,
   'patches/apply-anthropic-tool-fixes.sh': 500,
-  'patches/apply-code-highlight-eager.sh': 800,
 };
 
 /**
@@ -244,6 +242,10 @@ const DSH_HOME = process.env.DSH_HOME || join(process.env.HOME || '', 'dsh');
  * 所以这里只做「检测 + 调用包里那份脚本」，不重复实现打补丁逻辑
  * （脚本自带幂等标记与锚点断言，锚点找不到会直接报错而不是静默改坏）。
  */
+// 注：`patches/apply-code-highlight-eager.sh`（客户端代码块立即高亮）**未登记在这里**。
+// DSH 0.2.1-rc.5 起不再安装 `@deepseek-ai/dsh-client-ui-primitives`（改为预构建的
+// dsh-web-frontend + dsh-client-ui-renderer），该补丁没有目标文件；脚本保留仅供
+// 回滚到 0.2.1-alpha.x 时手工 `bash patches/apply-code-highlight-eager.sh`。
 const PATCHES = [
   {
     name: 'dsh-tools 恒输出 required:[]',
@@ -260,13 +262,6 @@ const PATCHES = [
     // 只认一个的话，机器上只有 Fix A 时会被误判成「已打」，Fix B 永远补不上。
     markers: ['enforceToolResultAdjacency', 'tool_use always trails'],
     why: '修 400 tool_use ids were found without tool_result blocks',
-  },
-  {
-    name: '客户端代码块立即高亮（不等视口）',
-    script: 'patches/apply-code-highlight-eager.sh',
-    file: join(DSH_HOME, 'node_modules/@deepseek-ai/dsh-client-ui-primitives/lib/index.js'),
-    marker: 'guava: eager code highlight',
-    why: '聊天/思考区代码块原本进入视口才激活 Shiki；没滚到的块只有单一前景色（看着像正文同色）',
   },
 ];
 

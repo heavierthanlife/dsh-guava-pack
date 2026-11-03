@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# ⚠️ 仅适用于 DSH ≤ 0.2.1-alpha.x：0.2.1-rc.5 起不再安装 @deepseek-ai/dsh-client-ui-primitives，
+#    代码块渲染逻辑进了预构建的 dsh-web-frontend bundle，本补丁没有目标文件。
+#    已从 install.mjs 的 PATCHES 撤掉；保留仅供回滚到 alpha.x 时手工执行。
 # 让聊天/思考区的代码块**渲染即高亮**，而不是等它滚进视口才高亮。
 #
 # ## 为什么需要它
