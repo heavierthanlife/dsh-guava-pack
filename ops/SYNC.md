@@ -6,7 +6,7 @@
 > `ERROR: Repository not found`），用户决定**不再重建**。
 >
 > **现在的同步载体只有本包 `heavierthanlife/dsh-guava-pack`**：
-> - **进仓库的**：`plugins/`（8 个插件，含 provider-router / dsh-context-guard）、
+> - **进仓库的**：`plugins/`（9 个插件，含 provider-router / dsh-context-acp）、
 >   `services/`、`ops/`（本文档 + NETWORK-NOTES + PROVIDER_ROUTING_PLAN）、
 >   `machine/`、`config/`、`patches/`、`tools/`、`install.mjs`
 > - **不进仓库、机器本地**：`~/dsh` 的其余部分 —— 启动器、`profiles/`、`sessions/`、

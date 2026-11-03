@@ -112,7 +112,7 @@ direct connection not established
 会丢弃标签页 → 表现成"经常重新加载"。
 
 - 测法：手机上开一个**全新会话**让它流式回一段 —— 流畅就说明是渲染而非网络
-- 治本：用 `dsh-context-guard` 的 handoff 流程（压缩 N 次后提示开新会话），别让会话无限变长
+- 治本：用 `dsh-context-acp` 的 handoff（压缩 N 次后自动写交接文档，提示开新会话），别让会话无限变长
 
 ## 6. 回滚：改代理配置前先记下原值
 

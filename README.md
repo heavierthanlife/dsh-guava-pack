@@ -14,7 +14,6 @@
 | `plugins/provider-router` | 供应商直连 / 经 SSR 路由 + 状态面板（**可配置**） | 自研 |
 | `plugins/dsh-theme-cyberpunk2077` | 赛博朋克 2077 主题（**改装版**） | ⚠️ 原作者 Tommy00748，MIT |
 | `plugins/dsh-opencode-session-header` | 修 OpenCode 的 `400 MissingSessionID`（**改装版**：本机代理路由也打头） | ⚠️ 原作者 beihzb，MIT |
-| `plugins/dsh-context-guard` | **已合并进 `dsh-context-acp`（2026-10-27）**：自动压缩→兜底压缩、handoff→ACP 内；代码保留用于回滚，**patch 行已 `disabled: true`**，不再挂载 | 自研 |
 | `plugins/dsh-context-acp` | **模型驱动压缩（ACP 全套）**：nudge 提醒 → 模型自己选区间/写摘要（零额外 LLM 调用）→ 账本/`decompress`/`search_context` 找回原文；**兜底自动压缩**（连续 2 次 nudge 未响应且 ≥75%）+ **交接文档**（压满 2 次写 handoff）；替换 4 个 agent preset 的 `compaction-basic` 后端 | 自研 |
 | `plugins/dsh-session-purge` | 清理已归档会话记录（保留产出并写清单），侧栏入口在设置上方一行；回滚区默认 7 天 / 2 GiB / 10 个自动清理（面板可调） | 自研 |
 | `plugins/dsh-code-theme` | 只给代码上色（Monokai Pro / Material / One Dark / GitHub / **OpenCode 官方色值**，共 5 套），自动跟随明暗 + 可强制代码区明暗；附 WCAG 对比度自检 | 自研 |
@@ -22,6 +21,8 @@
 | `config/model-policy.yml` | **模型选型意图表** —— 每家要哪些模型（`sync-model-policy` 读它） | 自研 |
 | `ops/` | 运维脚本：`bootstrap-machine.sh`（新机装 dsh.service + linger）、`restart-dsh.sh`、`tailnet-url.sh`（打印带 token 的手机访问地址）、`dsh.service`、`bashrc.dsh.example`、`wsl.conf.example`；`NETWORK-NOTES.md` 手机连不上/流式卡/Tailscale 绕代理的排查手册 | 自研 |
 | `services/commandcode-bridge` | 把 OpenAI 格式转成 Command Code 内部端点 | 自研 |
+
+> `dsh-context-guard` 已于 **2026-11-03 删除**：能力早已并入 `dsh-context-acp`（兜底压缩 / 交接文档 / 面板药丸），`contextGuard` 投影与面板只被它自己消费，dock 两列布局的归属也已转给 `dsh-mobile-ui`。需要回滚时从 git 历史取回该目录、把 patch 行加回并重启即可。
 
 第三方组件的授权与出处见 [`LICENSES/`](LICENSES/)。**两个第三方包都在原作者 MIT 授权范围内**：
 `dsh-theme-cyberpunk2077` 是**改装衍生版**（改动逐条记在 LICENSES §1）；
