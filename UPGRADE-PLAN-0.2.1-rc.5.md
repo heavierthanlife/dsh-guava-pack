@@ -149,7 +149,7 @@ systemctl --user restart dsh.service
 |---|---|
 | `patches/apply-code-highlight-eager.sh`（第三个补丁） | **已从 `install.mjs` 的 REQUIRED / MIN_BYTES / PATCHES 撤掉**；脚本文件保留，仅供回滚到 alpha.x 时手工执行 |
 | `tools/tests/code-theme-selectors.mjs` | 改成**双布局兼容**：优先 `primitives`，否则回退到 `dsh-web-frontend/dist/assets/index-*.js`；锚点匹配改成容忍压缩格式（`"data-read":""`），并新增「仍是 css-variables 主题」断言 → 15 passed |
-| 视口延迟高亮是否还在 | bundle 里 `IntersectionObserver` 只剩 4-5 处，上下文分别是**吸顶标题**与通用观察器，没有直接证据表明仍按视口门控代码高亮；`_plain_` 兜底类名仍在。**需你在 UI 里看一眼**：长回复里没滚到的代码块是否已经有颜色 |
+| 视口延迟高亮是否还在 | ✅ **已实测确认：不再门控**。用户 2026-11-03 在 rc.5 上观察到代码块**实时渲染高亮**，且在设置里切换调色板即时生效 → 第三个补丁（eager highlight）**永久退休**，无需再考虑改预构建 bundle |
 
 ### 6.2 升级后实测结果（全部通过）
 
@@ -162,6 +162,13 @@ systemctl --user restart dsh.service
 | `acp-client` | ✅ client bundle 编译并可取（2.08MB），宿主无装配错误 |
 | 其余 11 个自检 | ✅ 全绿（含 `code-theme-selectors` 15、`provider-router-adaptive` 65、`web-search-switch` 74、`model-policy` 150） |
 | `check-contrast` | ✅ 30 种组合 0 问题 |
+
+### 6.3 结论（2026-11-03 收尾）
+
+- 代码块在 rc.5 上是**实时高亮**（不等视口），`patches/apply-code-highlight-eager.sh`
+  确认**不再需要**——不必去改预构建的 `dsh-web-frontend` bundle。
+- 脚本保留仅为回滚到 `0.2.1-alpha.x` 的场合；`install.mjs` 不会再自动应用它。
+- 设置里切换代码配色即时生效 → `dsh-code-theme` 的「重建样式表 + 主题覆盖层」两条路径都正常。
 
 > 也就是说：**ACP 在 rc.5 上工作正常**，受影响的只有「客户端代码块立即高亮」这一个
 > node_modules 补丁——它现在无处可打，且很可能已被上游的渲染器重写顺带解决。
