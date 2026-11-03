@@ -88,9 +88,10 @@ function convertMessages('''
 
 # ---------- Fix B ----------
 if "tool_use always trails" not in s:
+    # 锚点故意只取这两行：pi-ai 1.5.0 在 continue; 与 messageIndex 之间插入了
+    # `flushPendingSystemMessages();`（1.2.0 没有）。锚到两行以上会在升级后静默失配。
     anchor = """            if (blocks.length === 0)
-                continue;
-            const messageIndex = params.length;"""
+                continue;"""
     new = """            // Anthropic requires every `tool_use` block to be the LAST block of its
             // assistant message. DSH can store content that a stream emitted *after*
             // the tool call (typically a leaked tool-syntax fragment), and the provider
@@ -104,8 +105,7 @@ if "tool_use always trails" not in s:
                     blocks.push(block);
             }
             if (blocks.length === 0)
-                continue;
-            const messageIndex = params.length;"""
+                continue;"""
     assert anchor in s, "blocks 锚点未找到"
     s = s.replace(anchor, new, 1)
     print("Fix B applied")
