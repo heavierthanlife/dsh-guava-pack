@@ -231,5 +231,26 @@ check('空输入仍包含全部内置默认键',
   Object.keys(DEFAULT_MODES).every((k) => kept[k] === DEFAULT_MODES[k]));
 check('空输入不夹带额外键', Object.keys(kept).length === Object.keys(DEFAULT_MODES).length);
 
+// ── 9. 目录噪声过滤（rc.5 起 configurable 目录有 47 家） ───────────────
+// pi-ai 的内置供应商目录在 rc.5 全量出现在 listConfigurableProviders()，它们既没
+// baseURL 也没注册，control 恒为 unknown —— 面板不该把它们画成"可拨的开关"。
+console.log('\n目录噪声过滤（未配置的内置供应商）');
+const noisy = buildProviderCatalog({
+  live: [{ id: 'opencode-go' }],
+  configurable: [
+    { provider: 'amazon-bedrock' }, { provider: 'anthropic' }, { provider: 'groq' },
+    { provider: 'opencode-go' },
+  ],
+  defaults: DEFAULT_MODES,
+  routerPrefixes: ['opencode-go'],
+  endpoints: { 'opencode-go': { baseURL: 'http://127.0.0.1:8318/opencode-go' } },
+});
+const noisyIds = noisy.map((r) => r.id);
+check('未配置的内置供应商被隐藏（amazon-bedrock / anthropic / groq）',
+  !noisyIds.includes('amazon-bedrock') && !noisyIds.includes('anthropic') && !noisyIds.includes('groq'), noisyIds);
+check('live 的行保留（opencode-go）', noisyIds.includes('opencode-go'));
+check('DEFAULT_MODES 的行保留（xiaomi / antigravity / commandcode）',
+  noisyIds.includes('xiaomi-token-plan-cn') && noisyIds.includes('antigravity') && noisyIds.includes('commandcode'), noisyIds);
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);

@@ -522,6 +522,17 @@ const server = createServer(async (req, res) => {
     if (body.length > 0) headers['content-length'] = String(body.length);
     else delete headers['content-length'];
     headers.host = target.host;
+
+    // 诊断：`DSH_ROUTER_LOG_SESSION=1` 时把 opencode-go 收到的 `x-opencode-session` 记一行。
+    // 用来回答「dsh-opencode-session-header 到底有没有按会话注入」——profile 里还有一条
+    // 静态兜底头，它会把失效**掩盖**成"能正常用"，所以必须看实际值：
+    //   session-…      注入生效（每会话不同）
+    //   9e6a6e91-…     吃的是静态兜底 → 插件没生效
+    //   (none)         完全没打头
+    // 默认关闭：不设这个 env 就零行为。
+    if (provider === 'opencode-go' && process.env.DSH_ROUTER_LOG_SESSION === '1') {
+      console.log(`[session-probe] ${req.method} ${upstreamPath} x-opencode-session=${headers['x-opencode-session'] ?? '(none)'}`);
+    }
     // 每个 provider 可声明必须改写的头（如 AgentRouter 的 UA 白名单）。
     if (entry.headers) for (const [k, v] of Object.entries(entry.headers)) headers[k] = v;
 

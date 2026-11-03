@@ -84,6 +84,27 @@ GET /_router/measure?provider=  # 当场测一次，返回 direct/ssr 的 ok+ms
 > 原文写"5 家开关均真生效"，紧接着自己又说 antigravity 不可用 —— 已按代码更正为
 > "4 家可切 + 1 家禁用"。
 
+## 诊断：确认 `x-opencode-session` 真的按会话注入
+
+`dsh-opencode-session-header` 失效时**不会报错**——profile 里那条静态兜底头会让请求
+照常成功，只是所有会话共用一个 id（丢掉上游的按会话路由/前缀缓存）。要看实际值：
+
+```sh
+DSH_ROUTER_LOG_SESSION=1 bash start.sh --force     # 只对这一条命令的进程生效
+# 然后用 opencode-go 的模型发一句话，再：
+grep '\[session-probe\]' router.log | tail -n 5
+```
+
+判读：
+
+| 看到的值 | 含义 |
+|---|---|
+| `session-…`（且不同会话不同） | ✅ 注入生效 |
+| `9e6a6e91-…` | ❌ 吃的是 profile 里的静态兜底 → 插件没生效 |
+| `(none)` | ❌ 完全没打头（上游会 400 MissingSessionID） |
+
+不设 `DSH_ROUTER_LOG_SESSION` 时零行为、不写日志。
+
 ## 风险
 
 - 只在 `127.0.0.1` 监听，不暴露局域网。

@@ -204,8 +204,19 @@ export function buildProviderCatalog({
       : row.id;
   }
 
+  // 只保留"控制方式可判定"的行。rc.5 起 `listConfigurableProviders()` 会把 pi-ai 的
+  // 整套内置供应商都吐出来（本机实测 47 个），其中 30+ 个既没在本 profile 配 baseURL、
+  // 也没注册，panel 里永远是"未判定"—— 只会把界面变成一堵墙，还会稀释真正能拨的开关。
+  //   · live                  → 保留（现在真的注册着，哪怕控制方式未判定）
+  //   · control !== 'unknown' → 保留（能判定走代理/直连/桥接/外部）
+  // 想让某个内置供应商出现：先在 profile 里给它 baseURL，control 就确定了。
+  const known = new Set(Object.keys(defaults ?? {}));
+  const visible = [...byId.values()].filter(
+    (row) => row.live || row.control !== 'unknown' || known.has(row.id),
+  );
+
   // 稳定排序：先 live，再按 id；避免面板顺序每次刷新都变。
-  return [...byId.values()].sort((a, b) => {
+  return visible.sort((a, b) => {
     if (a.live !== b.live) return a.live ? -1 : 1;
     return a.id.localeCompare(b.id);
   });
