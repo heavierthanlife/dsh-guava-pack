@@ -30,6 +30,19 @@
 3. 会话 A 的值与 `~/dsh/sessions/--home-guava5tar_-dsh-playground-themes--/session-58d1587d-…`
    目录名逐字一致 → 注入的是 DSH 会话 id 本身。
 
+### rc.5 复验（2026-11-03，升级后）
+
+升到 `0.2.1-rc.5` 后重跑同一验证，结果一致：
+
+```text
+[session-probe] POST /chat/completions x-opencode-session=session-58d1587d-8981-4818-ac53-e01c3425bd07
+```
+
+- 静态依据：`llm/stream` 瀑布仍在（`dsh-llm/lib/index.js:2397`），
+  `GenerateOptions.sessionId` 仍在（`dsh-llm/lib/types/types.d.ts:541`）；
+- 方法已升级为**常驻诊断**（不再临时改代码）：`DSH_ROUTER_LOG_SESSION=1` 启动 router
+  即写 `router.log`，判读见 `plugins/provider-router/README.md`「诊断」一节。
+
 收尾：探针代码已从内存副本与 pack 副本**删除并还原**（两份逐字节一致、`git status` 对
 `router.mjs` 无改动），`session-probe.log` 已删。**注意**：验证结束时正在运行的 router
 进程里仍带着探针，直到它下次重启；重启后即完全干净（不再写该日志）。
