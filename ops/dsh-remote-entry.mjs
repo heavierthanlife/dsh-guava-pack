@@ -104,9 +104,22 @@ function handleGo(res) {
   res.end('redirecting\n');
 }
 
+/**
+ * 构造转发给上游的头：Host 与 Origin 都改写成上游 authority。
+ *
+ * 只改 Host 不够 —— DSH 对 WebSocket 升级和 API 请求会校验 Origin 与 Host 是否同源，
+ * 只改 Host 会让 Origin 变成「外部地址」而被拒（表现为客户端一直等、服务端已销毁 socket）。
+ */
+function upstreamHeaders(req) {
+  const authority = `${UPSTREAM_HOST}:${UPSTREAM_PORT}`;
+  const headers = { ...req.headers, host: authority };
+  if (headers.origin !== undefined) headers.origin = `http://${authority}`;
+  return headers;
+}
+
 /** 反向代理一个请求（含 SSE 流式与 WebSocket 升级）。 */
 function proxy(req, res) {
-  const headers = { ...req.headers, host: `${UPSTREAM_HOST}:${UPSTREAM_PORT}` };
+  const headers = upstreamHeaders(req);
   // 转发给上游时不要带逐跳头
   delete headers.connection;
   delete headers['keep-alive'];
@@ -150,7 +163,7 @@ server.on('upgrade', (req, socket, head) => {
     socket.destroy();
     return;
   }
-  const headers = { ...req.headers, host: `${UPSTREAM_HOST}:${UPSTREAM_PORT}` };
+  const headers = upstreamHeaders(req);
   const up = http.request({
     host: UPSTREAM_HOST,
     port: UPSTREAM_PORT,
@@ -164,6 +177,13 @@ server.on('upgrade', (req, socket, head) => {
     if (head?.length) upSocket.write(head);
     upSocket.pipe(socket);
     socket.pipe(upSocket);
+  });
+  up.on('response', (upRes) => {
+    // 上游没同意升级（例如 401/403）：把它的响应原样交回客户端，别让浏览器干等。
+    socket.write(`HTTP/1.1 ${upRes.statusCode} ${upRes.statusMessage}\r\n${Object.entries(upRes.headers)
+      .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`)
+      .join('\r\n')}\r\n\r\n`);
+    upRes.pipe(socket);
   });
   up.on('error', () => socket.destroy());
   up.end();
