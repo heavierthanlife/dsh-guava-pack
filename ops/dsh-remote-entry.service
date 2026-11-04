@@ -1,0 +1,19 @@
+[Unit]
+# DSH 远程入口（公司 VPN / Tailscale 网段）：反代到 127.0.0.1:3080，Host 改写为 loopback。
+# 手机入口：http://<VPN 里的 10.8.0.x>:3098/go
+Description=DSH remote entry (VPN/tailnet reverse proxy)
+Documentation=file:///home/guava5tar_/dsh/playground/themes/dsh-guava-pack/ops/dsh-remote-entry.mjs
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/guava5tar_/dsh/playground/themes/dsh-guava-pack
+Environment=DSH_HOME=/home/guava5tar_/dsh
+Environment=DSH_REMOTE_PORT=3098
+ExecStart=/usr/bin/env node /home/guava5tar_/dsh/playground/themes/dsh-guava-pack/ops/dsh-remote-entry.mjs
+Restart=always
+RestartSec=3
+TimeoutStopSec=10
+
+[Install]
+WantedBy=default.target
