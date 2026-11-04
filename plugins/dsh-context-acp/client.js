@@ -42,7 +42,7 @@ window.__ModuleLoader__.load({
 
     const DICT = {
       zh: {
-        'pill.label': 'ACP {blocks} 块 · {percent}%',
+        'pill.label': 'ACP {blocks} 块',
         'pill.aria': 'ACP 压缩：已压 {blocks} 块，上下文占用 {percent}%',
         'panel.title': 'ACP 压缩控制台',
         'panel.blocks': '已压块数',
@@ -73,7 +73,7 @@ window.__ModuleLoader__.load({
         'inc': '增大',
       },
       en: {
-        'pill.label': 'ACP {blocks} blocks · {percent}%',
+        'pill.label': 'ACP {blocks} blocks',
         'pill.aria': 'ACP compression: {blocks} blocks compacted, context {percent}% used',
         'panel.title': 'ACP compression console',
         'panel.blocks': 'Blocks compacted',
@@ -147,8 +147,6 @@ window.__ModuleLoader__.load({
 .acp_note[data-ok="true"]{color:var(--dsw-alias-state-success-primary)}
 .acp_hint{margin-top:2px;color:var(--dsw-alias-label-tertiary);opacity:.8}
 .acp_label{text-overflow:ellipsis;min-width:0;overflow:hidden}
-/* 手机短标签：dock 里横向空间紧张，完整文案（"ACP N 块 · P%"）留给 aria。 */
-.acp_short{display:none}
 /* ── 手机形态：以宿主给的 dsh-phone 类为准，而不是视口宽度 ─────────────
    为什么不能只用 @media (max-width:520px)：**横屏时宽度是 844**，媒体查询
    不命中，但宿主仍然标记 dsh-phone —— 于是药丸在横屏下又变回 0 宽。
@@ -543,11 +541,9 @@ window.__ModuleLoader__.load({
             onClick: () => setOpen((value) => !value),
           },
           h(AcpIcon, { key: 'icon' }),
-          // 两份文案：桌面用完整（ACP N 块 · P%），手机用短标签（N·P%）。
-          // 无障碍仍读 aria-label 的完整句子。
-          h('span', { key: 'label', className: 'acp_label acp_full' }, label),
-          h('span', { key: 'short', className: 'acp_label acp_short' },
-            (percent === undefined ? `${blocks}` : `${blocks}·${percent}%`)),
+          // 文案只保留块数：占用百分比与宿主自带的上下文药丸重复，已删除。
+          // aria-label 仍带完整信息（块数 + 占用）。
+          h('span', { key: 'label', className: 'acp_label' }, label),
         ),
         open &&
           h('div', { key: 'panel', className: 'acp_panel', role: 'dialog', 'aria-label': tr('panel.title') }, [
