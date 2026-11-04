@@ -137,6 +137,7 @@ const REQUIRED = [
   'config/model-policy.yml',
   'patches/apply-required-array.sh',
   'patches/apply-anthropic-tool-fixes.sh',
+  'patches/apply-static-cache-headers.sh',
 ];
 
 /**
@@ -217,6 +218,7 @@ const MIN_BYTES = {
   'config/model-policy.yml': 1000,
   'patches/apply-required-array.sh': 300,
   'patches/apply-anthropic-tool-fixes.sh': 500,
+  'patches/apply-static-cache-headers.sh': 900,
 };
 
 /**
@@ -250,6 +252,13 @@ const PATCHES = [
     // 只认一个的话，机器上只有 Fix A 时会被误判成「已打」，Fix B 永远补不上。
     markers: ['enforceToolResultAdjacency', 'tool_use always trails'],
     why: '修 400 tool_use ids were found without tool_result blocks',
+  },
+  {
+    name: '静态资源缓存头（省每次重载 320KB）',
+    script: 'patches/apply-static-cache-headers.sh',
+    file: join(DSH_HOME, 'node_modules/@deepseek-ai/dsh-host-frontend-static/lib/index.js'),
+    marker: 'guava: static cache headers',
+    why: 'SPA 静态资源没有 cache-control/etag，手机经中继（RTT 250–350ms）每次刷新都可能重拉 bundle',
   },
 ];
 
