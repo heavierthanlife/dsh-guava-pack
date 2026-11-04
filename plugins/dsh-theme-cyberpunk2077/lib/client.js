@@ -1073,6 +1073,14 @@ window.__ModuleLoader__.load({
 
 				// ── Night City HUD footer (docked into the settings bar) ──────
 				"#cp2077-hud { position: fixed; z-index: 10048; pointer-events: none; user-select: none;",
+				"/* 宿主的「对话/轨迹」切换条（fV0t5q_root）被 HUD(z-index:10048) 压住左上角：",
+				"   把它抬到 HUD 之上。HUD 本身 pointer-events:none，抬高只影响绘制顺序。",
+				"   仅桌面生效：手机上 dock 有自己的层级处理，不需要这条。 */",
+				":root:not(.dsh-phone) [class*=\"fV0t5q_root\"],",
+				":root:not(.dsh-phone) [class*=\"fV0t5q_toggle\"] {",
+				"  position: relative;",
+				"  z-index: 10049;",
+				"}",
 				"  display: flex; align-items: center; gap: 10px; white-space: nowrap;",
 				"  transform: translateX(-100%);",
 				"  font: 600 10px 'SF Mono', 'JetBrains Mono', Consolas, 'Liberation Mono', Menlo, 'PingFang SC', 'Microsoft YaHei'; }",
