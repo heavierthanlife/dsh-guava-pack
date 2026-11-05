@@ -3,8 +3,10 @@
  *
  * ## 结构
  *
- * 与 `dsh-context-guard/client.js` 同一套：挂在 `conversation.composer.dock`
- * 的 pill（和宿主自带的「X 轮 X 步」、ContextMeter 同一行），点开是面板。
+ * 与 `dsh-context-guard/client.js` 同一套：ACP 药丸挂在 `conversation.composer.dock`
+ * （和宿主自带的「X 轮 X 步」、ContextMeter 同一行），点开是面板。
+ * nudge 提示单独挂在 `conversation.input.dock`——它在 composerStack 里位于
+ * 输入框之前，是一条 26px 的输入框上沿外嵌条，没有 nudge 时不占高度。
  * 不 require 任何 Harness Client 包，只 require('react')；样式只用 `--dsw-*`
  * 主题 token，类名前缀 `acp_`，随组件卸载移除。
  *
@@ -582,14 +584,16 @@ window.__ModuleLoader__.load({
      * 实测对比度（WCAG）：
      *   亮 #fef3c7 底 + #92400e 字 = 6.37:1（AA）
      *   暗 16% 橙底 over #0a0e18 + #ffc94d 字 = 10.02:1（AAA）
-     *   赛博 #fce300 底 + #05070d 字 = 15.47:1（AAA）
+     *   赛博 #0a101d 底 + #f6ff00 字 = 17+:1（AAA，亮柠檬黄）
      *   反例：暗色拿 --dsw-alias-state-warn-primary(#ffb300) 当底、warn-label(#ffc94d) 当字 = 1.17:1，禁用。
      */
     const NUDGE_CSS = `
-.acp_nudge_anchor{display:inline-flex;min-width:0;max-width:100%}
-.acp_nudge{display:inline-flex;align-items:center;gap:8px;height:26px;padding:0 10px 0 8px;
-  border-radius:999px;font-size:12px;font-weight:600;line-height:1;white-space:nowrap;
-  color:#78350f;background:#fff8e6;border:1px solid #fde68a;
+/* 输入框上沿外嵌条：宽度对齐输入卡（和宿主 TodoPanel 同一套宽度变量）。 */
+.acp_nudge_anchor{box-sizing:border-box;width:calc(100% - var(--dsh-composer-side-clearance,16px) * 2);
+  max-width:var(--dsh-composer-card-max-width,920px);margin:0 auto;display:flex}
+.acp_nudge{box-sizing:border-box;display:flex;align-items:center;gap:8px;width:100%;height:26px;
+  padding:0 10px 0 8px;border-radius:var(--dsw-radius-md);font-size:12px;font-weight:600;
+  line-height:1;white-space:nowrap;color:#78350f;background:#fff8e6;border:1px solid #fde68a;
   box-shadow:0 1px 8px rgba(180,83,9,.18)}
 .acp_nudge_badge{display:inline-flex;align-items:center;justify-content:center;
   width:18px;height:18px;border-radius:50%;flex:none;
@@ -598,7 +602,7 @@ window.__ModuleLoader__.load({
 .acp_nudge_compact{display:none}
 .acp_nudge_close{display:inline-flex;align-items:center;justify-content:center;
   width:18px;height:18px;border:0;border-radius:50%;padding:0;flex:none;cursor:pointer;
-  background:transparent;color:inherit;opacity:.55;font-size:14px;line-height:1}
+  background:transparent;color:inherit;opacity:.55;font-size:14px;line-height:1;margin-left:auto}
 .acp_nudge_close:hover{opacity:1}
 /* 暗色：深琥珀底 + 亮琥珀字（10.4:1） */
 body[data-ds-dark-theme] .acp_nudge,
@@ -606,12 +610,21 @@ body[data-ds-dark-theme] .acp_nudge,
   box-shadow:0 0 0 1px rgba(255,179,0,.18),0 2px 10px rgba(0,0,0,.45)}
 body[data-ds-dark-theme] .acp_nudge_badge,
 :root[data-ds-theme-source="dark"] .acp_nudge_badge{background:#ffb300;color:#1a1204}
-/* 赛博 2077：深夜底 + 霓虹黄描边/字 + 左侧警示竖条（避免大面积黄底刺眼） */
+/* 赛博 2077：深夜底 + 亮柠檬黄描边/字 + 左侧警示竖条。
+   注意暗色规则是 body[data-ds-dark-theme] .acp_nudge（特异性 0,2,1），
+   赛博主题本身也是暗色，所以这里必须用更高的特异性，否则会被暗色琥珀色压掉
+   —— 之前“黄色偏暗”就是这么来的。 */
+body[data-ds-dark-theme] .acp_nudge_cyber .acp_nudge,
+:root[data-ds-theme-source="dark"] .acp_nudge_cyber .acp_nudge,
 .acp_nudge_cyber .acp_nudge{
-  color:#fce300;background:#0a101d;border-color:#fce300;border-radius:2px;
-  box-shadow:0 0 6px rgba(252,227,0,.28),inset 3px 0 0 #fce300;
-  padding-left:12px;letter-spacing:.03em}
-.acp_nudge_cyber .acp_nudge_badge{background:#fce300;color:#05070d;border-radius:0}
+  color:#f6ff00;background:#0a101d;border-color:#f6ff00;border-radius:2px;
+  box-shadow:0 0 8px rgba(246,255,0,.35),inset 3px 0 0 #f6ff00;
+  padding-left:12px;letter-spacing:.03em;text-shadow:0 0 6px rgba(246,255,0,.55)}
+body[data-ds-dark-theme] .acp_nudge_cyber .acp_nudge_badge,
+:root[data-ds-theme-source="dark"] .acp_nudge_cyber .acp_nudge_badge,
+.acp_nudge_cyber .acp_nudge_badge{background:#f6ff00;color:#05070d;border-radius:0}
+body[data-ds-dark-theme] .acp_nudge_cyber .acp_nudge_hint,
+:root[data-ds-theme-source="dark"] .acp_nudge_cyber .acp_nudge_hint,
 .acp_nudge_cyber .acp_nudge_hint{color:#e8f1ff;opacity:.8}
 /* 入场：1 次上浮 + 2 次脉冲即收敛，不无限循环 */
 .acp_nudge[data-fresh="true"]{animation:dsh-acp-nudge-in .24s cubic-bezier(.16,1,.3,1)}
@@ -619,13 +632,11 @@ body[data-ds-dark-theme] .acp_nudge_badge,
 @media (prefers-reduced-motion: reduce){
   .acp_nudge{animation:none!important;transition:none!important}
 }
-/* 手机：独占 dock 第三行（不改前两行，不与 ACP 药丸抢位置） */
-:root.dsh-phone .dsh-mobile-dock .acp_nudge_anchor{
-  grid-column:1 / -1;grid-row:3;justify-self:start;margin-top:3px;max-width:100%}
 @media (max-width:430px){
   .acp_nudge_hint{display:none}
   .acp_nudge_wide{display:none}
   .acp_nudge_compact{display:inline}
+  .acp_nudge{gap:6px;padding:0 8px;font-size:11px}
 }
 `;
 
@@ -729,8 +740,10 @@ body[data-ds-dark-theme] .acp_nudge_badge,
           ctx.slots.register({ name: 'conversation.composer.dock', id: 'dsh-context-acp', order: 2, locale: NS }, AcpPill),
         );
         // 独立的 nudge 提示：故意与药丸分开注册，它自己挂了不会连累 ACP。
-        ctx.slots.inject('conversation.composer.dock', () =>
-          ctx.slots.register({ name: 'conversation.composer.dock', id: 'dsh-acp-nudge', order: 3, locale: NS }, AcpNudge),
+        // 挂在 conversation.input.dock：composerStack 里位于 inputBar 之前，
+        // 是一条输入框上沿外嵌条（无 nudge 时组件返回 null，不占高度）。
+        ctx.slots.inject('conversation.input.dock', () =>
+          ctx.slots.register({ name: 'conversation.input.dock', id: 'dsh-acp-nudge', order: 30, locale: NS }, AcpNudge),
         );
       },
     };

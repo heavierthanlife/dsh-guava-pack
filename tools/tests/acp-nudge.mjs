@@ -915,6 +915,37 @@ test('installPanel 路由：getSettings 信封 + setSettings 夹取并落盘', a
   }
 });
 
+test('客户端：nudge 挂在输入框上沿，且赛博黄色规则压过暗色规则', () => {
+  const client = readFileSync(new URL('../../plugins/dsh-context-acp/client.js', import.meta.url), 'utf8');
+
+  // 位置：conversation.input.dock 在 composerStack 里位于 inputBar 之前（输入框上沿），
+  // 不能退回到 composer.dock（输入框下方那一行）。
+  assert(
+    /name: 'conversation\.input\.dock', id: 'dsh-acp-nudge'/.test(client),
+    'nudge 应注册到 conversation.input.dock',
+  );
+  assert(
+    !/name: 'conversation\.composer\.dock', id: 'dsh-acp-nudge'/.test(client),
+    'nudge 不应再注册到 conversation.composer.dock',
+  );
+
+  // 外观：26px 外嵌条，宽度对齐输入卡；x 靠右。
+  assert(/\.acp_nudge\{[^}]*height:26px/.test(client), 'nudge 高度应为 26px');
+  assert(/\.acp_nudge_anchor\{[^}]*--dsh-composer-side-clearance/.test(client), '轨道宽度应复用输入卡边距变量');
+  assert(/\.acp_nudge_close\{[^}]*margin-left:auto/.test(client), '关闭按钮应靠右');
+
+  // 赛博主题也是暗色：body[data-ds-dark-theme] .acp_nudge 特异性 (0,2,1)，
+  // 如果赛博规则不叠加同样的前缀，就会被暗色琥珀色压掉（用户看到的“偏暗”）。
+  assert(
+    /body\[data-ds-dark-theme\] \.acp_nudge_cyber \.acp_nudge/.test(client),
+    '赛博规则必须带 body[data-ds-dark-theme] 前缀以压过暗色规则',
+  );
+  assert(/#f6ff00/.test(client), '赛博黄应为亮柠檬黄 #f6ff00');
+
+  // 旧的手机 dock 分格规则已不适用（nudge 不再在 dock 里）。
+  assert(!/\.dsh-mobile-dock \.acp_nudge_anchor/.test(client), '不应残留 dock 网格定位规则');
+});
+
 // ── runner ──────────────────────────────────────────────────────────────────
 
 for (const { name, fn } of tests) {
