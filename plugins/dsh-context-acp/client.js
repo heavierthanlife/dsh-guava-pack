@@ -460,7 +460,10 @@ window.__ModuleLoader__.load({
       }
 
       /** 一行「标签 … [−] 值 [+]」，返回 [dt, dd]。 */
-      const stepperRow = (term, value, unit, min, max, onDelta) => [
+      // step 显式传入：之前靠 `unit === '%'` 猜步长，handoff（单位 '×'）因此
+      // 误用了 GROWTH_STEP（上千级），一点加号就夹到上限、减号夹到下限，
+      // 1~5 之间根本选不到（2026-11-05 用户实测）。
+      const stepperRow = (term, value, unit, min, max, step, onDelta) => [
         h('dt', { key: `t-${term}` }, term),
         h(
           'dd',
@@ -474,7 +477,7 @@ window.__ModuleLoader__.load({
               disabled: value <= min,
               'aria-label': tr('dec'),
               title: tr('dec'),
-              onClick: () => onDelta(-(unit === '%' ? RATIO_STEP : GROWTH_STEP)),
+              onClick: () => onDelta(-step),
             },
             '−',
           ),
@@ -488,7 +491,7 @@ window.__ModuleLoader__.load({
               disabled: value >= max,
               'aria-label': tr('inc'),
               title: tr('inc'),
-              onClick: () => onDelta(unit === '%' ? RATIO_STEP : GROWTH_STEP),
+              onClick: () => onDelta(step),
             },
             '+',
           ),
@@ -501,10 +504,10 @@ window.__ModuleLoader__.load({
         [tr('panel.shadowed'), compact(shadowed)],
         [tr('panel.used'), usedText],
         [tr('panel.lastNudge'), nudgeText],
-        stepperRow(tr('panel.threshold'), shownPercent, '%', RATIO_MIN, RATIO_MAX, (delta) =>
+        stepperRow(tr('panel.threshold'), shownPercent, '%', RATIO_MIN, RATIO_MAX, RATIO_STEP, (delta) =>
           push((base) => ({ pressurePercent: clamp(base.pressurePercent + delta, RATIO_MIN, RATIO_MAX) })),
         ),
-        stepperRow(tr('panel.growth'), shownGrowth, '', GROWTH_MIN, GROWTH_MAX, (delta) =>
+        stepperRow(tr('panel.growth'), shownGrowth, '', GROWTH_MIN, GROWTH_MAX, GROWTH_STEP, (delta) =>
           push((base) => ({ growthTokens: clamp(base.growthTokens + delta, GROWTH_MIN, GROWTH_MAX) })),
         ),
         // ── 合并自 dsh-context-guard 的能力（2026-10-27）───────────────────
@@ -512,12 +515,12 @@ window.__ModuleLoader__.load({
           percent: shownFallbackPercent,
           n: num(info?.fallbackAfterNudges) ?? 2,
         })],
-        stepperRow(tr('panel.fallback') + '：' + tr('panel.threshold'), shownFallbackPercent, '%', RATIO_MIN, RATIO_MAX, (delta) =>
+        stepperRow(tr('panel.fallback') + '：' + tr('panel.threshold'), shownFallbackPercent, '%', RATIO_MIN, RATIO_MAX, RATIO_STEP, (delta) =>
           push((base) => ({ fallbackPercent: clamp(base.fallbackPercent + delta, RATIO_MIN, RATIO_MAX) })),
         ),
         [tr('panel.lastFallback'), fallbackText],
         [tr('panel.handoff'), tr('panel.handoffValue', { n: shownHandoff })],
-        stepperRow(tr('panel.handoff') + '：' + tr('panel.handoffAfter'), shownHandoff, '×', HANDOFF_MIN, HANDOFF_MAX, (delta) =>
+        stepperRow(tr('panel.handoff') + '：' + tr('panel.handoffAfter'), shownHandoff, '×', HANDOFF_MIN, HANDOFF_MAX, 1, (delta) =>
           push((base) => ({ handoffAfter: clamp(base.handoffAfter + delta, HANDOFF_MIN, HANDOFF_MAX) })),
         ),
         [tr('panel.handoff') + '：' + tr('panel.handoffStatus'), handoffText],
