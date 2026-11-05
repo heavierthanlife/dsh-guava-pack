@@ -433,8 +433,10 @@ window.__ModuleLoader__.load({
           var orientationSplit = sw > 0 && sh > 0 && iw > 0 && ih > 0
             && (sw > sh) !== (iw > ih);
           var ratioSplit = screenShort2 > 0 && viewShort > 0 && viewShort <= screenShort2 * 0.66;
-          var extremeAspect = viewShort > 0 && Math.max(iw, ih) / viewShort >= 1.7;
-          if (viewShort > 0 && (orientationSplit || viewShort <= TABLET_SPLIT_MAX || ratioSplit || extremeAspect)) {
+          // 2.2 而不是 1.7：完整平板横屏（16:10/16:9）也可能是 1.6~1.8，
+          // 不能把「全屏但比较宽」误判成分屏。上下分屏会接近 2 倍长宽比。
+          var extremeAspect = viewShort > 0 && Math.max(iw, ih) / viewShort >= 2.2;
+          if (viewShort > 0 && (orientationSplit || ratioSplit || extremeAspect)) {
             return 'tablet-split-window';
           }
         }
@@ -587,6 +589,12 @@ window.__ModuleLoader__.load({
         FRAME_PHONE + ' {',
         '  grid-template-columns: 0 minmax(0, 1fr) 0 !important;',
         '}',
+        '/* 侧栏展开时 position:fixed 脱离网格，中间的 centerCol 会掉到第 1 列（0 宽），',
+        '   右侧 rightbarCol 抢到第 2 列 —— 平板分屏套手机样式时整块工作区就是 0 宽。',
+        '   这里显式把 centerCol 钉回第 2 列，并隐藏手机上的右栏。 */',
+        FRAME_PHONE + ' > div:nth-of-type(2),',
+        FRAME_PHONE + ' > [class*="centerCol"] { grid-column: 2 !important; }',
+        FRAME_PHONE + ' > [data-rightbar-col] { display: none !important; }',
         '',
         '/* ══ STEP 3：展开态侧栏脱离网格，成为覆盖式抽屉 ══════════════════',
         '   只作用于展开态；收起态那一列本来就 0 宽（自带 overflow:hidden 会裁掉 rail）。',

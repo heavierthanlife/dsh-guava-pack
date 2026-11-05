@@ -81,6 +81,8 @@ check('超宽/超高窗口兜底', /extremeAspect/.test(mobileUiRaw) && /1\.7/.t
 check('detectPhone 含 tablet-split-window', /tablet-split-window/.test(mobileUiRaw));
 check('仅平板设备触发（isTabletDevice）', /function isTabletDevice/.test(mobileUiRaw));
 check('全局 resize 重算，不依赖设置面板', /tablet split detection/.test(mobileUiRaw));
+check('侧栏 fixed 时 centerCol 钉回第 2 列', /centerCol"\] \{ grid-column: 2/.test(mobileUiRaw));
+check('手机隐藏 rightbarCol（否则会抢走 1fr）', /\[data-rightbar-col\] \{ display: none/.test(mobileUiRaw));
 
 // ── 1.6 赛博主题浮层避让输入栏 ─────────────────────────────────────────
 console.log('\n赛博主题浮层（cyberpunk）');
