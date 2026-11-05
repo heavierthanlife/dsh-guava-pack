@@ -1,7 +1,9 @@
 # restic 备份速查
 
-仓库：`sftp:root@112.126.90.114:/srv/backup/dsh`（加密，密码在 `~/.restic-pass`）
+仓库：`sftp:root@100.109.125.37:/srv/backup/dsh`（加密，密码在 `~/.restic-pass`）
 封装脚本：`ops/backup/restic-ctl.sh`（省掉每次敲 `-o sftp.args` 与环境变量）
+
+> SSH 已收口到 tailnet（公网 22 由 VPS 侧 iptables 丢弃），仓库地址用 100.109.125.37。
 
 ```bash
 cd ~/dsh/playground/themes/dsh-guava-pack
@@ -19,6 +21,7 @@ alias rk='bash ops/backup/restic-ctl.sh'   # 可选，装个短名字
 | 对比两个快照 | `rk diff <id1> <id2>` |
 | 删一个快照 | `rk forget <id>` |
 | 删并回收空间 | `rk forget <id> --prune` |
+| 只回收未引用数据（不删快照） | `rk prune`（2026-11-05 实测 833M → 562M） |
 | 清理陈旧锁 | `rk unlock` |
 
 ## 恢复（最常用的部分）

@@ -10,7 +10,7 @@
 set -uo pipefail
 export PATH="$HOME/.local/bin:$PATH"
 export RESTIC_PASSWORD_FILE="${RESTIC_PASSWORD_FILE:-$HOME/.restic-pass}"
-export RESTIC_REPOSITORY="${RESTIC_REPOSITORY:-sftp:root@112.126.90.114:/srv/backup/dsh}"
+export RESTIC_REPOSITORY="${RESTIC_REPOSITORY:-sftp:root@100.109.125.37:/srv/backup/dsh}"
 SSH_ARGS="${RESTIC_SSH_ARGS:--F /dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15}"
 
 # --prune 是给我们的语法糖：forget 完顺手 prune

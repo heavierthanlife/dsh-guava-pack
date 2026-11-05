@@ -6,7 +6,7 @@
 set -uo pipefail
 export PATH="$HOME/.local/bin:$PATH"
 export RESTIC_PASSWORD_FILE="${RESTIC_PASSWORD_FILE:-$HOME/.restic-pass}"
-export RESTIC_REPOSITORY="${RESTIC_REPOSITORY:-sftp:root@112.126.90.114:/srv/backup/dsh}"
+export RESTIC_REPOSITORY="${RESTIC_REPOSITORY:-sftp:root@100.109.125.37:/srv/backup/dsh}"
 SSH_ARGS="-F /dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15"
 LIMIT="${RESTIC_LIMIT_KB:-200}"
 

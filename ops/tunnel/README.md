@@ -60,6 +60,12 @@ systemctl --user enable --now dsh-tunnel.service
 `/etc/ssh/ssh_config.d/20-systemd-ssh-proxy.conf`，不绕过会直接报
 `Bad owner or permissions`。
 
+## PC → VPS
+
+`dsh-tunnel.service` 的 `VPS_PUBLIC_IP` 现在填 **tailnet 地址**（`100.109.125.37`）：
+公网 22 已由 VPS 侧 `dsh-ssh-tailnet.service` 用 iptables 丢弃，只有 `tailscale0` 能进 22。
+VNC 控制台是唯一兜底。
+
 ## 手机侧
 
 打开 Tailscale（这是唯一 VPN 槽，公司 OpenVPN 要关掉），访问：
@@ -71,7 +77,7 @@ http://<VPS tailnet IP>:22022/go
 ## 自检
 
 ```bash
-bash ops/tunnel/check.sh <VPS公网IP> <VPS tailnet IP>
+bash ops/tunnel/check.sh <VPS tailnet IP>
 ```
 
 关键判据是 `tailscale status` 里手机那行：

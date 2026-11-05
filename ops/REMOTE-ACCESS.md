@@ -91,7 +91,7 @@ DSH 本体始终只监听 `127.0.0.1:3080`，外部入口都是**反代**。
         直连实测 ~34ms                     VPS→PC ~14–26ms
 ```
 
-- VPS：Debian 12，`dsh-relay`，tailnet `100.109.125.37`，公网 `112.126.90.114`；
+- VPS：Debian 12，`dsh-relay`，tailnet `100.109.125.37`，公网 `112.126.90.114`（**公网 22 已收口，仅 tailnet 可 SSH**）；
 - PC：`dsh-tunnel.service`（systemd --user，断线 5 秒重连，主机指纹固定）；
 - 手机：开 Tailscale → `http://100.109.125.37:22022/go`。
 
@@ -107,12 +107,15 @@ DSH 本体始终只监听 `127.0.0.1:3080`，外部入口都是**反代**。
 | 协议/端口 | 来源 | 用途 | 必须保留 |
 |---|---|---|---|
 | UDP 41641 | 0.0.0.0/0 | Tailscale 直连（不放行就退回东京 DERP，抖动） | ✅ |
-| TCP 22 | 0.0.0.0/0 | PC 的 SSH 反向隧道 + 你的管理登录 | ✅（`PasswordAuthentication no`，仅密钥） |
+| TCP 22 | 0.0.0.0/0（安全组）→ 主机 iptables 丢弃公网 | 仅 tailnet 内 SSH（反向隧道/管理/restic） | ✅（`PasswordAuthentication no`，仅密钥） |
 | ICMP | 0.0.0.0/0 | 系统默认，无害 | 可选 |
-| ~~TCP 3389 (RDP)~~ | ~~0.0.0.0/0~~ | Linux 上无服务，纯扫描噪音 | ❌ **应删除** |
+| ~~TCP 3389 (RDP)~~ | ~~0.0.0.0/0~~ | 外网扫描已 closed；按清理项删除 | ✅ 已关 |
 
 加固现状：
 
+- **SSH 只允许 tailscale0**：`dsh-ssh-tailnet.service` 用 iptables 链 `DSH_SSH_TAILNET`
+  放行 `tailscale0`/`lo` 的 22，其余接口 DROP；公网扫描确认 `:22` 已不可达。
+  安装/回滚见 [`ops/vps/README.md`](vps/README.md)；VNC 控制台兜底；
 - `PasswordAuthentication no` —— 只能密钥登录；
 - `authorized_keys` 仅 1 把（PC 的 WSL 密钥）；
 - `GatewayPorts clientspecified` —— 反向隧道只绑 tailnet 地址，公网看不到 22022；
@@ -154,10 +157,11 @@ VPS:  npm ci --omit=dev（本地编译 sqlite 原生模块）
 
 ### restic 备份
 
-- 仓库：`sftp:root@112.126.90.114:/srv/backup/dsh`，密码在 `~/.restic-pass`；
+- 仓库：`sftp:root@100.109.125.37:/srv/backup/dsh`（SSH 走 tailnet），密码在 `~/.restic-pass`；
 - 脚本 `ops/backup/restic-backup.sh`：`--compression max`、`--limit-upload 200`（留带宽给隧道），
   排除 node_modules / cache / .git / .shots / *.log；
-- 定时器 `dsh-backup.timer`：每日 03:30，`Persistent=true`；
+- 定时器 `dsh-backup.timer`：每日 03:30，`Persistent=true`（**只备份，不自动 prune**）；
+- 手动回收：`restic-ctl.sh prune`（2026-11-05 实测回收 269 MiB，833M → 562M）；
 - **首次全量约 16 分钟 / 800MB**；增量很小。
 
 ⚠️ 长任务不要用临时 shell 跑（会被回收），用 `systemctl --user start dsh-backup.service --no-block`。

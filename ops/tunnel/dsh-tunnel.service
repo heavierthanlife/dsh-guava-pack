@@ -1,6 +1,7 @@
 [Unit]
 # 把本机 127.0.0.1:${LOCAL_PORT}（dsh-remote-entry）反向上报到 VPS 的 tailnet 地址。
 # 变量来自 %h/dsh/tunnel.env（见同目录 tunnel.env.example）。
+# VPS_PUBLIC_IP 现在填 tailnet 地址（公网 22 已由 VPS 侧 iptables 收口）。
 Description=DSH reverse tunnel to relay (tailnet -> local 3098)
 After=network-online.target
 

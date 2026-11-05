@@ -1,0 +1,12 @@
+[Unit]
+Description=Restrict SSH :22 to tailscale0 (drop public)
+After=network-pre.target tailscaled.service
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/dsh-ssh-tailnet.sh
+
+[Install]
+WantedBy=multi-user.target
