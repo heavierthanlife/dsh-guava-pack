@@ -172,8 +172,16 @@ export function applyTunables(runtime, payload) {
   const nextGrowth = clampInteger(readTunable(payload, 'nudge', 'growthTokens'), 1000, 100000);
   const nextPageSize = clampInteger(readTunable(payload, 'retain', 'decompressPageSize'), 1, 50);
   const nextSearchLimit = clampInteger(readTunable(payload, 'retain', 'searchLimit'), 1, 50);
-  const nextFallbackRatio = clampRatio(readTunable(payload, 'fallback', 'ratio'));
-  const nextHandoffAfter = clampInteger(readTunable(payload, 'handoff', 'afterCompactions'), 1, 5);
+  // 客户端提交的是扁平键 `fallbackRatio`；readTunable 的扁平回退按第二个参数的 key
+  // 取名，所以要显式再试一次，否则面板【保存成功但数值不变】（2026-11-05 实测踩到）。
+  const nextFallbackRatio = clampRatio(
+    readTunable(payload, 'fallback', 'ratio') ?? readTunable(payload, 'fallback', 'fallbackRatio'),
+  );
+  // 同上：客户端扁平键是 `handoffAfter`。
+  const nextHandoffAfter = clampInteger(
+    readTunable(payload, 'handoff', 'afterCompactions') ?? readTunable(payload, 'handoff', 'handoffAfter'),
+    1, 5,
+  );
 
   const changed = {};
   const nudgePatch = {};
