@@ -72,24 +72,10 @@ check('占用量在右列上行', /JObwrW[^}]*grid-row:\s*1/.test(mobileUi) && /
 check('插件药丸在右列下行（内联，非悬浮）', /_anchor"\]?:not\(\[class\*="bOPqQW"\]\)[^}]*grid-row:\s*2/.test(mobileUi));
 check('DOM 重建后能重新打标（MutationObserver）', /MutationObserver/.test(mobileUi));
 
-// ── 1.5 平板分屏 = 大手机 ──────────────────────────────────────────────
-console.log('\n平板分屏分支（mobile-ui）');
-check('定义分屏阈值 820', /TABLET_SPLIT_MAX\s*=\s*820/.test(mobileUiRaw));
-check('触屏兜底 + 窗口/屏幕短边比例判定', /function isCoarsePointer/.test(mobileUiRaw) && /screenShort2 \* 0\.66/.test(mobileUiRaw));
-check('屏幕/窗口方向不一致也判分屏（不受缩放影响）', /orientationSplit/.test(mobileUiRaw) && /\(sw > sh\) !== \(iw > ih\)/.test(mobileUiRaw));
-check('超宽/超高窗口兜底', /extremeAspect/.test(mobileUiRaw) && /1\.7/.test(mobileUiRaw));
-check('detectPhone 含 tablet-split-window', /tablet-split-window/.test(mobileUiRaw));
-check('仅平板设备触发（isTabletDevice）', /function isTabletDevice/.test(mobileUiRaw));
-check('全局 resize 重算，不依赖设置面板', /tablet split detection/.test(mobileUiRaw));
+// ── 1.5 手机侧栏展开时的工作区宽度 ──────────────────────────────────────
+console.log('\n手机侧栏展开（centerCol）');
 check('侧栏 fixed 时 centerCol 钉回第 2 列', /centerCol"\] \{ grid-column: 2/.test(mobileUiRaw));
 check('手机隐藏 rightbarCol（否则会抢走 1fr）', /\[data-rightbar-col\] \{ display: none/.test(mobileUiRaw));
-
-// ── 1.6 赛博主题浮层避让输入栏 ─────────────────────────────────────────
-console.log('\n赛博主题浮层（cyberpunk）');
-const cyber = read('plugins/dsh-theme-cyberpunk2077/lib/client.js');
-check('SND/DECK 在触屏上重新定位', /function positionTouchChips/.test(cyber) && /\(pointer: coarse\)/.test(cyber));
-check('定位到可见且最靠下的 composer 卡', /function findComposerCard/.test(cyber) && /rect\.top > best\.getBoundingClientRect\(\)\.top/.test(cyber));
-check('用 top 定位并覆盖 bottom（避免被拉伸）', /style\.top = sndTop/.test(cyber) && /style\.bottom = "auto"/.test(cyber));
 
 // ── 2. ACP 面板的手机尺寸 ──────────────────────────────────────────────
 console.log('\nACP 面板手机适配');

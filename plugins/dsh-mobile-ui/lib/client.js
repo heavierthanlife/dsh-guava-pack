@@ -43,8 +43,6 @@ window.__ModuleLoader__.load({
 
     /** A phone: short physical side <= 520 CSS px. Tablets start near 600. */
     var PHONE_SHORT_SIDE = 520;
-    /** 平板左右分屏后，浏览器窗口短边 <= 这个值就按「大手机」处理。 */
-    var TABLET_SPLIT_MAX = 820;
     /** The type scale the multipliers below were measured against. */
     var BASELINE_PX = 14;
 
@@ -60,7 +58,7 @@ window.__ModuleLoader__.load({
 
     var T = {
       title: '移动端显示',
-      desc: '只改字号，不动布局。手机尺寸的屏幕生效；平板左右分屏（窗口短边 ≤ 720px）也会按大手机处理。桌面不受影响。',
+      desc: '只改字号，不动布局。只在手机尺寸的屏幕上生效；平板和桌面完全不受影响。',
       fontLabel: '字号（整体缩放）',
       fontHint: '正文、界面控件、代码字号按同一比例联动。基准 14px＝完全不改动。',
       previewLabel: '效果预览',
@@ -71,10 +69,8 @@ window.__ModuleLoader__.load({
       forceHint: '预览用：勾上后桌面窗口收窄到 ≤560px 也能看到手机样式。',
       statusLabel: '当前状态',
       detected: '已判定为手机',
-      detectedSplit: '已判定为大手机（平板分屏）',
       notDetected: '未判定为手机（平板 / 桌面）',
       reasonScreen: '依据：屏幕短边 ≤ ' + PHONE_SHORT_SIDE + 'px',
-      reasonTabletSplit: '依据：触屏/平板 + 分屏窗口（短边 ≤ ' + TABLET_SPLIT_MAX + 'px，或 ≤ 屏幕短边 66%）',
       reasonForced: '依据：手动强制开启',
       reasonNone: '依据：无',
       reset: '恢复默认',
@@ -400,14 +396,9 @@ window.__ModuleLoader__.load({
     /**
      * 判定是否是「手机」：只看**设备屏幕的短边**，完全不看窗口大小。
      *
-     * 之前同时用 innerWidth/innerHeight 兜底，结果这三类会被误判成手机：
-     *   · 平板分屏（半屏 ≈ 400px）
-     *   · 平板悬浮窗
-     *   · 桌面把窗口拖窄
-     * 平板本来用得好好的，不该因为窗口一变窄就整体换布局。现在：
-     *   手机 = 屏幕短边 ≤ 520px；
-     *   平板设备分屏（浏览器窗口短边 ≤ 720px）= 按大手机处理；
-     *   桌面窗口再窄也不进入手机模式。
+     * 平板分屏 / 悬浮窗 / 桌面拖窄窗口都不应该整体换手机布局：手机布局里的
+     * 字号、2×2 dock、抽屉都是按 ≤520px 调过的，套到平板上字会太小、
+     * 工具栏会散。平板继续用桌面布局，想要更大的内容密度用浏览器缩放。
      * 想在窄窗口里预览手机样式，用设置里的「在桌面也启用」开关（force）。
      */
     function detectPhone() {
@@ -416,52 +407,8 @@ window.__ModuleLoader__.load({
           (window.screen && window.screen.width) || 9999,
           (window.screen && window.screen.height) || 9999,
         );
-        if (screenShort <= PHONE_SHORT_SIDE) return 'screen-short-side';
-        // 平板左右分屏：物理屏幕还是平板，但浏览器窗口只剩半屏。
-        // 这时按「大手机」排（dock 2×2、抽屉、回车换行等），不然内容太挤。
-        // 触屏设备（UA 认不出平板时用粗指针兜底）。浏览器缩放会放大
-        // innerWidth，所以除了绝对阈值，再看「窗口短边 / 屏幕短边」比例。
-        if (isTabletDevice() || isCoarsePointer()) {
-          var sw = (window.screen && window.screen.width) || 0;
-          var sh = (window.screen && window.screen.height) || 0;
-          var iw = window.innerWidth || 0;
-          var ih = window.innerHeight || 0;
-          var viewShort = Math.min(iw, ih);
-          var screenShort2 = Math.min(sw, sh);
-          // 最可靠的信号：屏幕横屏、窗口却竖屏（左右分屏），或反过来（上下分屏）。
-          // 它不受浏览器缩放影响（缩放会同时改 innerWidth/innerHeight，不改方向）。
-          var orientationSplit = sw > 0 && sh > 0 && iw > 0 && ih > 0
-            && (sw > sh) !== (iw > ih);
-          var ratioSplit = screenShort2 > 0 && viewShort > 0 && viewShort <= screenShort2 * 0.66;
-          // 2.2 而不是 1.7：完整平板横屏（16:10/16:9）也可能是 1.6~1.8，
-          // 不能把「全屏但比较宽」误判成分屏。上下分屏会接近 2 倍长宽比。
-          var extremeAspect = viewShort > 0 && Math.max(iw, ih) / viewShort >= 2.2;
-          if (viewShort > 0 && (orientationSplit || ratioSplit || extremeAspect)) {
-            return 'tablet-split-window';
-          }
-        }
-        return '';
+        return screenShort <= PHONE_SHORT_SIDE ? 'screen-short-side' : '';
       } catch (e) { return ''; }
-    }
-
-    /** 触屏（平板/手机）：用于 UA 认不出时的兜底，桌面鼠标为 false。 */
-    function isCoarsePointer() {
-      try {
-        return typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches;
-      } catch (e) { return false; }
-    }
-
-    /** 只认「平板设备」：桌面窗口拖窄不算，避免误伤。 */
-    function isTabletDevice() {
-      try {
-        var ua = navigator.userAgent || '';
-        if (/iPad/i.test(ua)) return true;
-        if (/Tablet|PlayBook|Silk/i.test(ua)) return true;
-        if (/Android/i.test(ua) && !/Mobile/i.test(ua)) return true;
-        // iPadOS 13+ 的桌面 UA：伪装成 Macintosh，但有多点触控。
-        if (/Macintosh/i.test(ua) && (navigator.maxTouchPoints || 0) > 1) return true;
-      } catch (e) {}
-      return false;
     }
 
     /** 只写 <html> 的 class 与两个自定义属性。不碰任何其它 DOM。 */
@@ -991,7 +938,6 @@ window.__ModuleLoader__.load({
       }
 
       var reasonText = status.reason === 'screen-short-side' ? T.reasonScreen
-        : status.reason === 'tablet-split-window' ? T.reasonTabletSplit
         : status.reason === 'forced' ? T.reasonForced
         : T.reasonNone;
 
@@ -1097,9 +1043,7 @@ window.__ModuleLoader__.load({
           },
         }, [
           h('div', { key: 'a', style: { fontWeight: 500 } },
-            T.statusLabel + '：' + (status.active
-              ? (status.reason === 'tablet-split-window' ? T.detectedSplit : T.detected)
-              : T.notDetected)),
+            T.statusLabel + '：' + (status.active ? T.detected : T.notDetected)),
           h('div', { key: 'b', style: { opacity: 0.7 } }, reasonText),
           h('div', { key: 'c', style: { opacity: 0.7 } },
             '屏幕 ' + screenW + '×' + screenH + ' · 窗口 ' + viewW + '×' + viewH
@@ -1151,17 +1095,6 @@ window.__ModuleLoader__.load({
 
           var state = applyToRoot(readSettings());
 
-          // 平板分屏/退出分屏不会触发设置面板里的 resize 监听（面板没挂载时），
-          // 所以在插件生命周期上挂一个全局监听，保证 dsh-phone 随窗口短边切换。
-          ctx.effect(function () {
-            var reapply = function () { applyToRoot(readSettings()); };
-            window.addEventListener('resize', reapply, { passive: true });
-            window.addEventListener('orientationchange', reapply, { passive: true });
-            return function () {
-              window.removeEventListener('resize', reapply);
-              window.removeEventListener('orientationchange', reapply);
-            };
-          }, 'dsh-mobile-ui: tablet split detection');
           window.__dshMobileUI = {
             active: state.active, reason: state.reason,
             settings: readSettings(), hasStyle: true,

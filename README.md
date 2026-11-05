@@ -9,7 +9,7 @@
 
 | 路径 | 内容 | 来源 |
 |---|---|---|
-| `plugins/dsh-mobile-ui` | 手机上像 App 一样的排版/触控/安全区；平板左右分屏按大手机处理 | 自研 |
+| `plugins/dsh-mobile-ui` | 手机上像 App 一样的排版/触控/安全区（平板/桌面不受影响） | 自研 |
 | `plugins/dsh-theme-manager` | 设置里的主题管理页 | 自研 |
 | `plugins/provider-router` | 供应商直连 / 经 SSR 路由 + 状态面板（**可配置**） | 自研 |
 | `plugins/dsh-theme-cyberpunk2077` | 赛博朋克 2077 主题（**改装版**） | ⚠️ 原作者 Tommy00748，MIT |
