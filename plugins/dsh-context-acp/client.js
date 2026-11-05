@@ -568,6 +568,149 @@ window.__ModuleLoader__.load({
       );
     }
 
+    /* ── 上下文压力提示（独立条目）─────────────────────────────────────
+     * 为什么不改 AcpPill：药丸每次渲染都跑，一旦那里抛错整个 ACP 都会消失
+     * （2026-11-05 实测踩过）。所以单独注册一个 dock 条目，它坏了只影响自己。
+     *
+     * 设计要点（经设计顾问评审 + 实测对比度校准）：
+     *   · 位置：手机端独占 dock 第 3 行（grid-row:3），不跟「ACP 1 块」抢第 2 行；
+     *   · 常驻：最近 15 分钟发生过 nudge 就显示，不做"1 秒就消失"的 toast；
+     *   · 动效：入场 2 次脉冲后**收敛为静态**，不做无限循环（避免视觉疲劳）；
+     *   · 降级：prefers-reduced-motion 时彻底静态，靠描边+图标传达；
+     *   · 主题：亮/暗走宿主 token 的等效安全色，赛博 2077 用霓虹黄底黑字。
+     *
+     * 实测对比度（WCAG）：
+     *   亮 #fef3c7 底 + #92400e 字 = 6.37:1（AA）
+     *   暗 16% 橙底 over #0a0e18 + #ffc94d 字 = 10.02:1（AAA）
+     *   赛博 #fce300 底 + #05070d 字 = 15.47:1（AAA）
+     *   反例：暗色拿 --dsw-alias-state-warn-primary(#ffb300) 当底、warn-label(#ffc94d) 当字 = 1.17:1，禁用。
+     */
+    const NUDGE_CSS = `
+.acp_nudge_anchor{display:inline-flex;min-width:0;max-width:100%}
+.acp_nudge{display:inline-flex;align-items:center;gap:8px;height:26px;padding:0 10px 0 8px;
+  border-radius:999px;font-size:12px;font-weight:600;line-height:1;white-space:nowrap;
+  color:#78350f;background:#fff8e6;border:1px solid #fde68a;
+  box-shadow:0 1px 8px rgba(180,83,9,.18)}
+.acp_nudge_badge{display:inline-flex;align-items:center;justify-content:center;
+  width:18px;height:18px;border-radius:50%;flex:none;
+  background:#b45309;color:#fff;font-size:11px;font-weight:700}
+.acp_nudge_hint{opacity:.85;font-weight:500}
+.acp_nudge_compact{display:none}
+.acp_nudge_close{display:inline-flex;align-items:center;justify-content:center;
+  width:18px;height:18px;border:0;border-radius:50%;padding:0;flex:none;cursor:pointer;
+  background:transparent;color:inherit;opacity:.55;font-size:14px;line-height:1}
+.acp_nudge_close:hover{opacity:1}
+/* 暗色：深琥珀底 + 亮琥珀字（10.4:1） */
+:root[data-ds-dark-theme] .acp_nudge{color:#ffc94d;background:#231904;border-color:#7a5200;
+  box-shadow:0 0 0 1px rgba(255,179,0,.18),0 2px 10px rgba(0,0,0,.45)}
+:root[data-ds-dark-theme] .acp_nudge_badge{background:#ffb300;color:#1a1204}
+/* 赛博 2077：深夜底 + 霓虹黄描边/字 + 左侧警示竖条（避免大面积黄底刺眼） */
+:root.cp2077-on .acp_nudge,
+:root[data-cyberpunk-theme] .acp_nudge{
+  color:#fce300;background:#0a101d;border-color:#fce300;border-radius:2px;
+  box-shadow:0 0 6px rgba(252,227,0,.28),inset 3px 0 0 #fce300;
+  padding-left:12px;letter-spacing:.03em}
+:root.cp2077-on .acp_nudge_badge,
+:root[data-cyberpunk-theme] .acp_nudge_badge{background:#fce300;color:#05070d;border-radius:0}
+:root.cp2077-on .acp_nudge_hint,
+:root[data-cyberpunk-theme] .acp_nudge_hint{color:#e8f1ff;opacity:.8}
+/* 入场：1 次上浮 + 2 次脉冲即收敛，不无限循环 */
+.acp_nudge[data-fresh="true"]{animation:dsh-acp-nudge-in .24s cubic-bezier(.16,1,.3,1)}
+@keyframes dsh-acp-nudge-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion: reduce){
+  .acp_nudge{animation:none!important;transition:none!important}
+}
+/* 手机：独占 dock 第三行（不改前两行，不与 ACP 药丸抢位置） */
+:root.dsh-phone .dsh-mobile-dock .acp_nudge_anchor{
+  grid-column:1 / -1;grid-row:3;justify-self:start;margin-top:3px;max-width:100%}
+@media (max-width:430px){
+  .acp_nudge_hint{display:none}
+  .acp_nudge_wide{display:none}
+  .acp_nudge_compact{display:inline}
+}
+`;
+
+    /** 最近一次 nudge 的可见提示。失败时静默返回 null，绝不影响主界面。 */
+    function AcpNudge() {
+      const [state, setState] = React.useState(null);
+      // 用户点过 × 的那次 nudge 不再显示；换一次 nudge（at 变了）自动重新出现。
+      const [dismissedAt, setDismissedAt] = React.useState(() => {
+        try {
+          const raw = sessionStorage.getItem('dsh-acp-nudge-dismissed');
+          return raw === null ? undefined : Number(raw);
+        } catch {
+          return undefined;
+        }
+      });
+      React.useEffect(() => {
+        let alive = true;
+        const load = async () => {
+          try {
+            const response = await fetch(`${ROUTE}/getSettings`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ type: 'client-request', rpcId: 'nudge', method: 'getSettings', payload: {} }),
+            });
+            const data = await response.json();
+            const value = data?.result?.value;
+            if (alive && value !== undefined) setState(value);
+          } catch {
+            /* 拿不到就保持上一次状态，不报错、不影响输入框 */
+          }
+        };
+        load();
+        const timer = setInterval(load, 15000);
+        return () => {
+          alive = false;
+          clearInterval(timer);
+        };
+      }, []);
+
+      const at = num(state?.lastNudge?.at);
+      if (at === undefined || at <= 0) return null;
+      if (dismissedAt === at) return null;
+      const ageMs = Date.now() - at;
+      if (ageMs > 15 * 60 * 1000) return null;
+
+      const used = num(state?.lastNudge?.usedTokens);
+      const window = num(state?.lastNudge?.contextWindow);
+      const percent = used !== undefined && window !== undefined && window > 0
+        ? Math.round((used / window) * 100)
+        : undefined;
+      const fresh = ageMs < 90 * 1000;
+      const when = new Date(at).toLocaleTimeString();
+
+      return h(
+        'span',
+        { className: 'acp_nudge_anchor' },
+        h('style', { key: 'nudge-style' }, NUDGE_CSS),
+        h(
+          'span',
+          {
+            className: 'acp_nudge',
+            role: 'status',
+            'data-fresh': fresh ? 'true' : undefined,
+            title: `上次 nudge：${when}${percent === undefined ? '' : `（上下文 ${percent}%）`} · 模型可选择压缩历史`,
+          },
+          h('span', { key: 'badge', className: 'acp_nudge_badge' }, '!'),
+          h('span', { key: 'text', className: 'acp_nudge_text acp_nudge_wide' },
+            percent === undefined ? '上下文压力' : `上下文 ${percent}%`),
+          h('span', { key: 'compact', className: 'acp_nudge_text acp_nudge_compact' },
+            percent === undefined ? '压力' : `${percent}%`),
+          h('span', { key: 'hint', className: 'acp_nudge_hint' }, '建议压缩'),
+          h('button', {
+            key: 'close', type: 'button', className: 'acp_nudge_close',
+            'aria-label': '收起提醒', title: '收起提醒（下次 nudge 再出现）',
+            onClick: (event) => {
+              event.stopPropagation();
+              try { sessionStorage.setItem('dsh-acp-nudge-dismissed', String(at)); } catch { /* 隐私模式忽略 */ }
+              setDismissedAt(at);
+            },
+          }, '×'),
+        ),
+      );
+    }
+
     return {
       inject: ['slots', 'locale'],
       apply(ctx) {
@@ -576,6 +719,10 @@ window.__ModuleLoader__.load({
         // order=2：排在自带 stats pill 与 context-guard 之后，不顶掉宿主条目。
         ctx.slots.inject('conversation.composer.dock', () =>
           ctx.slots.register({ name: 'conversation.composer.dock', id: 'dsh-context-acp', order: 2, locale: NS }, AcpPill),
+        );
+        // 独立的 nudge 提示：故意与药丸分开注册，它自己挂了不会连累 ACP。
+        ctx.slots.inject('conversation.composer.dock', () =>
+          ctx.slots.register({ name: 'conversation.composer.dock', id: 'dsh-acp-nudge', order: 3, locale: NS }, AcpNudge),
         );
       },
     };
