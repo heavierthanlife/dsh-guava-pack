@@ -48,16 +48,40 @@ const states = new WeakMap();
 /**
  * 进程内最近一次 nudge（跨 agent 的单一读数）。
  *
- * 为什么需要：面板路由（HTTP）拿不到 sessionId（客户端 slot props 只有
- * useProjection/t），所以没法按 agent 取 lastNudge；但面板要显示「上次 nudge」。
- * 这里只保留**最近一次**（谁先谁后是 UI 能说清的语义），并在面板文案里标注
- * 「本进程最新」。WeakMap 不能遍历，所以另存一份标量读数 —— 不是账本，
- * 账本永远从 session 日志重建。
+ * 状态：**仅为向后兼容保留**。面板与横幅现在都带 sessionId 走
+ * {@link nudgeForSession}。「跨会话共享一条读数」正是横幅到处乱弹的根因，
+ * 新代码不要再读它；只有不带 sessionId 的旧客户端才会拿到这里的值。
+ * WeakMap 不能遍历，所以另存一份标量读数 —— 不是账本，账本永远从 session 日志重建。
  */
 let latestNudge = null;
 
 /** 进程内最近一次兜底尝试（同 latestNudge 的理由：面板路由没有 sessionId）。 */
 let latestFallback = null;
+
+/**
+ * **每会话**最近一次 nudge：`sessionId -> { at, usedTokens, contextWindow, reason }`。
+ *
+ * 为什么需要它（2026-11-06 实测 bug）：横幅以前只读进程级 `latestNudge`，于是
+ * 任何会话只要进程里发生过一次 nudge（15 分钟内）就全都在输入框上方报警 ——
+ * 用户看到「离 55% 还很远的对话」也在显示 nudge。横幅必须按会话区分。
+ *
+ * 会话 id 取自 `agent.session.id`（nudge 侧的 agent 一定有 session；测试里的
+ * 假 agent 用 `agent.id`）。用普通 Map 而不是 WeakMap：http 路由只有 sessionId
+ * 字符串，没有 agent/state 引用。上限 256 条，按插入序淘汰最久未 nudge 的会话
+ * （更新时先 delete 再 set，保证"最近写过"排在最后）；长跑进程不无界增长。
+ */
+const nudgesBySession = new Map();
+const MAX_SESSION_NUDGES = 256;
+
+/** 从 agent 取会话 id（取不到就 null：不猜、不伪造）。 */
+function sessionIdOf(agent) {
+  try {
+    const raw = agent?.session?.id ?? agent?.id;
+    return typeof raw === 'string' && raw !== '' ? raw : null;
+  } catch {
+    return null;
+  }
+}
 
 /** 取（必要时创建）一个 agent 的状态对象。调用方拿到的是**活引用**，可直接改字段。 */
 export function stateOf(agent) {
@@ -75,16 +99,39 @@ export function snapshot(agent) {
   return { ...stateOf(agent) };
 }
 
-/** 读进程内最近一次 nudge（面板路由用；没有则 null，绝不伪造时间）。 */
+/** 读进程内最近一次 nudge（旧客户端/无 sessionId 的调用方；没有则 null，绝不伪造时间）。 */
 export function latestNudgeOf() {
   return latestNudge === null ? null : { ...latestNudge };
 }
 
-/** 记录一次 nudge（C 调用）。 */
+/**
+ * 读**某个会话**最近一次 nudge（横幅与面板的权威读数；该会话没被 nudge 过就 null）。
+ *
+ * @param {string} sessionId 会话 id（空/非字符串一律 null）
+ * @returns {{at:number,usedTokens:number,contextWindow:number,reason:string} | null}
+ */
+export function nudgeForSession(sessionId) {
+  if (typeof sessionId !== 'string' || sessionId === '') return null;
+  const found = nudgesBySession.get(sessionId);
+  return found === undefined ? null : { ...found };
+}
+
+/** 记录一次 nudge（C 调用）：同时写 per-agent state、进程级读数、per-session 读数。 */
 export function recordNudge(agent, { usedTokens, contextWindow, step, reason }) {
   const state = stateOf(agent);
   state.lastNudge = { at: Date.now(), usedTokens, contextWindow, reason: reason ?? 'pressure' };
   latestNudge = { ...state.lastNudge };
+  const sessionId = sessionIdOf(agent);
+  if (sessionId !== null) {
+    // 先删再插：Map 保持插入序，淘汰时最久没 nudge 的会话先出。
+    nudgesBySession.delete(sessionId);
+    nudgesBySession.set(sessionId, { ...state.lastNudge });
+    while (nudgesBySession.size > MAX_SESSION_NUDGES) {
+      const oldest = nudgesBySession.keys().next();
+      if (oldest.done !== false) break;
+      nudgesBySession.delete(oldest.value);
+    }
+  }
   state.lastNudgeStep = typeof step === 'number' ? step : state.lastNudgeStep;
   state.lastNudgeTokens = typeof usedTokens === 'number' ? usedTokens : state.lastNudgeTokens;
   state.turnNudges += 1;

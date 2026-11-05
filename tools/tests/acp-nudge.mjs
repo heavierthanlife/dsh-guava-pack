@@ -881,13 +881,34 @@ test('installPanel 路由：getSettings 信封 + setSettings 夹取并落盘', a
     eq(got.result.value.tunables.growthTokens, 12000, 'tunables.growthTokens');
     eq(got.result.value.tunables.decompressPageSize, 8, 'tunables.decompressPageSize');
     eq(got.result.value.tunables.searchLimit, 20, 'tunables.searchLimit');
-    // 面板没有 sessionId：给「本进程最近一次 nudge」或 null，绝不伪造时间。
-    // 前面的 nudge 用例可能已经记录过，所以这里只断言形状。
+    // 横幅与面板都带 sessionId：host 必须只回**这个会话**的 nudge。
+    // 不带 sessionId 的旧客户端才落到进程级读数（兼容路径），所以先记录再断言。
+    // 前面的 nudge 用例可能已经写过进程级读数，这里对形状只做宽松断言。
     assert(got.result.value.lastNudge === null || typeof got.result.value.lastNudge?.at === 'number', 'lastNudge 形状');
-    recordNudge({ id: 'panel-test-agent' }, { usedTokens: 80, contextWindow: 100, step: 3, reason: 'pressure' });
-    const gotAfterNudge = await callRoute(route, 'getSettings', {}, 'r1b');
-    assert(gotAfterNudge.result.value.lastNudge !== null, '记录 nudge 后面板可见');
-    eq(gotAfterNudge.result.value.lastNudge.usedTokens, 80, 'lastNudge.usedTokens');
+    recordNudge(
+      { session: { id: 'session-alpha' } },
+      { usedTokens: 80, contextWindow: 100, step: 3, reason: 'pressure' },
+    );
+    recordNudge(
+      { session: { id: 'session-beta' } },
+      { usedTokens: 30, contextWindow: 100, step: 1, reason: 'pressure' },
+    );
+
+    // 1) 带 sessionId：各回各的。
+    const gotAlpha = await callRoute(route, 'getSettings', { sessionId: 'session-alpha' }, 'r1c');
+    assert(gotAlpha.result.value.lastNudge !== null, 'alpha 会话的记录可见');
+    eq(gotAlpha.result.value.lastNudge.usedTokens, 80, 'alpha usedTokens');
+    eq(gotAlpha.result.value.nudgeSession, 'session-alpha', '回显请求的 sessionId');
+
+    // 2) 关键回归：没被 nudge 过的会话必须是 null（以前会显示别的会话的 nudge）。
+    const gotGamma = await callRoute(route, 'getSettings', { sessionId: 'session-gamma' }, 'r1d');
+    eq(gotGamma.result.value.lastNudge, null, '未 nudge 过的会话不显示别人的记录');
+
+    // 3) 不带 sessionId 的旧客户端仍拿到进程级最近一次（兼容路径）。
+    const gotLegacy = await callRoute(route, 'getSettings', {}, 'r1e');
+    assert(gotLegacy.result.value.lastNudge !== null, '兼容路径仍有进程级读数');
+    eq(gotLegacy.result.value.lastNudge.usedTokens, 30, '进程级读数是最新那条');
+    eq(gotLegacy.result.value.nudgeSession, null, '未指定会话时回显 null');
 
     const saved = await callRoute(route, 'setSettings', {
       pressureRatio: 0.99,
@@ -944,6 +965,17 @@ test('客户端：nudge 挂在输入框上沿，且赛博黄色规则压过暗�
 
   // 旧的手机 dock 分格规则已不适用（nudge 不再在 dock 里）。
   assert(!/\.dsh-mobile-dock \.acp_nudge_anchor/.test(client), '不应残留 dock 网格定位规则');
+
+  // 2026-11-06：横幅必须按会话取数，否则任何会话都会显示别的会话的 nudge。
+  assert(/function AcpNudge\(\{ sessionId \}\)/.test(client), 'nudge 横幅应接收标准 props 里的 sessionId');
+  assert(/payload: \{ sessionId \}/.test(client), 'nudge 请求应带上 sessionId');
+  assert(/dsh-acp-nudge-dismissed:\$\{sessionId\}/.test(client), '收起状态应按会话分开存');
+  assert(!/payload: \{\}/.test(client), '不应再有"不带 sessionId 直接要进程级 nudge"的请求');
+
+  // 2026-11-06：手机上不再精简文案，必须与桌面完全一致。
+  assert(!/acp_nudge_compact/.test(client), '不应残留手机精简文案 span');
+  assert(!/max-width:430px/.test(client), '不应再按 430px 切换 nudge 文案/字号');
+  assert(!/acp_nudge_hint\{display:none\}/.test(client), '小屏也不应隐藏「建议压缩」提示');
 });
 
 // ── runner ──────────────────────────────────────────────────────────────────

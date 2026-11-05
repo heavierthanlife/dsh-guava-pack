@@ -11,10 +11,12 @@
  *
  * ## 为什么要有投影，而不是客户端直接问路由
  *
- * composer dock 的 slot 渲染 props 只有 `{useProjection, t}` —— 没有 sessionId。
- * 所以「每会话的块数 / 最高 tier / 被压 tokens」必须由宿主注册成 session
- * projection（key=`contextAcp`），客户端用 `useProjection('contextAcp')` 读取。
- * 可调参数与「上次 nudge」是进程级信息，才走 HTTP 路由。
+ * composer dock 的 slot 渲染 props 只有 `{sessionId, useProjection, t}`：
+ * sessionId 有（`dsh-client-ui-session` 的 builtin source 会给每个 session 作用域
+ * slot 注入它），但**瞬时状态没有投影**。所以「每会话的块数 / 最高 tier / 被压
+ * tokens」由宿主注册成 session projection（key=`contextAcp`）——它是从会话日志
+ * 纯折叠出来的、可重放、断线重连也能恢复。可调参数与「本会话上次 nudge」不属于
+ * 日志事实，走 HTTP 路由（客户端把 sessionId 带上去）。
  *
  * ## 投影必须纯、可重放
  *
@@ -35,7 +37,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { latestFallbackOf, latestNudgeOf } from './state.mjs';
+import { latestFallbackOf, latestNudgeOf, nudgeForSession } from './state.mjs';
 import { DEFAULT_FALLBACK } from './fallback.mjs';
 
 import { z } from 'zod';
@@ -356,9 +358,10 @@ function registerProjection(cctx) {
  * 面板读的权威值：
  *   · `tunables`：阈值 / 增长 tokens / 分页 / 检索上限（可调，白名单夹取）
  *   · `armed`：根插件已挂载即 armed（真正的引擎能力由 nudge 的 pre-step 检查）
- *   · `lastNudge`：HTTP 路由没有 sessionId，无法按 agent 取；给**本进程最近一次**
- *     nudge（state.mjs 的 latestNudgeOf），没有就 null（面板显示「本进程暂无记录」），
- *     绝不伪造一个时间。
+ *   · `lastNudge`：**按会话**给最近一次 nudge（`payload.sessionId` → state.mjs 的
+ *     nudgeForSession）。没被 nudge 过的会话就是 null（面板显示「本会话暂无记录」），
+ *     绝不伪造时间、也不拿别的会话的记录顶替。不带 sessionId 的旧客户端才落到
+ *     进程级 latestNudgeOf（兼容路径，横幅已不再使用它）。
  *
  * @param {object} deps 见 lib/index.js `makeDeps`
  * @returns {() => void} disposer
@@ -418,6 +421,13 @@ export function installPanel(deps) {
           }
 
           if (endpoint === 'getSettings') {
+            // 横幅与面板都必须按会话取值：payload.sessionId 由客户端从
+            // session 作用域的标准 props 里带上来（dsh-client-ui-session 的
+            // BUILTIN_SOURCE 对每个 session 作用域 slot 注入 `{sessionId}`）。
+            // 不带 sessionId 的旧客户端才落到进程级读数（兼容路径，不再推荐）。
+            const requestedSession = typeof body.payload?.sessionId === 'string' && body.payload.sessionId !== ''
+              ? body.payload.sessionId
+              : null;
             sendRpc(res, rpcId, {
               ok: true,
               value: {
@@ -427,7 +437,10 @@ export function installPanel(deps) {
                 // nudge 在 pre-step 里用 markArmed 另行验证。
                 armed: true,
                 tunables: tunablesOf(deps.runtime),
-                lastNudge: typeof latestNudgeOf === 'function' ? latestNudgeOf() : null,
+                lastNudge: requestedSession === null
+                  ? (typeof latestNudgeOf === 'function' ? latestNudgeOf() : null)
+                  : nudgeForSession(requestedSession),
+                nudgeSession: requestedSession,
                 // 兜底（原 context-guard 的自动压缩）最近一次尝试：为什么动手 / 为什么没动。
                 lastFallback: typeof latestFallbackOf === 'function' ? latestFallbackOf() : null,
                 // 交接文档最近一次真实结果（写没写、写到哪、为什么没写）。

@@ -12,10 +12,16 @@
  *
  * ## 数据来源（为什么要两条路）
  *
- * slot 的渲染 props 只有 `{useProjection, t}`，**没有 sessionId**：
+ * session 作用域 slot 的渲染 props = 标准 props（`sessionId`，由
+ * `dsh-client-ui-session` 的 builtin source 注入）+ 宿主 owner props + `t`：
  *   - 每会话的块数 / 最高 tier / 被压 tokens → 宿主注册的 `contextAcp` 投影；
  *   - 上下文占用 → token-meter 自己的 `contextPressure` 投影（不重复造数）；
- *   - 可调参数 + 上次 nudge → `POST /context-acp/getSettings`（进程级信息）。
+ *   - 可调参数 + **本会话**上次 nudge → `POST /context-acp/getSettings`，
+ *     请求体带 `sessionId`（不带就退化成进程级读数，只留给旧客户端）。
+ *
+ * 2026-11-06 修过的 bug：nudge 横幅以前不带 sessionId，读的是进程级「最近一次
+ * nudge」，于是任何会话只要 15 分钟内发生过一次 nudge 就全都显示警报（用户看到
+ * 「离 55% 还很远的对话」也在弹）。现在横幅只认**自己会话**的记录。
  *
  * 面板上改阈值/增长 tokens 走 `POST /context-acp/setSettings`，250ms 去抖，
  * 保存成功/失败都在面板里可见 —— 只改界面不改行为的面板是装饰。
@@ -52,7 +58,7 @@ window.__ModuleLoader__.load({
         'panel.shadowed': '累计被压 tokens',
         'panel.used': '上下文占用',
         'panel.lastNudge': '上次 nudge',
-        'panel.noNudge': '本进程暂无记录',
+        'panel.noNudge': '本会话暂无记录',
         'panel.lastFallback': '上次兜底',
         'panel.noFallback': '未触发过（模型都在自己压）',
         'panel.fallback': '兜底自动压缩',
@@ -83,7 +89,7 @@ window.__ModuleLoader__.load({
         'panel.shadowed': 'Tokens shadowed',
         'panel.used': 'Context used',
         'panel.lastNudge': 'Last nudge',
-        'panel.noNudge': 'no record in this process',
+        'panel.noNudge': 'no record in this session',
         'panel.lastFallback': 'Last fallback',
         'panel.noFallback': 'never (the model compacts on its own)',
         'panel.fallback': 'Fallback auto-compact',
@@ -241,7 +247,7 @@ window.__ModuleLoader__.load({
       );
     }
 
-    function AcpPill({ useProjection, t }) {
+    function AcpPill({ sessionId, useProjection, t }) {
       const acp = useProjection('contextAcp');
       const pressure = useProjection('contextPressure');
       const [open, setOpen] = React.useState(false);
@@ -297,13 +303,14 @@ window.__ModuleLoader__.load({
         [],
       );
 
-      // 打开面板时向 host 拉一次可调参数与上次 nudge。
+      // 打开面板时向 host 拉一次可调参数与「本会话」上次 nudge（带 sessionId，
+      // 不带的话 host 只能给进程级读数 —— 那正是别的会话也在报 nudge 的根因）。
       React.useEffect(() => {
         if (!open) return undefined;
         let alive = true;
         void (async () => {
           try {
-            const value = await rpc('getSettings', {});
+            const value = await rpc('getSettings', { sessionId });
             if (alive) setInfo(value);
           } catch {
             if (alive) setInfo(null);
@@ -312,7 +319,7 @@ window.__ModuleLoader__.load({
         return () => {
           alive = false;
         };
-      }, [open]);
+      }, [open, sessionId]);
 
       const contextWindow = num(pressure?.contextWindow);
       const used = num(pressure?.projectedTokens) ?? num(pressure?.pressureTokens);
@@ -404,7 +411,7 @@ window.__ModuleLoader__.load({
       const label = tr('pill.label', { blocks, percent: percent ?? tr('value.unknown') });
       const aria = tr('pill.aria', { blocks, percent: percent ?? tr('value.unknown') });
 
-      // 上次 nudge：host 路由没有 sessionId，拿不到就诚实说"本进程暂无记录"。
+      // 上次 nudge：host 已按 sessionId 过滤；本会话没提醒过就诚实说「本会话暂无记录」。
       const lastNudge = info?.lastNudge ?? null;
       let nudgeText;
       if (info === null) {
@@ -599,7 +606,6 @@ window.__ModuleLoader__.load({
   width:18px;height:18px;border-radius:50%;flex:none;
   background:#b45309;color:#fff;font-size:11px;font-weight:700}
 .acp_nudge_hint{opacity:.85;font-weight:500}
-.acp_nudge_compact{display:none}
 .acp_nudge_close{display:inline-flex;align-items:center;justify-content:center;
   width:18px;height:18px;border:0;border-radius:50%;padding:0;flex:none;cursor:pointer;
   background:transparent;color:inherit;opacity:.55;font-size:14px;line-height:1;margin-left:auto}
@@ -632,34 +638,52 @@ body[data-ds-dark-theme] .acp_nudge_cyber .acp_nudge_hint,
 @media (prefers-reduced-motion: reduce){
   .acp_nudge{animation:none!important;transition:none!important}
 }
-@media (max-width:430px){
-  .acp_nudge_hint{display:none}
-  .acp_nudge_wide{display:none}
-  .acp_nudge_compact{display:inline}
-  .acp_nudge{gap:6px;padding:0 8px;font-size:11px}
-}
+/* 小屏不再精简文案：手机宽度放得下完整一行「上下文 N% · 建议压缩」。
+   以前 430px 以下把文案压成「N%」并藏掉提示，用户实测明确要求与桌面一致。 */
 `;
 
-    /** 最近一次 nudge 的可见提示。失败时静默返回 null，绝不影响主界面。 */
-    function AcpNudge() {
+    /** 本会话最近一次 nudge 的可见提示。失败时静默返回 null，绝不影响主界面。 */
+    function AcpNudge({ sessionId }) {
+      // 没有会话作用域（例如还没有会话的 hero 输入框）就不可能有"本会话的 nudge"。
+      // 注意：这里**不能**提前 return —— hooks 必须每次都跑，只能最后按 hasSession 渲染 null。
+      const hasSession = typeof sessionId === 'string' && sessionId !== '';
       const [state, setState] = React.useState(null);
-      // 用户点过 × 的那次 nudge 不再显示；换一次 nudge（at 变了）自动重新出现。
-      const [dismissedAt, setDismissedAt] = React.useState(() => {
-        try {
-          const raw = sessionStorage.getItem('dsh-acp-nudge-dismissed');
-          return raw === null ? undefined : Number(raw);
-        } catch {
-          return undefined;
-        }
-      });
+      // 收起状态必须按会话分开存：在 A 会话点过 × 不能把 B 会话的提醒也吞掉。
+      const dismissStoreKey = hasSession ? `dsh-acp-nudge-dismissed:${sessionId}` : null;
+      // 用户点过 × 的**那一次** nudge 不再显示；换一次 nudge（at 变了）自动重新出现。
+      const [dismissedAt, setDismissedAt] = React.useState(undefined);
       React.useEffect(() => {
+        // 切会话时先清掉上一个会话的记忆，再从该会话自己的键读收起状态，
+        // 避免"上一会话的提醒"在新会话里闪一下。
+        setState(null);
+        if (dismissStoreKey === null) {
+          setDismissedAt(undefined);
+          return;
+        }
+        try {
+          const raw = sessionStorage.getItem(dismissStoreKey);
+          setDismissedAt(raw === null ? undefined : Number(raw));
+        } catch {
+          setDismissedAt(undefined);
+        }
+      }, [dismissStoreKey]);
+
+      React.useEffect(() => {
+        if (!hasSession) return undefined;
         let alive = true;
         const load = async () => {
           try {
             const response = await fetch(`${ROUTE}/getSettings`, {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ type: 'client-request', rpcId: 'nudge', method: 'getSettings', payload: {} }),
+              // 关键：带 sessionId。宿主只回**这个会话**的 nudge；不带的话会退化成
+              // 进程级读数，任何会话都会显示别人的提醒（2026-11-06 修掉的 bug）。
+              body: JSON.stringify({
+                type: 'client-request',
+                rpcId: 'nudge',
+                method: 'getSettings',
+                payload: { sessionId },
+              }),
             });
             const data = await response.json();
             const value = data?.result?.value;
@@ -674,7 +698,7 @@ body[data-ds-dark-theme] .acp_nudge_cyber .acp_nudge_hint,
           alive = false;
           clearInterval(timer);
         };
-      }, []);
+      }, [sessionId, hasSession]);
 
       // 赛博 2077 主题在根节点上没有类名（它的 cp2077-on 只加在面板按钮上），
       // 只能靠它插入的 <style data-cyberpunk-theme> 来判定。轮询时重算一次即可。
@@ -686,6 +710,7 @@ body[data-ds-dark-theme] .acp_nudge_cyber .acp_nudge_hint,
       }
 
       const at = num(state?.lastNudge?.at);
+      if (!hasSession) return null;
       if (at === undefined || at <= 0) return null;
       if (dismissedAt === at) return null;
       const ageMs = Date.now() - at;
@@ -712,17 +737,16 @@ body[data-ds-dark-theme] .acp_nudge_cyber .acp_nudge_hint,
             title: `上次 nudge：${when}${percent === undefined ? '' : `（上下文 ${percent}%）`} · 模型可选择压缩历史`,
           },
           h('span', { key: 'badge', className: 'acp_nudge_badge' }, '!'),
-          h('span', { key: 'text', className: 'acp_nudge_text acp_nudge_wide' },
+          // 只用一份文案：手机与桌面完全一致（以前 430px 以下会换成精简版）。
+          h('span', { key: 'text', className: 'acp_nudge_text' },
             percent === undefined ? '上下文压力' : `上下文 ${percent}%`),
-          h('span', { key: 'compact', className: 'acp_nudge_text acp_nudge_compact' },
-            percent === undefined ? '压力' : `${percent}%`),
           h('span', { key: 'hint', className: 'acp_nudge_hint' }, '建议压缩'),
           h('button', {
             key: 'close', type: 'button', className: 'acp_nudge_close',
             'aria-label': '收起提醒', title: '收起提醒（下次 nudge 再出现）',
             onClick: (event) => {
               event.stopPropagation();
-              try { sessionStorage.setItem('dsh-acp-nudge-dismissed', String(at)); } catch { /* 隐私模式忽略 */ }
+              try { sessionStorage.setItem(dismissStoreKey, String(at)); } catch { /* 隐私模式忽略 */ }
               setDismissedAt(at);
             },
           }, '×'),

@@ -205,9 +205,13 @@ node tools/gen-acp-preset.mjs --check   # 上游漂移
 ## 已知限制
 
 - **需要重启 DSH**：preset 覆盖层与根插件都在 host 侧加载。
-- **面板 pill 的「上次 nudge」是进程级最新一条**：客户端 slot 拿不到 sessionId，
-  每会话数据走 projection，nudge 瞬时状态只能全局展示（面板标注「本进程最新」）；
-  `/acp status` 里的 nudge 才是该会话自己的（读共享 state 的 per-agent 值）。
+- **面板 pill 与输入框上沿横幅的「上次 nudge」都是本会话的**：session 作用域 slot
+  能拿到标准 props `sessionId`，客户端把它带给 `getSettings`，宿主按会话返回
+  （`nudgeForSession`）。没被 nudge 过的会话就是 `null`，不会显示别的会话的提醒
+  （2026-11-06 修掉「所有对话都在弹 nudge」的 bug）。不带 `sessionId` 的旧客户端
+  才落到进程级 `latestNudgeOf`（兼容路径，横幅已不再用它）。
+- **横幅文案在手机与桌面一致**：不再按 430px 隐藏「建议压缩」或把「上下文 N%」
+  压成「N%」——实测手机宽度放得下完整一行。
 - **面板只暴露两个可调项**（阈值%、增长 tokens）；`decompressPageSize` / `searchLimit`
   仍可在 `config/acp.json` + 面板 HTTP 路由的 `setSettings` 调整，只是没放成步进控件。
 - **`compactRegion` 需要在 turn 内调用**：模型在 turn 中调 `compress` 天然满足；
