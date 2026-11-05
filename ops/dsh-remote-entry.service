@@ -10,6 +10,8 @@ Type=simple
 WorkingDirectory=/home/guava5tar_/dsh/playground/themes/dsh-guava-pack
 Environment=DSH_HOME=/home/guava5tar_/dsh
 Environment=DSH_REMOTE_PORT=3098
+# 只监听回环：外部只能经 SSH 隧道（127.0.0.1）进入
+Environment=DSH_REMOTE_BIND=127.0.0.1
 ExecStart=/usr/bin/env node /home/guava5tar_/dsh/playground/themes/dsh-guava-pack/ops/dsh-remote-entry.mjs
 Restart=always
 RestartSec=3
