@@ -22,6 +22,8 @@ alias rk='bash ops/backup/restic-ctl.sh'   # 可选，装个短名字
 | 删一个快照 | `rk forget <id>` |
 | 删并回收空间 | `rk forget <id> --prune` |
 | 只回收未引用数据（不删快照） | `rk prune`（2026-11-05 实测 833M → 562M） |
+
+自动回收：`dsh-prune.timer` 每月 1 日 04:30 跑一次 `restic prune`（不补跑；备份定时器只备份）。
 | 清理陈旧锁 | `rk unlock` |
 
 ## 恢复（最常用的部分）

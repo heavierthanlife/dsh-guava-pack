@@ -161,7 +161,8 @@ VPS:  npm ci --omit=dev（本地编译 sqlite 原生模块）
 - 脚本 `ops/backup/restic-backup.sh`：`--compression max`、`--limit-upload 200`（留带宽给隧道），
   排除 node_modules / cache / .git / .shots / *.log；
 - 定时器 `dsh-backup.timer`：每日 03:30，`Persistent=true`（**只备份，不自动 prune**）；
-- 手动回收：`restic-ctl.sh prune`（2026-11-05 实测回收 269 MiB，833M → 562M）；
+- 回收：`restic-ctl.sh prune`（2026-11-05 实测回收 269 MiB，833M → 562M）；
+  `dsh-prune.timer` 每月 1 日 04:30 自动跑一次（`Persistent=false`）。
 - **首次全量约 16 分钟 / 800MB**；增量很小。
 
 ⚠️ 长任务不要用临时 shell 跑（会被回收），用 `systemctl --user start dsh-backup.service --no-block`。
