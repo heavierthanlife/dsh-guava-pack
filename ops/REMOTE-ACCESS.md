@@ -122,6 +122,46 @@ DSH 本体始终只监听 `127.0.0.1:3080`，外部入口都是**反代**。
 公网只剩 UDP 41641（WireGuard 对未授权探测静默，扫描器看不到任何东西）。
 代价是 PC 必须常驻 Tailscale，隧道依赖它。
 
+## VPS 上的附加服务（2026-11-05）
+
+| 服务 | 监听 | 用途 | 资源 |
+|---|---|---|---|
+| tailscaled | UDP 41641 | 手机直连入口 | ~40MB |
+| sshd | TCP 22 | PC 反向隧道 + 管理 | ~10MB |
+| uptime-kuma | **100.109.125.37:3001**（仅 tailnet） | 监控隧道/DSH 存活 | ~150MB |
+| restic 仓库 | /srv/backup/dsh | DSH 每日加密备份 | 磁盘 ~830MB/次全量 |
+
+### Uptime Kuma 的特殊装法（重要）
+
+**不要在这台机器上跑 vite 构建**：2C2G 上会把内存打满、swap 抖动，
+sshd 连 banner 都发不出（实测发生过，只能控制台重启）。
+
+正确流程：
+
+```
+PC:   拉源码 → npm ci --ignore-scripts → npm run build → 得到 dist（14MB）
+传输: tar czf - dist | ssh root@VPS 'tar -C /opt/uptime-kuma -xzf -'
+VPS:  npm ci --omit=dev（本地编译 sqlite 原生模块）
+```
+
+三个必踩的坑：
+
+1. **node-gyp 下 headers 被墙** → `npm_config_disturl=https://registry.npmmirror.com/-/binary/node`；
+2. **Cypress 二进制下不动** → `CYPRESS_INSTALL_BINARY=0`（构建不需要它）；
+3. **npm 日志目录不可写**（受限环境）→ `npm_config_logs_dir` 指到可写目录。
+
+单元里 `ProtectSystem=full` 要求 `ReadWritePaths` 路径已存在，故有 `ExecStartPre=mkdir`。
+
+### restic 备份
+
+- 仓库：`sftp:root@112.126.90.114:/srv/backup/dsh`，密码在 `~/.restic-pass`；
+- 脚本 `ops/backup/restic-backup.sh`：`--compression max`、`--limit-upload 200`（留带宽给隧道），
+  排除 node_modules / cache / .git / .shots / *.log；
+- 定时器 `dsh-backup.timer`：每日 03:30，`Persistent=true`；
+- **首次全量约 16 分钟 / 800MB**；增量很小。
+
+⚠️ 长任务不要用临时 shell 跑（会被回收），用 `systemctl --user start dsh-backup.service --no-block`。
+
 ## 新设备（平板）怎么接
 
 1. 导入 `caikuai03-split-phone.ovpn`（与手机同一份即可）；
