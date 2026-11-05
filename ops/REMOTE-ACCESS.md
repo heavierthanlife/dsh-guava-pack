@@ -119,7 +119,10 @@ DSH 本体始终只监听 `127.0.0.1:3080`，外部入口都是**反代**。
 - `PasswordAuthentication no` —— 只能密钥登录；
 - `authorized_keys` 仅 1 把（PC 的 WSL 密钥）；
 - `GatewayPorts clientspecified` —— 反向隧道只绑 tailnet 地址，公网看不到 22022；
-- PC 侧反代 `DSH_REMOTE_BIND=127.0.0.1` —— 外部完全无法直连 3098。
+- PC 侧反代 `DSH_REMOTE_BIND=127.0.0.1` —— 外部完全无法直连 3098；
+- 元数据/云助手：Tailscale 的 `ts-input` 会把源地址 `100.64.0.0/10` 的非 tailscale 包
+  丢掉，而阿里云元数据 `100.100.100.200` 正好在这个段里 → `dsh-aliyun-metadata.service`
+  在 ts-input 之前显式放行它（否则云助手/免密登录一直异常），详见 `ops/vps/README.md`。
 
 进阶（未实施）：PC 加入 tailnet 后，22 端口可从安全组整体删除，
 公网只剩 UDP 41641（WireGuard 对未授权探测静默，扫描器看不到任何东西）。
