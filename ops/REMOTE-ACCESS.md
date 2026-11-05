@@ -107,7 +107,7 @@ DSH 本体始终只监听 `127.0.0.1:3080`，外部入口都是**反代**。
 | 协议/端口 | 来源 | 用途 | 必须保留 |
 |---|---|---|---|
 | UDP 41641 | 0.0.0.0/0 | Tailscale 直连（不放行就退回东京 DERP，抖动） | ✅ |
-| TCP 22 | 0.0.0.0/0（安全组）→ 主机 iptables 丢弃公网 | 仅 tailnet 内 SSH（反向隧道/管理/restic） | ✅（`PasswordAuthentication no`，仅密钥） |
+| TCP 22 | 公网 0.0.0.0/0 → 主机 iptables 丢弃；安全组保留 **100.104.0.0/16** | tailnet 内 SSH + 控制台 Workbench 实例登录 | ✅（`PasswordAuthentication no`，仅密钥） |
 | ICMP | 0.0.0.0/0 | 系统默认，无害 | 可选 |
 | ~~TCP 3389 (RDP)~~ | ~~0.0.0.0/0~~ | 外网扫描已 closed；按清理项删除 | ✅ 已关 |
 
