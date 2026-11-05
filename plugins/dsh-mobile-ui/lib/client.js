@@ -43,6 +43,8 @@ window.__ModuleLoader__.load({
 
     /** A phone: short physical side <= 520 CSS px. Tablets start near 600. */
     var PHONE_SHORT_SIDE = 520;
+    /** 平板左右分屏后，浏览器窗口短边 <= 这个值就按「大手机」处理。 */
+    var TABLET_SPLIT_MAX = 720;
     /** The type scale the multipliers below were measured against. */
     var BASELINE_PX = 14;
 
@@ -58,7 +60,7 @@ window.__ModuleLoader__.load({
 
     var T = {
       title: '移动端显示',
-      desc: '只改字号，不动布局。只在手机尺寸的屏幕上生效；平板和桌面完全不受影响。',
+      desc: '只改字号，不动布局。手机尺寸的屏幕生效；平板左右分屏（窗口短边 ≤ 720px）也会按大手机处理。桌面不受影响。',
       fontLabel: '字号（整体缩放）',
       fontHint: '正文、界面控件、代码字号按同一比例联动。基准 14px＝完全不改动。',
       previewLabel: '效果预览',
@@ -69,8 +71,10 @@ window.__ModuleLoader__.load({
       forceHint: '预览用：勾上后桌面窗口收窄到 ≤560px 也能看到手机样式。',
       statusLabel: '当前状态',
       detected: '已判定为手机',
+      detectedSplit: '已判定为大手机（平板分屏）',
       notDetected: '未判定为手机（平板 / 桌面）',
       reasonScreen: '依据：屏幕短边 ≤ ' + PHONE_SHORT_SIDE + 'px',
+      reasonTabletSplit: '依据：平板设备 + 窗口短边 ≤ ' + TABLET_SPLIT_MAX + 'px',
       reasonForced: '依据：手动强制开启',
       reasonNone: '依据：无',
       reset: '恢复默认',
@@ -401,7 +405,9 @@ window.__ModuleLoader__.load({
      *   · 平板悬浮窗
      *   · 桌面把窗口拖窄
      * 平板本来用得好好的，不该因为窗口一变窄就整体换布局。现在：
-     *   手机 = 屏幕短边 ≤ 520px；平板 / 桌面一律不进入手机模式。
+     *   手机 = 屏幕短边 ≤ 520px；
+     *   平板设备分屏（浏览器窗口短边 ≤ 720px）= 按大手机处理；
+     *   桌面窗口再窄也不进入手机模式。
      * 想在窄窗口里预览手机样式，用设置里的「在桌面也启用」开关（force）。
      */
     function detectPhone() {
@@ -410,8 +416,28 @@ window.__ModuleLoader__.load({
           (window.screen && window.screen.width) || 9999,
           (window.screen && window.screen.height) || 9999,
         );
-        return screenShort <= PHONE_SHORT_SIDE ? 'screen-short-side' : '';
+        if (screenShort <= PHONE_SHORT_SIDE) return 'screen-short-side';
+        // 平板左右分屏：物理屏幕还是平板，但浏览器窗口只剩半屏。
+        // 这时按「大手机」排（dock 2×2、抽屉、回车换行等），不然内容太挤。
+        if (isTabletDevice()) {
+          var viewShort = Math.min(window.innerWidth || 0, window.innerHeight || 0);
+          if (viewShort > 0 && viewShort <= TABLET_SPLIT_MAX) return 'tablet-split-window';
+        }
+        return '';
       } catch (e) { return ''; }
+    }
+
+    /** 只认「平板设备」：桌面窗口拖窄不算，避免误伤。 */
+    function isTabletDevice() {
+      try {
+        var ua = navigator.userAgent || '';
+        if (/iPad/i.test(ua)) return true;
+        if (/Tablet|PlayBook|Silk/i.test(ua)) return true;
+        if (/Android/i.test(ua) && !/Mobile/i.test(ua)) return true;
+        // iPadOS 13+ 的桌面 UA：伪装成 Macintosh，但有多点触控。
+        if (/Macintosh/i.test(ua) && (navigator.maxTouchPoints || 0) > 1) return true;
+      } catch (e) {}
+      return false;
     }
 
     /** 只写 <html> 的 class 与两个自定义属性。不碰任何其它 DOM。 */
@@ -935,6 +961,7 @@ window.__ModuleLoader__.load({
       }
 
       var reasonText = status.reason === 'screen-short-side' ? T.reasonScreen
+        : status.reason === 'tablet-split-window' ? T.reasonTabletSplit
         : status.reason === 'forced' ? T.reasonForced
         : T.reasonNone;
 
@@ -1036,7 +1063,9 @@ window.__ModuleLoader__.load({
           },
         }, [
           h('div', { key: 'a', style: { fontWeight: 500 } },
-            T.statusLabel + '：' + (status.active ? T.detected : T.notDetected)),
+            T.statusLabel + '：' + (status.active
+              ? (status.reason === 'tablet-split-window' ? T.detectedSplit : T.detected)
+              : T.notDetected)),
           h('div', { key: 'b', style: { opacity: 0.7 } }, reasonText),
           h('div', { key: 'c', style: { opacity: 0.7 } },
             '屏幕短边 ' + shortScreen + 'px · 窗口短边 ' + shortView + 'px'),
@@ -1086,6 +1115,18 @@ window.__ModuleLoader__.load({
           document.head.appendChild(style);
 
           var state = applyToRoot(readSettings());
+
+          // 平板分屏/退出分屏不会触发设置面板里的 resize 监听（面板没挂载时），
+          // 所以在插件生命周期上挂一个全局监听，保证 dsh-phone 随窗口短边切换。
+          ctx.effect(function () {
+            var reapply = function () { applyToRoot(readSettings()); };
+            window.addEventListener('resize', reapply, { passive: true });
+            window.addEventListener('orientationchange', reapply, { passive: true });
+            return function () {
+              window.removeEventListener('resize', reapply);
+              window.removeEventListener('orientationchange', reapply);
+            };
+          }, 'dsh-mobile-ui: tablet split detection');
           window.__dshMobileUI = {
             active: state.active, reason: state.reason,
             settings: readSettings(), hasStyle: true,

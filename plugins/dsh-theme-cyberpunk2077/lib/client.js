@@ -390,6 +390,70 @@ window.__ModuleLoader__.load({
 			return btn;
 		}
 
+		// ── touch 布局：SND / DECK 浮层抬到输入卡上方 ────────────────────
+		// 平板上这两枚 fixed 按钮原来贴屏幕右下角，正好压住输入栏的停止/发送键。
+		// 触摸设备上把它们锚到 composer 卡片上沿；卡片会随多行输入变高，
+		// 所以用轻量轮询 + resize 重算，而不是写死 bottom。
+		function findComposerCard() {
+			// 页面里可能同时挂着隐藏的 hero composer（新会话落地页）和当前会话的
+			// composer；必须按「可见 + 最靠下」挑，否则会一直按隐藏卡的坐标摆放。
+			let best = null;
+			for (const card of document.querySelectorAll("[class*='_card']")) {
+				const rect = card.getBoundingClientRect();
+				if (rect.width < 40 || rect.height < 40) continue;
+				if (rect.bottom <= 0 || rect.top >= window.innerHeight) continue;
+				if (card.querySelector("button[class*='_primary']") === null) continue;
+				if (best === null || rect.top > best.getBoundingClientRect().top) best = card;
+			}
+			return best;
+		}
+		function positionTouchChips() {
+			const snd = document.getElementById("cp2077-snd-toggle");
+			if (snd === null) return;
+			const deckBtn = document.getElementById("cp2077-deck-toggle");
+			const deck = document.getElementById("cp2077-deck");
+			const nodes = [snd, deckBtn, deck];
+			const coarse = typeof matchMedia !== "undefined" && matchMedia("(pointer: coarse)").matches;
+			const card = coarse ? findComposerCard() : null;
+			if (card === null) {
+				nodes.forEach((node) => {
+					if (node) {
+						node.style.removeProperty("top");
+						node.style.removeProperty("bottom");
+					}
+				});
+				return;
+			}
+			const rect = card.getBoundingClientRect();
+			if (rect.height === 0) return;
+			// 用 top 而不是 bottom：分屏手机布局下 fixed 的 bottom 会被布局视口
+			// 重新解释（实测 221px 渲染成 603px），top 没有这个问题。
+			const gap = 10;
+			const sndTop = Math.max(8, Math.round(rect.top) - gap - 26);
+			snd.style.top = sndTop + "px";
+			snd.style.bottom = "auto";
+			if (deckBtn) {
+				deckBtn.style.top = Math.max(8, sndTop - 4 - 23) + "px";
+				deckBtn.style.bottom = "auto";
+			}
+			if (deck) {
+				const panelH = deck.classList.contains("cp2077-open") ? deck.offsetHeight : 0;
+				deck.style.top = Math.max(8, (deckBtn ? parseInt(deckBtn.style.top, 10) : sndTop) - 8 - panelH) + "px";
+				deck.style.bottom = "auto";
+			}
+		}
+		function startChipPlacement() {
+			positionTouchChips();
+			const timer = setInterval(positionTouchChips, 800);
+			window.addEventListener("resize", positionTouchChips);
+			window.addEventListener("orientationchange", positionTouchChips);
+			return () => {
+				clearInterval(timer);
+				window.removeEventListener("resize", positionTouchChips);
+				window.removeEventListener("orientationchange", positionTouchChips);
+			};
+		}
+
 		// ── interaction watchers (send / done / error / toast) ────────────
 		let lastSfxAt = 0;
 		function throttled(fn) {
@@ -1347,6 +1411,7 @@ window.__ModuleLoader__.load({
 						playBootTransition();
 						ensureSndChip();
 						ensureDeckPanel();
+						stop.push(startChipPlacement());
 						document.addEventListener("keydown", onKeydown, true);
 						// Built one by one: an array literal evaluates left to
 						// right, so a creator that throws would strand the

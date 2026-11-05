@@ -63,12 +63,28 @@ check('mobile-ui 提供 installComposerDock', /function installComposerDock\s*\(
 check('apply 里安装 dock 布局', /return installComposerDock\(\)/.test(mobileUi));
 check('从统计锚点定位 dock（bOPqQW）', /bOPqQW/.test(mobileUi) && /_dock/.test(mobileUi));
 check('dock 改为两列网格', /:root\.dsh-phone \.dsh-mobile-dock\s*\{[^}]*display:\s*grid/.test(mobileUi) &&
-  /grid-template-columns:\s*minmax\(0,\s*1fr\)\s*auto/.test(mobileUi));
-check('统计在左列上下叠放', /bOPqQW[^}]*grid-row:\s*1\s*\/\s*span 2/.test(mobileUi) &&
-  /bOPqQW[^}]*flex-direction:\s*column/.test(mobileUi));
+  /grid-template-columns:\s*minmax\(max-content,\s*1fr\)\s*auto/.test(mobileUi));
+check('两个统计锚点各占左列一行（nth-of-type 分格）',
+  /bOPqQW_anchor"\]:nth-of-type\(1\)\s*\{[^}]*grid-row:\s*1/.test(mobileUi) &&
+  /bOPqQW_anchor"\]:nth-of-type\(2\)\s*\{[^}]*grid-row:\s*2/.test(mobileUi));
+check('统计块不再改成 column flex（会撑成多行）', !/bOPqQW[^}]*flex-direction:\s*column/.test(mobileUi));
 check('占用量在右列上行', /JObwrW[^}]*grid-row:\s*1/.test(mobileUi) && /JObwrW[^}]*grid-column:\s*2/.test(mobileUi));
 check('插件药丸在右列下行（内联，非悬浮）', /_anchor"\]?:not\(\[class\*="bOPqQW"\]\)[^}]*grid-row:\s*2/.test(mobileUi));
 check('DOM 重建后能重新打标（MutationObserver）', /MutationObserver/.test(mobileUi));
+
+// ── 1.5 平板分屏 = 大手机 ──────────────────────────────────────────────
+console.log('\n平板分屏分支（mobile-ui）');
+check('定义分屏阈值 720', /TABLET_SPLIT_MAX\s*=\s*720/.test(mobileUiRaw));
+check('detectPhone 含 tablet-split-window', /tablet-split-window/.test(mobileUiRaw));
+check('仅平板设备触发（isTabletDevice）', /function isTabletDevice/.test(mobileUiRaw));
+check('全局 resize 重算，不依赖设置面板', /tablet split detection/.test(mobileUiRaw));
+
+// ── 1.6 赛博主题浮层避让输入栏 ─────────────────────────────────────────
+console.log('\n赛博主题浮层（cyberpunk）');
+const cyber = read('plugins/dsh-theme-cyberpunk2077/lib/client.js');
+check('SND/DECK 在触屏上重新定位', /function positionTouchChips/.test(cyber) && /\(pointer: coarse\)/.test(cyber));
+check('定位到可见且最靠下的 composer 卡', /function findComposerCard/.test(cyber) && /rect\.top > best\.getBoundingClientRect\(\)\.top/.test(cyber));
+check('用 top 定位并覆盖 bottom（避免被拉伸）', /style\.top = sndTop/.test(cyber) && /style\.bottom = "auto"/.test(cyber));
 
 // ── 2. ACP 面板的手机尺寸 ──────────────────────────────────────────────
 console.log('\nACP 面板手机适配');
@@ -84,8 +100,8 @@ check('长标签在手机上允许折行（dt 不再 nowrap）',
   /:root\.dsh-phone \.acp_rows dt\s*\{[^}]*white-space:\s*normal/.test(acpPhone));
 check('面板最大高度用 dvh 且可滚动',
   /max-height:\s*min\(\d+dvh/.test(acpPhone) && /overflow-y:\s*auto/.test(acpPhone));
-check('手机用完整文案（旧版样式），短标签保留但隐藏',
-  /\.acp_short\s*\{\s*display:\s*none/.test(acp) && !/:root\.dsh-phone \.acp_short\s*\{\s*display:\s*inline/.test(acpPhone));
+check('药丸只用完整文案（没有短标签分支）',
+  /'pill\.label'/.test(acp) && !/\.acp_short/.test(acp));
 check('药丸在手机上抬高到 ≥40px', /:root\.dsh-phone \.acp_pill\s*\{[^}]*min-height:\s*40px/.test(acpPhone));
 
 // 2026-10-28 两个实测踩到的坑，各钉一条：
