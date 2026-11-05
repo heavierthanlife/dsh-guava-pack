@@ -100,6 +100,28 @@ DSH 本体始终只监听 `127.0.0.1:3080`，外部入口都是**反代**。
 
 详细步骤、自检脚本、已知短板见 [`ops/tunnel/README.md`](tunnel/README.md)。
 
+## VPS 暴露面（2026-11-05 定稿）
+
+阿里云安全组只保留必要规则：
+
+| 协议/端口 | 来源 | 用途 | 必须保留 |
+|---|---|---|---|
+| UDP 41641 | 0.0.0.0/0 | Tailscale 直连（不放行就退回东京 DERP，抖动） | ✅ |
+| TCP 22 | 0.0.0.0/0 | PC 的 SSH 反向隧道 + 你的管理登录 | ✅（`PasswordAuthentication no`，仅密钥） |
+| ICMP | 0.0.0.0/0 | 系统默认，无害 | 可选 |
+| ~~TCP 3389 (RDP)~~ | ~~0.0.0.0/0~~ | Linux 上无服务，纯扫描噪音 | ❌ **应删除** |
+
+加固现状：
+
+- `PasswordAuthentication no` —— 只能密钥登录；
+- `authorized_keys` 仅 1 把（PC 的 WSL 密钥）；
+- `GatewayPorts clientspecified` —— 反向隧道只绑 tailnet 地址，公网看不到 22022；
+- PC 侧反代 `DSH_REMOTE_BIND=127.0.0.1` —— 外部完全无法直连 3098。
+
+进阶（未实施）：PC 加入 tailnet 后，22 端口可从安全组整体删除，
+公网只剩 UDP 41641（WireGuard 对未授权探测静默，扫描器看不到任何东西）。
+代价是 PC 必须常驻 Tailscale，隧道依赖它。
+
 ## 新设备（平板）怎么接
 
 1. 导入 `caikuai03-split-phone.ovpn`（与手机同一份即可）；
