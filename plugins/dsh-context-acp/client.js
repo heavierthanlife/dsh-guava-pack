@@ -117,9 +117,6 @@ window.__ModuleLoader__.load({
   display:inline-flex;cursor:pointer}
 .acp_pill:hover{color:var(--dsw-alias-label-secondary)}
 .acp_pill[data-open="true"]{color:var(--dsw-alias-label-primary)}
-/* 最近 10 分钟内发生过 nudge：药丸变告警色，避免"提醒了但看不出来" */
-.acp_pill[data-nudged="true"]{color:var(--dsw-alias-state-warning-primary,#f5a524)}
-.acp_pill[data-nudged="true"] .acp_label{font-weight:500}
 .acp_icon{width:13px;height:13px;flex:none;display:block}
 .acp_panel{position:absolute;bottom:calc(100% + 8px);right:0;left:auto;z-index:1100;
   box-sizing:border-box;border-radius:var(--dsw-radius-lg);background:var(--dsw-specific-menu);
@@ -536,21 +533,17 @@ window.__ModuleLoader__.load({
             key: 'trigger',
             type: 'button',
             className: 'acp_pill',
-            'data-nudged': nudgedRecently ? 'true' : undefined,
             'data-open': open ? 'true' : 'false',
             'aria-label': aria,
             'aria-haspopup': 'dialog',
             'aria-expanded': open,
-            title: nudgedRecently && nudgePercentRecent !== undefined
-              ? `${aria}  ·  上次提醒：${new Date(nudgeAt).toLocaleTimeString()}（${nudgePercentRecent}%）`
-              : aria,
+            title: aria,
             onClick: () => setOpen((value) => !value),
           },
           h(AcpIcon, { key: 'icon' }),
           // 文案只保留块数：占用百分比与宿主自带的上下文药丸重复，已删除。
           // aria-label 仍带完整信息（块数 + 占用）。
-          h('span', { key: 'label', className: 'acp_label' },
-            (nudgedRecently ? '⚠ ' : '') + label),
+          h('span', { key: 'label', className: 'acp_label' }, label),
         ),
         open &&
           h('div', { key: 'panel', className: 'acp_panel', role: 'dialog', 'aria-label': tr('panel.title') }, [
