@@ -44,7 +44,7 @@ window.__ModuleLoader__.load({
     /** A phone: short physical side <= 520 CSS px. Tablets start near 600. */
     var PHONE_SHORT_SIDE = 520;
     /** 平板左右分屏后，浏览器窗口短边 <= 这个值就按「大手机」处理。 */
-    var TABLET_SPLIT_MAX = 720;
+    var TABLET_SPLIT_MAX = 820;
     /** The type scale the multipliers below were measured against. */
     var BASELINE_PX = 14;
 
@@ -74,7 +74,7 @@ window.__ModuleLoader__.load({
       detectedSplit: '已判定为大手机（平板分屏）',
       notDetected: '未判定为手机（平板 / 桌面）',
       reasonScreen: '依据：屏幕短边 ≤ ' + PHONE_SHORT_SIDE + 'px',
-      reasonTabletSplit: '依据：平板设备 + 窗口短边 ≤ ' + TABLET_SPLIT_MAX + 'px',
+      reasonTabletSplit: '依据：触屏/平板 + 分屏窗口（短边 ≤ ' + TABLET_SPLIT_MAX + 'px，或 ≤ 屏幕短边 66%）',
       reasonForced: '依据：手动强制开启',
       reasonNone: '依据：无',
       reset: '恢复默认',
@@ -419,12 +419,26 @@ window.__ModuleLoader__.load({
         if (screenShort <= PHONE_SHORT_SIDE) return 'screen-short-side';
         // 平板左右分屏：物理屏幕还是平板，但浏览器窗口只剩半屏。
         // 这时按「大手机」排（dock 2×2、抽屉、回车换行等），不然内容太挤。
-        if (isTabletDevice()) {
+        // 触屏设备（UA 认不出平板时用粗指针兜底）。浏览器缩放会放大
+        // innerWidth，所以除了绝对阈值，再看「窗口短边 / 屏幕短边」比例。
+        if (isTabletDevice() || isCoarsePointer()) {
           var viewShort = Math.min(window.innerWidth || 0, window.innerHeight || 0);
-          if (viewShort > 0 && viewShort <= TABLET_SPLIT_MAX) return 'tablet-split-window';
+          var screenShort2 = Math.min(
+            (window.screen && window.screen.width) || 0,
+            (window.screen && window.screen.height) || 0,
+          );
+          var ratioSplit = screenShort2 > 0 && viewShort > 0 && viewShort <= screenShort2 * 0.66;
+          if (viewShort > 0 && (viewShort <= TABLET_SPLIT_MAX || ratioSplit)) return 'tablet-split-window';
         }
         return '';
       } catch (e) { return ''; }
+    }
+
+    /** 触屏（平板/手机）：用于 UA 认不出时的兜底，桌面鼠标为 false。 */
+    function isCoarsePointer() {
+      try {
+        return typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches;
+      } catch (e) { return false; }
     }
 
     /** 只认「平板设备」：桌面窗口拖窄不算，避免误伤。 */
