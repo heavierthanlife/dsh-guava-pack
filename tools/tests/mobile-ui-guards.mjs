@@ -76,6 +76,8 @@ check('DOM 重建后能重新打标（MutationObserver）', /MutationObserver/.t
 console.log('\n平板分屏分支（mobile-ui）');
 check('定义分屏阈值 820', /TABLET_SPLIT_MAX\s*=\s*820/.test(mobileUiRaw));
 check('触屏兜底 + 窗口/屏幕短边比例判定', /function isCoarsePointer/.test(mobileUiRaw) && /screenShort2 \* 0\.66/.test(mobileUiRaw));
+check('屏幕/窗口方向不一致也判分屏（不受缩放影响）', /orientationSplit/.test(mobileUiRaw) && /\(sw > sh\) !== \(iw > ih\)/.test(mobileUiRaw));
+check('超宽/超高窗口兜底', /extremeAspect/.test(mobileUiRaw) && /1\.7/.test(mobileUiRaw));
 check('detectPhone 含 tablet-split-window', /tablet-split-window/.test(mobileUiRaw));
 check('仅平板设备触发（isTabletDevice）', /function isTabletDevice/.test(mobileUiRaw));
 check('全局 resize 重算，不依赖设置面板', /tablet split detection/.test(mobileUiRaw));

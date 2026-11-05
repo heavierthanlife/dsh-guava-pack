@@ -422,13 +422,21 @@ window.__ModuleLoader__.load({
         // 触屏设备（UA 认不出平板时用粗指针兜底）。浏览器缩放会放大
         // innerWidth，所以除了绝对阈值，再看「窗口短边 / 屏幕短边」比例。
         if (isTabletDevice() || isCoarsePointer()) {
-          var viewShort = Math.min(window.innerWidth || 0, window.innerHeight || 0);
-          var screenShort2 = Math.min(
-            (window.screen && window.screen.width) || 0,
-            (window.screen && window.screen.height) || 0,
-          );
+          var sw = (window.screen && window.screen.width) || 0;
+          var sh = (window.screen && window.screen.height) || 0;
+          var iw = window.innerWidth || 0;
+          var ih = window.innerHeight || 0;
+          var viewShort = Math.min(iw, ih);
+          var screenShort2 = Math.min(sw, sh);
+          // 最可靠的信号：屏幕横屏、窗口却竖屏（左右分屏），或反过来（上下分屏）。
+          // 它不受浏览器缩放影响（缩放会同时改 innerWidth/innerHeight，不改方向）。
+          var orientationSplit = sw > 0 && sh > 0 && iw > 0 && ih > 0
+            && (sw > sh) !== (iw > ih);
           var ratioSplit = screenShort2 > 0 && viewShort > 0 && viewShort <= screenShort2 * 0.66;
-          if (viewShort > 0 && (viewShort <= TABLET_SPLIT_MAX || ratioSplit)) return 'tablet-split-window';
+          var extremeAspect = viewShort > 0 && Math.max(iw, ih) / viewShort >= 1.7;
+          if (viewShort > 0 && (orientationSplit || viewShort <= TABLET_SPLIT_MAX || ratioSplit || extremeAspect)) {
+            return 'tablet-split-window';
+          }
         }
         return '';
       } catch (e) { return ''; }
@@ -979,8 +987,12 @@ window.__ModuleLoader__.load({
         : status.reason === 'forced' ? T.reasonForced
         : T.reasonNone;
 
-      var shortScreen = Math.min((window.screen && window.screen.width) || 0, (window.screen && window.screen.height) || 0);
-      var shortView = Math.min(window.innerWidth, window.innerHeight);
+      var screenW = (window.screen && window.screen.width) || 0;
+      var screenH = (window.screen && window.screen.height) || 0;
+      var viewW = window.innerWidth;
+      var viewH = window.innerHeight;
+      var shortScreen = Math.min(screenW, screenH);
+      var shortView = Math.min(viewW, viewH);
 
       return h('div', { style: { padding: '2px 0' } }, [
         h('div', { key: 'desc', style: { fontSize: 12, opacity: 0.65, lineHeight: 1.65 } }, T.desc),
@@ -1082,7 +1094,8 @@ window.__ModuleLoader__.load({
               : T.notDetected)),
           h('div', { key: 'b', style: { opacity: 0.7 } }, reasonText),
           h('div', { key: 'c', style: { opacity: 0.7 } },
-            '屏幕短边 ' + shortScreen + 'px · 窗口短边 ' + shortView + 'px'),
+            '屏幕 ' + screenW + '×' + screenH + ' · 窗口 ' + viewW + '×' + viewH
+            + '（短边 ' + shortScreen + '/' + shortView + '）'),
           h('div', { key: 'd', style: { opacity: 0.7 } },
             '样式层 ' + (document.getElementById(STYLE_ID) ? '已注入' : '缺失')
             + ' · 缩放 x' + (status.scale || 1).toFixed(2)
