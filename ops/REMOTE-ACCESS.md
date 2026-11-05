@@ -67,6 +67,24 @@
 
 ---
 
+---
+
+## 路径三：自建 tailnet 中继（VPS，2026-11-05 上线）
+
+```
+手机 ──Tailscale(WireGuard)──▸ 阿里云 VPS(100.109.125.37) ──SSH 反向隧道──▸ PC:3098
+        直连实测 ~34ms                     VPS→PC ~14–26ms
+```
+
+- VPS：Debian 12，`dsh-relay`，tailnet `100.109.125.37`，公网 `112.126.90.114`；
+- PC：`dsh-tunnel.service`（systemd --user，断线 5 秒重连，主机指纹固定）；
+- 手机：开 Tailscale → `http://100.109.125.37:22022/go`。
+
+**关键前置**：阿里云安全组必须放行 **UDP 41641**，否则 Tailscale 退回东京 DERP
+（国内 VPS 连海外 DERP 均 148ms+），表现为“抖动又回来了”。
+
+详细步骤、自检脚本、已知短板见 [`ops/tunnel/README.md`](tunnel/README.md)。
+
 ## 新设备（平板）怎么接
 
 1. 导入 `caikuai03-split-phone.ovpn`（与手机同一份即可）；

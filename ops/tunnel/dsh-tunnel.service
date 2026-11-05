@@ -1,0 +1,22 @@
+[Unit]
+# 把本机 127.0.0.1:${LOCAL_PORT}（dsh-remote-entry）反向上报到 VPS 的 tailnet 地址。
+# 变量来自 %h/dsh/tunnel.env（见同目录 tunnel.env.example）。
+Description=DSH reverse tunnel to relay (tailnet -> local 3098)
+After=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/dsh/tunnel.env
+# -F /dev/null：绕开系统 ssh_config 里那个坏属主的 include
+# StrictHostKeyChecking=yes：主机指纹已固定在 ~/.ssh/known_hosts
+ExecStart=/usr/bin/ssh -F /dev/null -N \
+  -o ExitOnForwardFailure=yes \
+  -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
+  -o StrictHostKeyChecking=yes \
+  -R ${VPS_TAILNET_IP}:${REMOTE_PORT}:127.0.0.1:${LOCAL_PORT} \
+  root@${VPS_PUBLIC_IP}
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
