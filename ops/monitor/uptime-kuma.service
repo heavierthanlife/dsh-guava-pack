@@ -1,0 +1,26 @@
+[Unit]
+# Uptime Kuma —— 只监听 tailnet 地址，公网不可见。
+# dist 由 PC 构建后经 scp 传入（这台机器不跑 vite 构建：2C2G 上会把 sshd 拖死）。
+Description=Uptime Kuma (monitoring, tailnet only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/uptime-kuma
+Environment=NODE_ENV=production
+Environment=UPTIME_KUMA_HOST=100.109.125.37
+Environment=UPTIME_KUMA_PORT=3001
+# ProtectSystem 要求 ReadWritePaths 的路径在启动前已存在，否则 unit 会以 226/NAMESPACE 失败
+ExecStartPre=/bin/mkdir -p /opt/uptime-kuma/data
+ExecStart=/usr/local/bin/node server/server.js
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths=/opt/uptime-kuma/data
+
+[Install]
+WantedBy=multi-user.target

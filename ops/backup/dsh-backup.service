@@ -1,0 +1,9 @@
+[Unit]
+Description=DSH nightly backup to VPS (restic)
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/home/guava5tar_/dsh/playground/themes/dsh-guava-pack/ops/backup/restic-backup.sh
+Nice=10
+IOSchedulingClass=idle
