@@ -601,19 +601,18 @@ window.__ModuleLoader__.load({
   background:transparent;color:inherit;opacity:.55;font-size:14px;line-height:1}
 .acp_nudge_close:hover{opacity:1}
 /* 暗色：深琥珀底 + 亮琥珀字（10.4:1） */
-:root[data-ds-dark-theme] .acp_nudge{color:#ffc94d;background:#231904;border-color:#7a5200;
+body[data-ds-dark-theme] .acp_nudge,
+:root[data-ds-theme-source="dark"] .acp_nudge{color:#ffc94d;background:#231904;border-color:#7a5200;
   box-shadow:0 0 0 1px rgba(255,179,0,.18),0 2px 10px rgba(0,0,0,.45)}
-:root[data-ds-dark-theme] .acp_nudge_badge{background:#ffb300;color:#1a1204}
+body[data-ds-dark-theme] .acp_nudge_badge,
+:root[data-ds-theme-source="dark"] .acp_nudge_badge{background:#ffb300;color:#1a1204}
 /* 赛博 2077：深夜底 + 霓虹黄描边/字 + 左侧警示竖条（避免大面积黄底刺眼） */
-:root.cp2077-on .acp_nudge,
-:root[data-cyberpunk-theme] .acp_nudge{
+.acp_nudge_cyber .acp_nudge{
   color:#fce300;background:#0a101d;border-color:#fce300;border-radius:2px;
   box-shadow:0 0 6px rgba(252,227,0,.28),inset 3px 0 0 #fce300;
   padding-left:12px;letter-spacing:.03em}
-:root.cp2077-on .acp_nudge_badge,
-:root[data-cyberpunk-theme] .acp_nudge_badge{background:#fce300;color:#05070d;border-radius:0}
-:root.cp2077-on .acp_nudge_hint,
-:root[data-cyberpunk-theme] .acp_nudge_hint{color:#e8f1ff;opacity:.8}
+.acp_nudge_cyber .acp_nudge_badge{background:#fce300;color:#05070d;border-radius:0}
+.acp_nudge_cyber .acp_nudge_hint{color:#e8f1ff;opacity:.8}
 /* 入场：1 次上浮 + 2 次脉冲即收敛，不无限循环 */
 .acp_nudge[data-fresh="true"]{animation:dsh-acp-nudge-in .24s cubic-bezier(.16,1,.3,1)}
 @keyframes dsh-acp-nudge-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
@@ -666,6 +665,15 @@ window.__ModuleLoader__.load({
         };
       }, []);
 
+      // 赛博 2077 主题在根节点上没有类名（它的 cp2077-on 只加在面板按钮上），
+      // 只能靠它插入的 <style data-cyberpunk-theme> 来判定。轮询时重算一次即可。
+      let cyber = false;
+      try {
+        cyber = !!document.querySelector('style[data-cyberpunk-theme]');
+      } catch {
+        cyber = false;
+      }
+
       const at = num(state?.lastNudge?.at);
       if (at === undefined || at <= 0) return null;
       if (dismissedAt === at) return null;
@@ -682,7 +690,7 @@ window.__ModuleLoader__.load({
 
       return h(
         'span',
-        { className: 'acp_nudge_anchor' },
+        { className: cyber ? 'acp_nudge_anchor acp_nudge_cyber' : 'acp_nudge_anchor' },
         h('style', { key: 'nudge-style' }, NUDGE_CSS),
         h(
           'span',
