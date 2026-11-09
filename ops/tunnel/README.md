@@ -85,6 +85,47 @@ bash ops/tunnel/check.sh <VPS tailnet IP>
 - `active; direct 1.2.3.4:xxxxx` → 正常（快）；
 - `active; relay "tok"` → 走了东京中继（慢），先查安全组 UDP 41641。
 
+## 多台 PC 同时接入（2026-11-09）
+
+每台 PC 在 VPS 上占一个**独立端口**，手机/平板按端口区分两台 DSH：
+
+| PC | VPS 端口 | 入口 |
+|---|---|---|
+| 主力机 | 22022 | `http://100.109.125.37:22022/go` |
+| 第二台 | 22023（自动分配） | `http://100.109.125.37:22023/go` |
+
+VPS 侧**不用改任何配置**（`GatewayPorts clientspecified` 已允许绑定 tailnet 地址），
+新端口只出现在 `ss -ltn` 里，且只绑 `100.x`，公网看不到。
+
+### 第二台怎么接（3 步）
+
+1. **Tailscale**：装好并 `tailscale up`，加入同一 tailnet
+   （WSL2 镜像模式下 Tailscale 跑在 Windows 宿主，Linux 侧没有 CLI 也能通）。
+2. **授权 SSH**：把第二台的 `~/.ssh/id_ed25519.pub` 追加到 VPS 的
+   `/root/.ssh/authorized_keys`。最省事：在主力机上执行
+   `ssh root@100.109.125.37 'echo "<第二台公钥>" >> /root/.ssh/authorized_keys'`。
+3. **跑脚本**（第二台上，pack 目录内）：
+
+```bash
+bash ops/tunnel/join-relay.sh --dry-run   # 先看它要做什么
+bash ops/tunnel/join-relay.sh             # 自动挑空闲 220xx → 写配置 → 起服务 → 自检
+```
+
+脚本会：校验 VPS ed25519 主机指纹并写入 `known_hosts` → 选端口 → 写 `~/dsh/tunnel.env`
+→ 生成 `dsh-remote-entry.service` / `dsh-tunnel.service` → enable + restart
+→ 自检 `/go` 与 VPS 监听 → 打印手机入口。**重跑是幂等的**（沿用 tunnel.env 里的端口）。
+
+### 手机/平板怎么“任选一台”
+
+两个入口是不同端口 = **不同 origin**，登录态 / localStorage / PWA 完全隔离：
+
+- 两个标签页各开一个即可同时看两台（互不抢 token）；
+- 也可以各装一个主屏图标；
+- `/go` 每次都跟随该机**当前** token，token 轮换不用手动改书签。
+
+⚠️ 两台是各自独立的 DSH（各自的会话、工作目录、插件），**不是**同一个实例的镜像，
+文件也不共享。需要文件互通得另做同步（restic/Syncthing 之类）。
+
 ## 已知短板：TCP 套 TCP
 
 链路是 `手机─TCP─VPS─SSH(TCP)─PC`，浏览器 TCP 终止在 VPS、再由 SSH 重新发起到 PC，

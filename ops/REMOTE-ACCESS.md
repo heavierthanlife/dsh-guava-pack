@@ -93,7 +93,10 @@ DSH 本体始终只监听 `127.0.0.1:3080`，外部入口都是**反代**。
 
 - VPS：Debian 12，`dsh-relay`，tailnet `100.109.125.37`，公网 `112.126.90.114`（**公网 22 已收口，仅 tailnet 可 SSH**）；
 - PC：`dsh-tunnel.service`（systemd --user，断线 5 秒重连，主机指纹固定）；
-- 手机：开 Tailscale → `http://100.109.125.37:22022/go`。
+- 手机：开 Tailscale → `http://100.109.125.37:22022/go`；
+- 多台 PC（2026-11-09）：每台各占一个 VPS 端口（主力 22022、第二台 22023），
+  手机/平板开两个标签页即可任选一台；接入用 `ops/tunnel/join-relay.sh`，
+  步骤见 [`ops/tunnel/README.md`](tunnel/README.md) 的「多台 PC 同时接入」。
 
 **关键前置**：阿里云安全组必须放行 **UDP 41641**，否则 Tailscale 退回东京 DERP
 （国内 VPS 连海外 DERP 均 148ms+），表现为“抖动又回来了”。
