@@ -64,7 +64,16 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-PACK_DIR="${PACK_DIR:-$DSH_HOME/playground/themes/dsh-guava-pack}"
+# 默认从脚本自身位置反推 pack 目录（<pack>/ops/tunnel/join-relay.sh），
+# 这样两台机器布局不同也不用传 --pack-dir：
+#   第一台: <DSH_HOME>/playground/themes/dsh-guava-pack
+#   第二台: ~/dsh-guava-pack
+SELF_PACK="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+PACK_DIR="${PACK_DIR:-$SELF_PACK}"
+if [ ! -f "$PACK_DIR/ops/dsh-remote-entry.mjs" ]; then
+  # 兜底：老的固定布局
+  PACK_DIR="$DSH_HOME/playground/themes/dsh-guava-pack"
+fi
 ENTRY_MJS="$PACK_DIR/ops/dsh-remote-entry.mjs"
 
 SSH_OPTS=(-F /dev/null -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=yes)
