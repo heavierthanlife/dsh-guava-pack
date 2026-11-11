@@ -445,6 +445,7 @@ const ACTIONS = Object.freeze({
   prune: { kind: 'unit', unit: 'restic-prune.service', timeoutMs: 120000, label: 'prune（回收仓库空间）' },
   check: { kind: 'unit', unit: 'restic-check.service', timeoutMs: 120000, label: 'check（仓库完整性校验）' },
   unlock: { kind: 'unit', unit: 'restic-lock-janitor.service', timeoutMs: 60000, label: 'unlock（清理陈旧锁）' },
+  offsite: { kind: 'unit', unit: 'offsite-sync.service', timeoutMs: 300000, label: 'offsite（异地镜像同步）' },
   doctor: { kind: 'bin', bin: '/usr/local/sbin/dsh-doctor.sh', args: ['--short'], timeoutMs: 30000, label: 'doctor（只读诊断）' },
 });
 
@@ -647,7 +648,7 @@ const server = createServer(async (req, res) => {
       const action = body && typeof body.action === 'string' ? body.action : '';
       if (!Object.prototype.hasOwnProperty.call(ACTIONS, action)) {
         log(`action rejected name=${JSON.stringify(action).slice(0, 60)} ip=${ip}`);
-        return sendJson(req, res, 400, { error: '未知动作（只允许 prune / check / unlock / doctor）' });
+        return sendJson(req, res, 400, { error: '未知动作（只允许 prune / check / unlock / offsite / doctor）' });
       }
       if (actionRunning) {
         log(`action busy rejected name=${action} ip=${ip}`);

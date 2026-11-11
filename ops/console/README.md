@@ -37,7 +37,7 @@ VPS 侧安装后的路径：
   **passwordless sudo 规则**；而单元同时要求 `NoNewPrivileges=yes`，`sudo` 属于 setuid
   提权，会被 NNP 直接挡住。二者不可兼得。
 - 走 root 时，攻击面靠下面这些约束收窄，而不是靠用户降权：
-  - 动作是**编译期硬编码的四个对象**（`prune` / `check` / `unlock` / `doctor`），
+  - 动作是**编译期硬编码的五个对象**（`prune` / `check` / `unlock` / `offsite` / `doctor`），
     请求里只传动作名，严格 `hasOwnProperty` 校验，**任何情况下都不拼接 shell**；
   - 全部命令用 `execFile(绝对路径, 固定参数)` 执行，不经 `/bin/sh`；
   - `ExecStart=/usr/local/bin/node /opt/dsh-console/server.mjs` 固定，页面不提供上传、
@@ -122,7 +122,7 @@ ssh -F /dev/null root@100.109.125.37 '
   状态在服务端缓存 8 秒；apt 计数另缓存 5 分钟。
 - `POST /api/action`，必须同时满足：
   `Content-Type: application/json`、请求头 `X-Requested-With: dsh-console`（CSRF）、
-  body 为 `{"action":"prune|check|unlock|doctor"}`，且 `Origin`（若存在）必须是本服务地址。
+  body 为 `{"action":"prune|check|unlock|offsite|doctor"}`，且 `Origin`（若存在）必须是本服务地址。
   返回动作结果 JSON（HTTP 200，`ok` 表示 rc==0；超时/失败时 `ok=false` 并带原因）。
 
 只读采集的细节：restic 用
