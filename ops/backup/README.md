@@ -84,3 +84,37 @@ RESTIC_REPOSITORY='sftp:root@100.109.125.37:/srv/backup/dsh' rk snapshots
 1. **密码丢了 = 数据永久丢失**（仓库是加密的；VPS 上那份口令只是给 prune 用，不改变这一点）；
 2. **定期做一次恢复演练**——没恢复过的备份不叫备份；
 3. 恢复**永远先到 `/tmp`**，确认无误再覆盖。
+
+## 第二台（pack 不在 `~/dsh` 下的机器）怎么启用
+
+`dsh-backup.service` 里的 `ExecStart` 写的是第一台布局
+（`<DSH_HOME>/playground/themes/dsh-guava-pack/...`）。pack 在别处时**本机单元要改路径**，
+共享脚本不用动：
+
+```bash
+# 1) 二进制与凭证（口令从 VPS 取，别手抄）
+mkdir -p ~/.local/bin
+#   restic 0.17.3（与 VPS 同版本）
+curl -fsSL -o /tmp/restic.bz2 \
+  https://github.com/restic/restic/releases/download/v0.17.3/restic_0.17.3_linux_amd64.bz2
+bunzip2 -f /tmp/restic.bz2 && install -m 755 /tmp/restic ~/.local/bin/restic
+ssh root@100.109.125.37 'cat /etc/restic/repo-password' > ~/.restic-pass && chmod 600 ~/.restic-pass
+#   rest: URL 含 rest-server 的 basic auth
+printf 'rest:http://%s:%s@100.109.125.37:3000/dsh/\n' \
+  "$(ssh root@100.109.125.37 'cut -d: -f1 /etc/rest-server/htpasswd')" \
+  "$(ssh root@100.109.125.37 'cat /etc/rest-server/password')" > ~/.restic-repo-url
+chmod 600 ~/.restic-repo-url
+
+# 2) 单元（把 ExecStart 换成本机 pack 真实路径）
+#    ~/.config/systemd/user/dsh-backup.service  ExecStart=<pack>/ops/backup/restic-backup.sh
+#    ~/.config/systemd/user/dsh-backup.timer    同 pack 里的定义
+systemctl --user daemon-reload
+systemctl --user enable --now dsh-backup.timer
+
+# 3) 首跑（可临时取消限速，仓库 dedup 后通常只需几十 MiB）
+RESTIC_LIMIT_KB=0 <pack>/ops/backup/restic-backup.sh
+```
+
+**实测（2026-11-12，MSI）**：首跑 296 MiB 逻辑 / 97 MiB 实存，用时 1:28；
+仓库里出现 `host=MSI` 的快照，`restic ls latest` 能列出 profile 与 sessions。
+注意 `dsh-backup.service` 里的 git 镜像步骤指向第一台路径，本机不存在时会静默跳过（无害）。
