@@ -64,7 +64,6 @@ ssh -F /dev/null root@100.109.125.37 '
 | Kuma 报「备份新鲜度 Down」 | 先确认 PC 上昨晚备份是否跑了：`journalctl --user -u dsh-backup -n 50 --no-pager`；再 `bash ops/backup/restic-ctl.sh snapshots` |
 | `restic prune` 失败 | 只能在 VPS 跑：`systemctl start restic-prune.service`，看 `journalctl -u restic-prune -n 50` |
 | 想删某个坏快照 | append-only 拒绝客户端删除；`bash ops/backup/restic-ctl.sh forget <id>`（自动转 VPS 执行） |
-| 异地镜像红 | `systemctl start offsite-sync.service`，看 `journalctl -u offsite-sync -n 30`；若提示 CHANGE_ME，说明 AK/SK 还没填 |
 | 磁盘紧张（>85%） | `journalctl --vacuum-size=200M`；`apt-get clean`；确认 prune 最近成功；必要时调大磁盘 |
 
 ## 5. 监控不响 / 收不到推送

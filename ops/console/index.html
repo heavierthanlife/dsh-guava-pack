@@ -328,9 +328,6 @@
       <button class="act danger" type="button" data-action="unlock">
         <b>unlock</b><small>清理陈旧锁（restic-lock-janitor）</small>
       </button>
-      <button class="act" type="button" data-action="offsite">
-        <b>offsite</b><small>异地镜像同步（rclone → OSS）</small>
-      </button>
       <button class="act" type="button" data-action="doctor">
         <b>doctor</b><small>只读诊断（dsh-doctor --short）</small>
       </button>
@@ -385,7 +382,6 @@
     prune: 'prune 会整理/压缩 restic 仓库，可能耗时几十秒到数分钟，运行期间备份可能受影响。\n\n确定执行吗？',
     check: 'check 会读取并校验仓库数据，可能耗时数十秒到数分钟。\n\n确定执行吗？',
     unlock: '将清理超过 30 分钟的陈旧 restic 锁，不会动正在进行的备份。\n\n确定执行吗？',
-    offsite: '把加密仓库镜像到异地 OSS（rclone copy，只增不删）。未配置 AK/SK 时会立刻报错退出。\n\n确定执行吗？',
     doctor: '运行只读诊断脚本 dsh-doctor.sh --short。\n\n确定执行吗？'
   };
 

@@ -77,24 +77,6 @@ else
   problems+=("git 镜像从未成功运行")
 fi
 
-# A3 异地镜像：填好 AK/SK 后才算"应有"；48h 没成功 = 异地副本已经过期。
-OFFSITE_CFG="${OFFSITE_CONFIG:-/etc/rclone/rclone.conf}"
-OFFSITE_STAMP="${OFFSITE_STAMP_FILE:-/srv/backup/.offsite-last-run}"
-if [ -r "$OFFSITE_CFG" ] && ! grep -q 'CHANGE_ME' "$OFFSITE_CFG" 2>/dev/null; then
-  if [ -f "$OFFSITE_STAMP" ]; then
-    offsite_age_h=$(( ( $(date +%s) - $(stat -c %Y "$OFFSITE_STAMP") ) / 3600 ))
-    if [ "$offsite_age_h" -gt 48 ]; then
-      problems+=("异地镜像 ${offsite_age_h}h 未更新")
-    else
-      notes+=("异地镜像 ${offsite_age_h}h 前")
-    fi
-  else
-    problems+=("异地镜像从未成功")
-  fi
-else
-  notes+=("异地镜像未配置")
-fi
-
 [ -f /var/run/reboot-required ] && notes+=("需要重启（内核/库更新）")
 # 只数安全更新，避免把 186 个普通待升级包当成告警噪音。
 updates=$(apt-get -s -o Debug::NoLocking=true dist-upgrade 2>/dev/null | grep -ci '^Inst.*security' || true)

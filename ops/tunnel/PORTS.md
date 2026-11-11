@@ -31,7 +31,6 @@
 | `/etc/ntfy/topic` | 640 root:ntfy | 推送 topic（等同访问令牌） | 手机 ntfy App 订阅 |
 | `/etc/kuma/push-tokens.env` | 600 root | Kuma push 监控令牌 | `dsh-health-push.sh` / `dsh-backup-freshness-push.sh` |
 | `/root/.ssh/gitmirror_ed25519` | 600 root | Deploy key（仅当以后要 VPS 直连私有仓库时用） | 当前未启用（镜像由 PC 推送） |
-| `/etc/rclone/rclone.conf` | 600 root | 异地对象存储（OSS）的 RAM AK/SK；占位符未填时同步任务明确退出 3 | `dsh-offsite-sync.sh`（A3） |
 
 ## PC 浏览器访问不到 100.x 时
 
@@ -51,7 +50,6 @@ Windows 侧若被公司 VPN/代理接管了路由，浏览器打不开 `http://1
 | 每 30 分钟 | `dsh-health-push.timer` | 磁盘/内存/锁/服务/git 镜像新鲜度 → Kuma |
 | 00/06/12/18:20 | `dsh-backup-freshness.timer` | restic 最新快照 >26h → 报警 |
 | 每日 03:00 | `restic-lock-janitor.timer` | 清理 >30 分钟的陈旧锁（早于 PC 03:30 备份） |
-| 每日 04:10 | `offsite-sync.timer` | 把加密仓库文件镜像到异地 OSS（A3，需填 AK/SK） |
 | 每月 1 日 04:30 | `restic-prune.timer` | 仓库 prune（append-only 下只能在 VPS 做） |
 | 每周日 05:00 | `restic-check.timer` | `restic check --read-data-subset=2%` |
 
