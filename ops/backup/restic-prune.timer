@@ -1,0 +1,11 @@
+[Unit]
+Description=Run DSH restic prune monthly on VPS (1st 04:30)
+
+[Timer]
+OnCalendar=*-*-01 04:30:00
+# 错过不补跑：prune 不是关键路径，避免开机后突然跑几分钟。
+Persistent=false
+RandomizedDelaySec=1800
+
+[Install]
+WantedBy=timers.target

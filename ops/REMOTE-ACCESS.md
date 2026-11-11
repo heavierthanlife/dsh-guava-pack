@@ -131,14 +131,26 @@ DSH 本体始终只监听 `127.0.0.1:3080`，外部入口都是**反代**。
 公网只剩 UDP 41641（WireGuard 对未授权探测静默，扫描器看不到任何东西）。
 代价是 PC 必须常驻 Tailscale，隧道依赖它。
 
-## VPS 上的附加服务（2026-11-05）
+## VPS 上的附加服务（2026-11-11 更新）
+
+端口/凭据的权威表：[`tunnel/PORTS.md`](tunnel/PORTS.md)。
 
 | 服务 | 监听 | 用途 | 资源 |
 |---|---|---|---|
-| tailscaled | UDP 41641 | 手机直连入口 | ~40MB |
-| sshd | TCP 22 | PC 反向隧道 + 管理 | ~10MB |
-| uptime-kuma | **100.109.125.37:3001**（仅 tailnet） | 监控隧道/DSH 存活 | ~150MB |
-| restic 仓库 | /srv/backup/dsh | DSH 每日加密备份 | 磁盘 ~830MB/次全量 |
+| tailscaled | UDP 41641 | 手机直连入口 | ~65MB |
+| sshd | TCP 22 + tailnet 22022/22023 | PC 反向隧道 + 管理 | ~10MB |
+| rest-server | **tailnet :3000**（append-only + basic auth） | restic 仓库的 HTTP 接入 | ~10MB |
+| uptime-kuma | **tailnet :3001** | 监控面板 + push 接收 | ~150MB |
+| ntfy | **tailnet :8080** | 手机推送（Kuma 告警经它落地） | ~20MB |
+| miniserve | **tailnet :8081** | 手机↔PC 文件中转（basic auth） | ~10MB |
+| restic 仓库 | /srv/backup/dsh | DSH 每日加密备份 | 磁盘 ~1.0GB（8 份快照，去重） |
+| git 裸镜像 | /srv/git-mirror | 两个仓库的 `--mirror` 备份 | ~5MB |
+
+定时任务、以及"为什么 prune/forget 只能在 VPS 做"，见 [`backup/README.md`](backup/README.md)
+与 [`vps/README.md`](vps/README.md) 的「附加服务」一节。
+
+**监控闭环**：Kuma 里 6 个监控项（隧道/公网 IP/DSH 根/DSH `/go`/备份新鲜度/VPS 健康），
+通知统一走自建 ntfy；状态变化会在手机上收到 "VPS 健康 Down/Up" 这类消息。
 
 ### Uptime Kuma 的特殊装法（重要）
 
@@ -161,15 +173,18 @@ VPS:  npm ci --omit=dev（本地编译 sqlite 原生模块）
 
 单元里 `ProtectSystem=full` 要求 `ReadWritePaths` 路径已存在，故有 `ExecStartPre=mkdir`。
 
-### restic 备份
+### restic 备份（2026-11-11：改成 append-only rest-server）
 
-- 仓库：`sftp:root@100.109.125.37:/srv/backup/dsh`（SSH 走 tailnet），密码在 `~/.restic-pass`；
+- 仓库：`rest:http://100.109.125.37:3000/dsh/`（basic auth，口令在 `~/.restic-repo-url`）；
+  仓库加密口令仍在 `~/.restic-pass`（**丢了数据就没了**）；
+- **append-only**：PC 只能追加，`forget`/`prune` 被服务端 403 拒绝 ——
+  即使 PC 中招，历史快照也删不掉；
 - 脚本 `ops/backup/restic-backup.sh`：`--compression max`、`--limit-upload 200`（留带宽给隧道），
-  排除 node_modules / cache / .git / .shots / *.log；
-- 定时器 `dsh-backup.timer`：每日 03:30，`Persistent=true`（**只备份，不自动 prune**）；
-- 回收：`restic-ctl.sh prune`（2026-11-05 实测回收 269 MiB，833M → 562M）；
-  `dsh-prune.timer` 每月 1 日 04:30 自动跑一次（`Persistent=false`）。
-- **首次全量约 16 分钟 / 800MB**；增量很小。
+  成功后顺带把两个 git 仓库 `push --mirror` 到 `/srv/git-mirror`；
+- 回收/校验全部在 VPS：`restic-prune.timer`（每月 1 日 04:30）、`restic-check.timer`（每周日 05:00）、
+  `restic-lock-janitor.timer`（每日 03:00 清陈旧锁）。PC 上原来的 `dsh-prune.timer` 已作废；
+- `restic-ctl.sh prune|forget|unlock` 会自动转成 SSH 到 VPS 执行（见脚本注释）；
+- **首次全量约 16 分钟 / 800MB**；增量很小（2026-11-11 实测仓库 1.0GB / 8 份快照）。
 
 ⚠️ 长任务不要用临时 shell 跑（会被回收），用 `systemctl --user start dsh-backup.service --no-block`。
 

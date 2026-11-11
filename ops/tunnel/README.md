@@ -1,5 +1,8 @@
 # 方案 A：自建 tailnet 中继（手机 → VPS → PC）
 
+> VPS 上的端口分配与凭据位置：[`PORTS.md`](PORTS.md)（新增服务前先查表）。
+
+
 ```
 手机 ──WireGuard(Tailscale, 加密)──▸ VPS(100.x) ──SSH 反向隧道(加密)──▸ PC:3098 ──▸ DSH:3080
         ↑ 直连时 ~34ms                    ↑ ~14ms RTT

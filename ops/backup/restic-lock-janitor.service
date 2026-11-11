@@ -1,0 +1,11 @@
+[Unit]
+Description=Remove stale restic locks before the nightly backup
+After=network-online.target rest-server.service
+
+[Service]
+Type=oneshot
+User=restic
+Group=restic
+ExecStart=/usr/local/sbin/dsh-restic-lock-janitor.sh
+Nice=19
+IOSchedulingClass=idle

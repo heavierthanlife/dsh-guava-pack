@@ -1,0 +1,10 @@
+[Unit]
+Description=Run DSH restic integrity check weekly on VPS (Sun 05:00)
+
+[Timer]
+OnCalendar=Sun 05:00:00
+Persistent=false
+RandomizedDelaySec=1200
+
+[Install]
+WantedBy=timers.target

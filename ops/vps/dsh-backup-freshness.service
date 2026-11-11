@@ -1,0 +1,9 @@
+[Unit]
+Description=Push restic backup freshness to Uptime Kuma
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/dsh-backup-freshness-push.sh
+Nice=19
+IOSchedulingClass=idle

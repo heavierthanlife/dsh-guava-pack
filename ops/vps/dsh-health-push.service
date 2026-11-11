@@ -1,0 +1,9 @@
+[Unit]
+Description=Push VPS self-check to Uptime Kuma (disk/mem/locks/services)
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/dsh-health-push.sh
+Nice=19
+IOSchedulingClass=idle

@@ -89,3 +89,64 @@ curl -s http://100.100.100.200/latest/meta-data/instance-id   # 应返回 i-xxxx
 
 注意：如果以后 Tailscale 升级/重启后云助手又异常，先
 `systemctl restart dsh-aliyun-metadata.service` 把 ACCEPT 规则重新提到最前面。
+
+---
+
+## 附加服务（2026-11-11 上线）
+
+端口与凭据的权威表在 [`../tunnel/PORTS.md`](../tunnel/PORTS.md)。下面只写"为什么"和安装/回滚。
+
+### 1. ntfy（自建推送，tailnet-only）
+
+`/etc/ntfy/server.yml` → `listen-http: 100.109.125.37:8080`；单元 `ntfy.service`（User=ntfy）。
+topic 在 `/etc/ntfy/topic`（等同令牌，别外传）。手机装 ntfy App → 添加服务器
+`http://100.109.125.37:8080` → 订阅该 topic。
+
+回滚：`systemctl disable --now ntfy.service`（Kuma 的通知会失败，但监控本身不受影响）。
+
+### 2. uptime-kuma 的监控项与通知（脚本改 DB）
+
+Kuma 1.23 没有「建监控/建通知」的公开 API，所以用
+[`kuma-configure.py`](kuma-configure.py) 按表结构写库：**先停服务 + 备份 DB**，
+写完启动并校验，异常自动回滚。幂等，可重复跑。
+
+```bash
+# 首次 / 修改监控定义后
+python3 kuma-configure.py --dry-run     # 先看一眼要做什么
+python3 kuma-configure.py
+```
+
+它会做三件事：建 `ntfy (VPS)` 通知并设为默认、建 `DSH /go`（HTTP）与两个 push 监控、
+把所有监控关联到通知。push 令牌写 `/etc/kuma/push-tokens.env`。
+
+> 踩过的坑：Kuma 的 ntfy provider 会**无条件**把 `monitor.url` 塞进消息里的
+> 「打开」按钮；push 监控没有 url 时 ntfy 返回 `400 actions invalid`。所以两个
+> push 监控的 url 填成 `http://100.109.125.37:3001`（只是按钮目标，不影响探测）。
+
+### 3. 健康自检 / 备份新鲜度（推给 Kuma）
+
+| 单元 | 频率 | 检查 |
+|---|---|---|
+| `dsh-health-push.timer` | 30 分钟 | 根分区 >85%、可用内存 <120MiB、restic 有锁、关键服务挂了、git 镜像 >48h 没更新 |
+| `dsh-backup-freshness.timer` | 6 小时 | restic 最新快照 >26h → down |
+
+单位是 oneshot + 推 Kuma push 端点；状态变化时 Kuma 会经 ntfy 推到手机。
+手动触发：`systemctl start dsh-health-push.service`。
+
+### 4. miniserve（文件中转，tailnet-only + basic auth）
+
+`/srv/exchange`（User=exchange）；`http://100.109.125.37:8081`，账号 `share`，
+口令在 `/etc/miniserve/password`。支持上传（`--upload-files`）、禁符号链接、隐藏版本页脚。
+
+回滚：`systemctl disable --now miniserve.service`。
+
+### 5. rest-server（append-only 仓库）+ 维护任务
+
+见 [`../backup/README.md`](../backup/README.md) 的「append-only」一节。
+
+### 6. BBR + 自动安全更新
+
+- `/etc/sysctl.d/99-dsh-bbr.conf`：`net.core.default_qdisc=fq`、`net.ipv4.tcp_congestion_control=bbr`
+  （实测中继/备份走的移动网络吞吐更稳；`sysctl --system` 立即生效，重启保持）；
+- `unattended-upgrades` + `/etc/apt/apt.conf.d/51-dsh-unattended`：**只自动装安全更新**，
+  不自动重启；需要重启时 `dsh-health-push` 会在消息里写「需要重启」。

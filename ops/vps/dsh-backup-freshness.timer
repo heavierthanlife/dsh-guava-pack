@@ -1,0 +1,10 @@
+[Unit]
+Description=Check restic backup freshness every 6 hours
+
+[Timer]
+OnCalendar=*-*-* 00,06,12,18:20:00
+Persistent=false
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

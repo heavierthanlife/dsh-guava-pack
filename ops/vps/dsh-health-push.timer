@@ -1,0 +1,10 @@
+[Unit]
+Description=Run VPS self-check every 30 minutes
+
+[Timer]
+OnCalendar=*:0/30
+Persistent=false
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

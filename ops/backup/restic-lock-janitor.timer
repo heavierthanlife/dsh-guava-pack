@@ -1,0 +1,10 @@
+[Unit]
+Description=Clean stale restic locks daily at 03:00 (before the 03:30 backup)
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+Persistent=false
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,12 @@
+[Unit]
+Description=DSH restic prune (runs on VPS: append-only blocks client deletes)
+After=network-online.target rest-server.service
+
+[Service]
+Type=oneshot
+User=restic
+Group=restic
+ExecStart=/usr/local/sbin/dsh-restic-prune.sh
+Nice=19
+IOSchedulingClass=idle
+TimeoutStartSec=3600
