@@ -50,8 +50,8 @@ ssh -F /dev/null root@100.109.125.37 '
 ```bash
 iptables -S INPUT | head -5      # 头两条必须是 100.104/16:22 与 100.100/16
 curl -s -m 5 http://100.100.100.200/latest/meta-data/instance-id   # 超时=被挡
-systemctl restart aliyun-metadata   # 重排规则（幂等）
-systemctl start aliyun-metadata-reassert.timer   # 兜底每 5 分钟
+systemctl restart dsh-aliyun-metadata   # 重排规则（幂等）
+systemctl start dsh-aliyun-metadata-reassert.timer   # 兜底每 5 分钟
 ```
 
 

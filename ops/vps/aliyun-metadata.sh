@@ -19,6 +19,14 @@
 #   3. 由 aliyun-metadata.timer 每 5 分钟兜底重排一次（tailscaled 重启会重插自己的链）。
 set -eu
 
+# 并发保护：timer、开机单元和手工重启可能撞在一起；两个实例同时"删+插"会产生重复规则。
+exec 9>/run/dsh-aliyun-metadata.lock
+# 用 -w 等锁而不是跳过：跳过会让"重排"偶发不生效（2026-11-11 实测留下重复规则）。
+if ! flock -w 10 9; then
+  echo "warn: 等锁超时，跳过本次"
+  exit 0
+fi
+
 ensure_top() {
   # 删除所有匹配的旧副本（同一 match 可能被重复添加过）
   while iptables -D INPUT "$@" 2>/dev/null; do :; done

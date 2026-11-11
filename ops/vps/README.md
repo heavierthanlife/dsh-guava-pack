@@ -78,7 +78,7 @@ UDP 41641 的加密流量，没法按 tailnet 源 IP 过滤 22。所以在主机
 **2026-11-11 二次踩坑**：旧脚本用 `iptables -C ... || iptables -I INPUT 1 ...`，规则已存在时
 **不会把位置挪回最前**。重启 + Tailscale 升级后顺序变成 `ts-input → DSH_SSH_TAILNET → 100.100`，
 结果元数据超时、Workbench 报「实例登录失败」。现在脚本改成「先删所有旧副本再 `-I INPUT 1`」，
-并加 `aliyun-metadata-reassert.timer`（每 5 分钟）兜底重排（tailscaled 重启会重插自己的链）。
+并加 `dsh-aliyun-metadata-reassert.timer`（每 5 分钟）兜底重排（tailscaled 重启会重插自己的链）。
 顺序自检会写进 journal：两条 ACCEPT 必须排在 `-j ts-input` 之前。
 
 验证（VPS 上）：
@@ -86,18 +86,22 @@ UDP 41641 的加密流量，没法按 tailnet 源 IP 过滤 22。所以在主机
 ```bash
 iptables -S INPUT | head -5          # 头两条应是 100.104/16:22 与 100.100/16
 curl -s -m 5 http://100.100.100.200/latest/meta-data/instance-id   # 应秒回 i-xxxx
-systemctl status aliyun-metadata aliyun-metadata-reassert.timer
+systemctl status dsh-aliyun-metadata dsh-aliyun-metadata-reassert.timer
 ```
 安装：
 
 ```bash
 scp -F /dev/null -o StrictHostKeyChecking=yes \
-  ops/vps/aliyun-metadata.sh ops/vps/aliyun-metadata.service \
+  ops/vps/aliyun-metadata.sh ops/vps/dsh-aliyun-metadata.service \
+  ops/vps/dsh-aliyun-metadata-reassert.service ops/vps/dsh-aliyun-metadata-reassert.timer \
   root@100.109.125.37:/tmp/
 ssh -F /dev/null -o StrictHostKeyChecking=yes root@100.109.125.37 '
   install -m 755 /tmp/aliyun-metadata.sh /usr/local/sbin/dsh-aliyun-metadata.sh
-  install -m 644 /tmp/aliyun-metadata.service /etc/systemd/system/dsh-aliyun-metadata.service
-  systemctl daemon-reload && systemctl enable --now dsh-aliyun-metadata.service
+  install -m 644 /tmp/dsh-aliyun-metadata.service /etc/systemd/system/dsh-aliyun-metadata.service
+  install -m 644 /tmp/dsh-aliyun-metadata-reassert.service /etc/systemd/system/dsh-aliyun-metadata-reassert.service
+  install -m 644 /tmp/dsh-aliyun-metadata-reassert.timer /etc/systemd/system/dsh-aliyun-metadata-reassert.timer
+  systemctl daemon-reload
+  systemctl enable --now dsh-aliyun-metadata.service dsh-aliyun-metadata-reassert.timer
 '
 curl -s http://100.100.100.200/latest/meta-data/instance-id   # 应返回 i-xxxx
 ```
