@@ -1,6 +1,11 @@
 [Unit]
 Description=Daily Model Policy Sync & Probe Timer
-After=dsh.service
+# 不要写 `After=dsh.service`：本 timer 由 timers.target 拉取，而 dsh.service 挂在
+# default.target（位于 basic.target 之后），而 timers.target 又属于 basic.target ——
+# 三者构成 ordering cycle。systemd 为破环会删除 model-policy.timer/start，
+# 结果每次开机定时器都起不来（实测 2026-11-12，WSL 重启后 timer 为 inactive）。
+# 定时器本身不需要等 DSH：它只按日历触发 oneshot 的 model-policy.service，
+# 那个 service 只读配置 + 探测网络，不依赖 DSH 进程。
 
 [Timer]
 # 每天 09:30 执行一次模型探测与策略同步
