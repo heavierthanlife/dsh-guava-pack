@@ -1,0 +1,7 @@
+[Unit]
+Description=Re-assert Aliyun internal ACCEPT rules ahead of ts-input (no service restarts)
+After=tailscaled.service dsh-ssh-tailnet.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/dsh-aliyun-metadata.sh

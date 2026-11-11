@@ -1,0 +1,10 @@
+[Unit]
+Description=Re-assert Aliyun internal ACCEPT rules every 5 minutes
+
+[Timer]
+OnBootSec=45s
+OnUnitActiveSec=5min
+AccuracySec=15s
+
+[Install]
+WantedBy=timers.target

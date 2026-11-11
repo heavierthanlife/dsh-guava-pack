@@ -55,7 +55,7 @@ UDP 41641 的加密流量，没法按 tailnet 源 IP 过滤 22。所以在主机
 才是正解；安全组里 22 可以留着（公网包到主机后被 DROP）。
 
 
-## 附加坑：Tailscale 把阿里云元数据/DNS 当成 CGNAT 伪造包丢了
+## 附加坑：Tailscale 把阿里云内网（元数据/DNS/Workbench）当成 CGNAT 伪造包丢了
 
 症状：控制台“云助手”状态异常，实例内 `curl http://100.100.100.200/latest/meta-data/`
 **TCP 超时**（不是 403/404）；阿里云内网 DNS 100.100.2.136/138 也时好时坏。
@@ -70,9 +70,24 @@ UDP 41641 的加密流量，没法按 tailnet 源 IP 过滤 22。所以在主机
 （如 `100.100.45.106`）都在 `100.64.0.0/10` 里，响应包从 `eth0` 回来就被 DROP。
 控制台的“实例元数据访问”开着也没用。
 
-修复：`dsh-aliyun-metadata.service` 在 `ts-input` 之前显式 ACCEPT **`100.100.0.0/16`**
-（元数据 100.100.100.200、内网 DNS 100.100.2.136/138、云助手内网端点都在这个段里）
-（`ops/vps/aliyun-metadata.sh`），并重启 `aliyun.service` 让它重新注册。
+修复：`dsh-aliyun-metadata.service` 在 `ts-input` **之前**显式 ACCEPT 两段：
+
+- `100.100.0.0/16` —— 元数据 100.100.100.200、内网 DNS 100.100.2.136/138、云助手端点；
+- `100.104.0.0/16:22` —— 控制台 **Workbench「实例登录」**（它从该段连实例私网 IP:22）。
+
+**2026-11-11 二次踩坑**：旧脚本用 `iptables -C ... || iptables -I INPUT 1 ...`，规则已存在时
+**不会把位置挪回最前**。重启 + Tailscale 升级后顺序变成 `ts-input → DSH_SSH_TAILNET → 100.100`，
+结果元数据超时、Workbench 报「实例登录失败」。现在脚本改成「先删所有旧副本再 `-I INPUT 1`」，
+并加 `aliyun-metadata-reassert.timer`（每 5 分钟）兜底重排（tailscaled 重启会重插自己的链）。
+顺序自检会写进 journal：两条 ACCEPT 必须排在 `-j ts-input` 之前。
+
+验证（VPS 上）：
+
+```bash
+iptables -S INPUT | head -5          # 头两条应是 100.104/16:22 与 100.100/16
+curl -s -m 5 http://100.100.100.200/latest/meta-data/instance-id   # 应秒回 i-xxxx
+systemctl status aliyun-metadata aliyun-metadata-reassert.timer
+```
 安装：
 
 ```bash

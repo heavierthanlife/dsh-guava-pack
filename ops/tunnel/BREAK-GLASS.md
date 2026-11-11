@@ -44,6 +44,17 @@ ssh -F /dev/null root@100.109.125.37 '
 
 ## 3. VPS 完全进不去（SSH 也连不上）
 
+**先查「实例登录失败」最常见的原因**（2026-11-11 实际踩到）：Tailscale 的 `ts-input`
+把阿里云内网包 DROP 了，元数据与 Workbench 一起失效。VPS 上（别的方式能进时）执行：
+
+```bash
+iptables -S INPUT | head -5      # 头两条必须是 100.104/16:22 与 100.100/16
+curl -s -m 5 http://100.100.100.200/latest/meta-data/instance-id   # 超时=被挡
+systemctl restart aliyun-metadata   # 重排规则（幂等）
+systemctl start aliyun-metadata-reassert.timer   # 兜底每 5 分钟
+```
+
+
 1. 阿里云控制台 → 实例 → **远程连接 / VNC**（root 密码见密码管理器，2026-11-05 设的）；
 2. 或者用 **Workbench 实例登录**（需要安全组保留 `TCP 22 ← 100.104.0.0/16`，主机 iptables 也放行该段）；
 3. 进去后先跑诊断脚本，再按结论修。

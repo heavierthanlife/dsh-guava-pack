@@ -1,13 +1,15 @@
 [Unit]
-Description=Allow Aliyun metadata/DNS through Tailscale CGNAT drop
-After=network-online.target tailscaled.service
-Wants=network-online.target
+Description=Allow Aliyun internal ranges (metadata/DNS/Workbench) ahead of Tailscale ts-input
+After=network-online.target tailscaled.service dsh-ssh-tailnet.service
+Wants=network-online.target tailscaled.service
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/usr/local/sbin/dsh-aliyun-metadata.sh
 # 元数据可用后重启云助手，让它重新注册（失败不影响本单元）。
+# 只在开机这次执行；每 5 分钟的兜底重排由 aliyun-metadata-reassert.service 负责，
+# 那个单元**不**重启云助手（否则每 5 分钟抖一次）。
 ExecStartPost=-/bin/systemctl try-restart aliyun.service
 
 [Install]
