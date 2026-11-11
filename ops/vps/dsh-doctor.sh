@@ -89,6 +89,21 @@ else
   bad "仓库路径不存在：$REPO"
 fi
 
+section "异地镜像（A3）"
+OFFSITE_CFG=/etc/rclone/rclone.conf
+OFFSITE_STAMP=/srv/backup/.offsite-last-run
+if [ -r "$OFFSITE_CFG" ] && ! grep -q 'CHANGE_ME' "$OFFSITE_CFG" 2>/dev/null; then
+  if [ -f "$OFFSITE_STAMP" ]; then
+    offsite_age_h=$(( ( $(date +%s) - $(stat -c %Y "$OFFSITE_STAMP") ) / 3600 ))
+    [ "$offsite_age_h" -le 48 ] && ok "异地镜像 ${offsite_age_h}h 前（$(cat "$OFFSITE_STAMP")）" \
+      || bad "异地镜像 ${offsite_age_h}h 未更新（systemctl start offsite-sync.service）"
+  else
+    bad "异地镜像从未成功（systemctl start offsite-sync.service）"
+  fi
+else
+  warn "异地镜像未配置：填 /etc/rclone/rclone.conf（见 ops/backup/README.md 的 A3）"
+fi
+
 section "监控 / 推送"
 kuma=$(curl -s -o /dev/null -w '%{http_code}' -m 5 http://100.109.125.37:3001/ 2>/dev/null || true)
 case "$kuma" in 200|302|401) ok "uptime-kuma HTTP $kuma" ;; *) bad "uptime-kuma HTTP ${kuma:-timeout}" ;; esac

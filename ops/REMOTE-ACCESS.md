@@ -142,7 +142,9 @@ DSH 本体始终只监听 `127.0.0.1:3080`，外部入口都是**反代**。
 | rest-server | **tailnet :3000**（append-only + basic auth） | restic 仓库的 HTTP 接入 | ~10MB |
 | uptime-kuma | **tailnet :3001** | 监控面板 + push 接收 | ~150MB |
 | ntfy | **tailnet :8080** | 手机推送（Kuma 告警经它落地） | ~20MB |
-| miniserve | **tailnet :8081** | 手机↔PC 文件中转（basic auth） | ~10MB |
+| miniserve | **tailnet :8081** | 手机↔PC 文件中转（令牌路径） | ~10MB |
+| dsh-console | **tailnet :8090** | **统一入口**：状态/动作/各服务跳转 | ~55MB |
+| rclone（定时） | — | 加密仓库 → 异地 OSS 镜像（A3） | 同步期间短暂占用，跑完退出 |
 | restic 仓库 | /srv/backup/dsh | DSH 每日加密备份 | 磁盘 ~1.0GB（8 份快照，去重） |
 | git 裸镜像 | /srv/git-mirror | 两个仓库的 `--mirror` 备份 | ~5MB |
 
@@ -181,6 +183,8 @@ VPS:  npm ci --omit=dev（本地编译 sqlite 原生模块）
   即使 PC 中招，历史快照也删不掉；
 - 脚本 `ops/backup/restic-backup.sh`：`--compression max`、`--limit-upload 200`（留带宽给隧道），
   成功后顺带把两个 git 仓库 `push --mirror` 到 `/srv/git-mirror`；
+- **异地副本（A3）**：`offsite-sync.timer`（每日 04:10）用 rclone 把加密仓库文件镜像到异地 OSS
+  （跨地域、私有 bucket）；配置与恢复演练见 [`backup/README.md`](backup/README.md) 的「A3」一节；
 - 回收/校验全部在 VPS：`restic-prune.timer`（每月 1 日 04:30）、`restic-check.timer`（每周日 05:00）、
   `restic-lock-janitor.timer`（每日 03:00 清陈旧锁）。PC 上原来的 `dsh-prune.timer` 已作废；
 - `restic-ctl.sh prune|forget|unlock` 会自动转成 SSH 到 VPS 执行（见脚本注释）；

@@ -176,6 +176,26 @@ providers:
         # 虽然无上限，但当前满载 → 排到最后
         priority: low
 
+  # ── openrouter（2026-11-11 新增）──────────────────────────────────────────
+  # 意图：只用**免费**的 nemotron 两档；付费模型不在策略里占位。
+  # 端点模型 id 带 vendor 前缀（`nvidia/...:free`），explicit 写完整 id。
+  openrouter:
+    intent: 只保留 nemotron 免费两档（够日常用，付费不占位）
+    pick:
+      explicit:
+        - 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free'
+        - 'nvidia/nemotron-3-ultra-550b-a55b:free'
+      on_missing: keep
+
+  # ── nvidia（NVIDIA NIM，2026-11-11 新增）─────────────────────────────────
+  # 意图：只保留当前唯一可用的 Nemotron 3 Ultra。
+  nvidia:
+    intent: 只保留 Nemotron 3 Ultra（端点目前唯一可用型号）
+    pick:
+      explicit:
+        - 'nvidia/nemotron-3-ultra-550b-a55b'
+      on_missing: keep
+
 # ── 视觉推断表 ──────────────────────────────────────────────────────────────
 # 端点上**没有**视觉字段（实测 6 家都没有），所以只能按 id 关键词推断。
 # 这直接影响"旗舰没视觉时要补一个视觉型号"这条规则。

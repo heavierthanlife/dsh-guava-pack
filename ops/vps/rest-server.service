@@ -1,0 +1,24 @@
+[Unit]
+Description=restic REST server (append-only, tailnet only)
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=restic
+Group=restic
+# --append-only：客户端（PC）只能追加，删不掉任何历史对象；
+# 回收由 VPS 本地 restic-prune.service 直接操作仓库目录完成。
+ExecStart=/usr/local/bin/rest-server --path /srv/backup --listen 100.109.125.37:3000 \
+  --append-only --htpasswd-file /etc/rest-server/htpasswd
+Restart=always
+RestartSec=3
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/srv/backup
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

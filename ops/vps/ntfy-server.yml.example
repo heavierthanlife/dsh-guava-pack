@@ -1,0 +1,10 @@
+# /etc/ntfy/server.yml —— tailnet-only 推送服务。安装：cp 到 /etc/ntfy/server.yml
+# 依赖：用户 ntfy、目录 /var/cache/ntfy（含 attachments 子目录）、/etc/ntfy/topic。
+base-url: "http://100.109.125.37:8080"
+listen-http: "100.109.125.37:8080"
+cache-file: "/var/cache/ntfy/cache.db"
+cache-duration: "24h"
+attachment-cache-dir: "/var/cache/ntfy/attachments"
+attachment-total-size-limit: "64M"
+attachment-expiry-duration: "24h"
+behind-proxy: false

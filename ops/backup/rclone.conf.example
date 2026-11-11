@@ -1,0 +1,13 @@
+# /etc/rclone/rclone.conf —— 异地对象存储（A3）。权限必须 600。
+# 阿里云 OSS（推荐，与 VPS 同账号最省事；bucket 建议**跨地域**，例如 VPS 在
+# cn-beijing，bucket 放 oss-cn-hangzhou，避免同城机房级别的单点）。
+#
+# 建 RAM 用户并只授权该 bucket 的读写：AliyunOSSFullAccess 太大，用自定义策略
+# （oss:PutObject / GetObject / ListObjects / DeleteObject / AbortMultipartUpload）。
+[offsite]
+type = s3
+provider = Alibaba
+endpoint = oss-cn-hangzhou.aliyuncs.com
+access_key_id = CHANGE_ME_AK
+secret_access_key = CHANGE_ME_SK
+acl = private

@@ -1,0 +1,797 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0a0f0d">
+<title>DSH 控制台</title>
+<style>
+  :root {
+    --bg: #0a0f0d;
+    --panel: #101a15;
+    --panel-2: #0d1612;
+    --line: #1e2f26;
+    --line-soft: #17241d;
+    --text: #e7f3ea;
+    --muted: #8fa89b;
+    --green: #8fe388;
+    --green-dim: #4f8a52;
+    --pink: #ff9fb2;
+    --amber: #ffc36b;
+    --red: #ff6b6b;
+    --blue: #7cc7ff;
+    --radius: 14px;
+    --shadow: 0 6px 24px rgba(0, 0, 0, .28);
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    color: var(--text);
+    background:
+      radial-gradient(1100px 620px at 12% -12%, rgba(143, 227, 136, .10), transparent 62%),
+      radial-gradient(900px 520px at 112% -4%, rgba(255, 159, 178, .07), transparent 58%),
+      var(--bg);
+    font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB",
+      "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+  .wrap { width: 100%; max-width: 1000px; margin: 0 auto; padding: 18px 14px 36px; }
+  .mono { font-variant-numeric: tabular-nums; }
+  .muted { color: var(--muted); }
+  .ok { color: var(--green); }
+  .warn { color: var(--amber); }
+  .bad { color: var(--red); }
+
+  /* ---------- 顶栏 ---------- */
+  .top { display: flex; align-items: center; gap: 12px; margin: 2px 0 18px; }
+  .brand { display: flex; align-items: center; gap: 11px; min-width: 0; }
+  .logo {
+    flex: none; width: 42px; height: 42px; border-radius: 12px;
+    display: grid; place-items: center;
+    background: linear-gradient(145deg, #1c3a27, #10231a);
+    border: 1px solid #2c5238;
+    color: var(--green); font-weight: 800; font-size: 13px; letter-spacing: .5px;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 0 0 3px rgba(143,227,136,.05);
+  }
+  h1 { margin: 0; font-size: 19px; font-weight: 700; letter-spacing: .3px; }
+  .sub { margin: 1px 0 0; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .top-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .ghost {
+    appearance: none; border: 1px solid var(--line); background: #0f1a14; color: var(--text);
+    border-radius: 10px; padding: 8px 13px; font-size: 14px; cursor: pointer; min-height: 38px;
+  }
+  .ghost:active { transform: translateY(1px); }
+  .ghost[disabled] { opacity: .55; }
+  .ghost .spin { display: inline-block; animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .banner {
+    margin: 0 0 14px; padding: 10px 12px; border-radius: 10px; font-size: 13.5px;
+    background: rgba(255, 195, 107, .08); border: 1px solid rgba(255, 195, 107, .3); color: var(--amber);
+  }
+  .banner.bad { background: rgba(255, 107, 107, .08); border-color: rgba(255, 107, 107, .35); color: var(--red); }
+
+  /* ---------- 区块 ---------- */
+  .block { margin-top: 22px; }
+  .block-head { display: flex; align-items: baseline; gap: 10px; margin: 0 2px 10px; }
+  .block-head h2 { margin: 0; font-size: 15px; font-weight: 700; letter-spacing: .04em; color: #cfe6d6; }
+  .block-head .stamp { margin-left: auto; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  /* ---------- 入口卡 ---------- */
+  .entries { display: grid; grid-template-columns: 1fr; gap: 10px; }
+  .entry {
+    display: flex; align-items: center; gap: 12px;
+    padding: 13px 14px; border-radius: var(--radius);
+    background: linear-gradient(180deg, #121e18, #0f1914);
+    border: 1px solid var(--line);
+    color: var(--text); text-decoration: none;
+    box-shadow: var(--shadow);
+    transition: border-color .15s, transform .15s, background .15s;
+    min-height: 64px;
+  }
+  .entry:hover, .entry:focus-visible { border-color: #31594080; transform: translateY(-1px); outline: none; }
+  .entry:focus-visible { box-shadow: 0 0 0 2px rgba(143, 227, 136, .35); }
+  .entry .ico {
+    flex: none; width: 40px; height: 40px; border-radius: 11px; display: grid; place-items: center;
+    background: #16261d; color: var(--green); border: 1px solid #233a2b;
+  }
+  .entry .ico svg { width: 21px; height: 21px; }
+  .entry .meta { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .entry .meta b { font-size: 15.5px; font-weight: 650; }
+  .entry .meta small { font-size: 12px; color: var(--muted); line-height: 1.45; }
+  .entry .meta small code { background: #0b1410; border: 1px solid var(--line-soft); border-radius: 4px; padding: 1px 4px; font-size: 11.5px; }
+  .entry .badge {
+    flex: none; margin-left: auto; font-size: 11.5px; padding: 3px 8px; border-radius: 999px;
+    border: 1px solid var(--line); color: var(--muted); background: #0b1410; white-space: nowrap;
+  }
+  .entry .badge.ok { color: var(--green); border-color: rgba(143, 227, 136, .35); background: rgba(143, 227, 136, .08); }
+  .entry .badge.bad { color: var(--red); border-color: rgba(255, 107, 107, .35); background: rgba(255, 107, 107, .07); }
+  .entry.disabled { opacity: .45; filter: saturate(.35); cursor: not-allowed; transform: none !important; }
+  .entry.disabled .ico { color: var(--muted); }
+  .entry .go { flex: none; color: var(--muted); font-size: 15px; }
+
+  /* ---------- 状态卡 ---------- */
+  .grid { display: grid; grid-template-columns: 1fr; gap: 10px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 13px 14px; box-shadow: var(--shadow); min-width: 0;
+  }
+  .card h3 { margin: 0 0 10px; font-size: 12.5px; color: var(--muted); font-weight: 650; letter-spacing: .06em; text-transform: uppercase; }
+  .card.span2 { grid-column: 1 / -1; }
+
+  .svc-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; }
+  .svc { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13.5px; }
+  .svc .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .svc .st { margin-left: auto; font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .dot.ok { background: var(--green); box-shadow: 0 0 0 3px rgba(143, 227, 136, .12); }
+  .dot.warn { background: var(--amber); }
+  .dot.bad { background: var(--red); box-shadow: 0 0 0 3px rgba(255, 107, 107, .12); }
+
+  .row { display: flex; align-items: baseline; gap: 10px; padding: 5px 0; font-size: 13.5px; border-bottom: 1px dashed var(--line-soft); }
+  .row:last-child { border-bottom: 0; }
+  .row .k { color: var(--muted); flex: none; }
+  .row .v { margin-left: auto; text-align: right; min-width: 0; overflow-wrap: anywhere; }
+  .row .v small { color: var(--muted); font-size: 11.5px; }
+
+  .bar-wrap { padding: 7px 0 3px; }
+  .bar-head { display: flex; justify-content: space-between; font-size: 12.5px; margin-bottom: 5px; }
+  .bar-head .k { color: var(--muted); }
+  .bar { height: 7px; border-radius: 99px; background: #0a120e; border: 1px solid var(--line-soft); overflow: hidden; }
+  .bar > i { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, #4f8a52, var(--green)); }
+  .bar > i.warn { background: linear-gradient(90deg, #a8752d, var(--amber)); }
+  .bar > i.bad { background: linear-gradient(90deg, #a83a3a, var(--red)); }
+  .bar-sub { margin-top: 4px; font-size: 11.5px; color: var(--muted); }
+
+  /* ---------- 操作区 ---------- */
+  .hint { margin: -2px 2px 12px; font-size: 12.5px; color: var(--muted); }
+  .actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .act {
+    appearance: none; text-align: left; cursor: pointer;
+    display: flex; flex-direction: column; gap: 2px;
+    padding: 12px 14px; min-height: 62px;
+    border-radius: 12px; border: 1px solid var(--line);
+    background: linear-gradient(180deg, #121e18, #0f1914);
+    color: var(--text); font: inherit;
+    transition: border-color .15s, transform .15s;
+  }
+  .act b { font-size: 14.5px; font-weight: 650; }
+  .act small { font-size: 11.5px; color: var(--muted); line-height: 1.4; }
+  .act:hover:not(:disabled), .act:focus-visible:not(:disabled) { border-color: #3a6a48; transform: translateY(-1px); outline: none; }
+  .act:disabled { opacity: .45; cursor: not-allowed; }
+  .act.danger b::before { content: "⚠ "; color: var(--amber); font-size: 12px; }
+  .act[data-action="prune"] b, .act[data-action="check"] b { color: #ffd9a0; }
+
+  .out {
+    margin-top: 12px; background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: var(--radius); overflow: hidden;
+  }
+  .out-head {
+    display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+    padding: 11px 14px; border-bottom: 1px solid var(--line-soft); background: #0c1712;
+  }
+  .out-head .title { font-size: 14px; font-weight: 650; }
+  .out-head .meta { margin-left: auto; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .out-body { padding: 12px 14px 14px; }
+  .out-body h4 { margin: 12px 0 6px; font-size: 12px; color: var(--muted); font-weight: 600; letter-spacing: .04em; }
+  .out-body h4:first-child { margin-top: 0; }
+  .out-body pre {
+    margin: 0; padding: 10px 12px; border-radius: 9px; border: 1px solid var(--line-soft);
+    background: #08100c; color: #d7e8dc; font-size: 12px; line-height: 1.5;
+    white-space: pre-wrap; overflow-wrap: anywhere; max-height: 46vh; overflow: auto;
+  }
+  .note { margin: 8px 0 0; font-size: 12.5px; }
+  .note.warn { color: var(--amber); }
+  .note.bad { color: var(--red); }
+  .note.muted { color: var(--muted); }
+
+  footer { margin-top: 26px; padding-top: 14px; border-top: 1px solid var(--line-soft); color: #6f857a; font-size: 11.5px; display: flex; flex-wrap: wrap; gap: 6px 14px; }
+  footer code { color: #9db3a6; }
+
+  @media (min-width: 620px) {
+    .wrap { padding: 26px 22px 46px; }
+    .entries { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .entry.primary { grid-column: 1 / -1; }
+    .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .card.span2 { grid-column: 1 / -1; }
+    .svc-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .actions { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    h1 { font-size: 21px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <span class="logo">DSH</span>
+      <div style="min-width:0">
+        <h1>DSH 控制台</h1>
+        <p class="sub" id="hostline">正在加载主机信息…</p>
+      </div>
+    </div>
+    <div class="top-actions">
+      <button class="ghost" id="refresh" type="button" title="立即刷新状态">↻ 刷新</button>
+    </div>
+  </header>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <section class="block" aria-labelledby="entries-title">
+    <div class="block-head"><h2 id="entries-title">入口</h2><span class="stamp">tailnet 内网 · 无需公网</span></div>
+    <div class="entries">
+      <a class="entry primary" href="http://100.109.125.37:22022/go" target="_blank" rel="noopener" data-tunnel="22022">
+        <span class="ico" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4" width="19" height="12.5" rx="2"/><path d="M8 20.5h8M12 16.5v4"/></svg>
+        </span>
+        <span class="meta">
+          <b>DSH 主力机</b>
+          <small>100.109.125.37:22022 · 反向隧道 → /go</small>
+        </span>
+        <span class="badge" data-badge="22022">检测中</span>
+      </a>
+
+      <a class="entry" href="http://100.109.125.37:22023/go" target="_blank" rel="noopener" data-tunnel="22023">
+        <span class="ico" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="11" rx="2"/><path d="M8 20h8M12 16v4"/><path d="M7 9h4"/></svg>
+        </span>
+        <span class="meta">
+          <b>DSH 第二台</b>
+          <small>100.109.125.37:22023 · 未监听时自动置灰</small>
+        </span>
+        <span class="badge" data-badge="22023">检测中</span>
+      </a>
+
+      <a class="entry" href="http://100.109.125.37:3001" target="_blank" rel="noopener">
+        <span class="ico" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2.5-6 4 12 2.5-6h5"/></svg>
+        </span>
+        <span class="meta">
+          <b>监控面板</b>
+          <small>uptime-kuma · 100.109.125.37:3001</small>
+        </span>
+        <span class="go" aria-hidden="true">↗</span>
+      </a>
+
+      <a class="entry" href="http://100.109.125.37:8080" target="_blank" rel="noopener">
+        <span class="ico" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M18 9a6 6 0 1 0-12 0c0 6-2 6-2 8h16c0-2-2-2-2-8"/><path d="M10 21h4"/></svg>
+        </span>
+        <span class="meta">
+          <b>推送服务</b>
+          <small>ntfy · 手机装 App 订阅，topic 在 VPS <code>/etc/ntfy/topic</code></small>
+        </span>
+        <span class="go" aria-hidden="true">↗</span>
+      </a>
+
+      <a class="entry disabled" id="miniserve-link" target="_blank" rel="noopener" aria-disabled="true">
+        <span class="ico" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H10l2 2h6.5A2.5 2.5 0 0 1 21 9.5v7A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5z"/></svg>
+        </span>
+        <span class="meta">
+          <b>文件中转</b>
+          <small>miniserve 令牌路径 · 链接由 VPS <code>/etc/miniserve/env</code> 生成</small>
+        </span>
+        <span class="badge" data-badge="miniserve">读取中</span>
+      </a>
+    </div>
+  </section>
+
+  <section class="block" aria-labelledby="status-title">
+    <div class="block-head">
+      <h2 id="status-title">状态</h2>
+      <span class="stamp" id="ts">等待首次刷新…</span>
+    </div>
+    <div class="grid">
+      <article class="card span2">
+        <h3>系统服务</h3>
+        <div id="services" class="svc-grid"><span class="muted">加载中…</span></div>
+      </article>
+
+      <article class="card">
+        <h3>资源</h3>
+        <div id="metrics"><span class="muted">加载中…</span></div>
+      </article>
+
+      <article class="card">
+        <h3>隧道探测</h3>
+        <div id="tunnels"><span class="muted">加载中…</span></div>
+      </article>
+
+      <article class="card">
+        <h3>restic 仓库</h3>
+        <div id="restic"><span class="muted">加载中…</span></div>
+      </article>
+
+      <article class="card">
+        <h3>其他</h3>
+        <div id="misc"><span class="muted">加载中…</span></div>
+      </article>
+    </div>
+  </section>
+
+  <section class="block" aria-labelledby="actions-title">
+    <div class="block-head"><h2 id="actions-title">操作</h2><span class="stamp">每项都需二次确认</span></div>
+    <p class="hint">动作由服务端白名单执行，不接受任意命令。prune / check 是 systemd oneshot，可能几十秒到数分钟；同一时间只允许一个动作。</p>
+    <div class="actions">
+      <button class="act danger" type="button" data-action="prune">
+        <b>prune</b><small>回收仓库空间（restic-prune）</small>
+      </button>
+      <button class="act danger" type="button" data-action="check">
+        <b>check</b><small>仓库完整性校验（restic-check）</small>
+      </button>
+      <button class="act danger" type="button" data-action="unlock">
+        <b>unlock</b><small>清理陈旧锁（restic-lock-janitor）</small>
+      </button>
+      <button class="act" type="button" data-action="doctor">
+        <b>doctor</b><small>只读诊断（dsh-doctor --short）</small>
+      </button>
+    </div>
+
+    <div id="action-out" class="out" hidden>
+      <div class="out-head">
+        <span class="title" id="out-title">—</span>
+        <span class="meta" id="out-meta"></span>
+      </div>
+      <div class="out-body" id="out-body"></div>
+    </div>
+  </section>
+
+  <footer>
+    <span>DSH Console v1.0.0</span>
+    <span>仅监听 <code>100.109.125.37:8090</code></span>
+    <span>HTTP Basic · 口令在 VPS <code>/etc/dsh-console/password</code></span>
+  </footer>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var $ = function (sel) { return document.querySelector(sel); };
+  var REFRESH_MS = 15000;
+
+  var state = { status: null, inFlight: false, localBusy: false };
+
+  var SERVICE_LABEL = {
+    'tailscaled': 'tailscaled',
+    'ssh': 'ssh',
+    'rest-server': 'rest-server',
+    'uptime-kuma': 'uptime-kuma',
+    'ntfy': 'ntfy',
+    'miniserve': 'miniserve'
+  };
+
+  var STATE_TEXT = {
+    active: '运行中',
+    inactive: '已停止',
+    failed: '失败',
+    activating: '启动中',
+    deactivating: '停止中',
+    reloading: '重载中',
+    unknown: '未知',
+    timeout: '超时'
+  };
+
+  var ACTION_CONFIRM = {
+    prune: 'prune 会整理/压缩 restic 仓库，可能耗时几十秒到数分钟，运行期间备份可能受影响。\n\n确定执行吗？',
+    check: 'check 会读取并校验仓库数据，可能耗时数十秒到数分钟。\n\n确定执行吗？',
+    unlock: '将清理超过 30 分钟的陈旧 restic 锁，不会动正在进行的备份。\n\n确定执行吗？',
+    doctor: '运行只读诊断脚本 dsh-doctor.sh --short。\n\n确定执行吗？'
+  };
+
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text !== undefined && text !== null) n.textContent = String(text);
+    return n;
+  }
+
+  function fmtBytes(n) {
+    if (!Number.isFinite(n) || n < 0) return '—';
+    var units = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'];
+    var i = 0;
+    while (n >= 1024 && i < units.length - 1) { n /= 1024; i += 1; }
+    return (i === 0 ? String(Math.round(n)) : n.toFixed(n >= 100 ? 0 : 1)) + ' ' + units[i];
+  }
+
+  function fmtAge(h) {
+    if (!Number.isFinite(h)) return '—';
+    if (h < 1) return Math.max(1, Math.round(h * 60)) + ' 分钟';
+    if (h < 48) return h.toFixed(1) + ' 小时';
+    return (h / 24).toFixed(1) + ' 天';
+  }
+
+  function fmtUptime(sec) {
+    if (!Number.isFinite(sec)) return '—';
+    var d = Math.floor(sec / 86400);
+    var h = Math.floor((sec % 86400) / 3600);
+    var m = Math.floor((sec % 3600) / 60);
+    if (d > 0) return d + ' 天 ' + h + ' 小时';
+    if (h > 0) return h + ' 小时 ' + m + ' 分钟';
+    return m + ' 分钟';
+  }
+
+  function fmtDateTime(iso) {
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return '—';
+    try {
+      return new Intl.DateTimeFormat('zh-CN', {
+        timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', hour12: false
+      }).format(d);
+    } catch (e) {
+      return d.toLocaleString();
+    }
+  }
+
+  function fmtClock(iso) {
+    var d = iso ? new Date(iso) : new Date();
+    if (isNaN(d.getTime())) return '—';
+    try {
+      return new Intl.DateTimeFormat('zh-CN', {
+        timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit',
+        second: '2-digit', hour12: false
+      }).format(d);
+    } catch (e) {
+      return d.toLocaleTimeString();
+    }
+  }
+
+  function level(pct, warnAt, badAt) {
+    if (!Number.isFinite(pct)) return '';
+    if (pct >= badAt) return 'bad';
+    if (pct >= warnAt) return 'warn';
+    return '';
+  }
+
+  function row(box, key, valueNode, keyTitle) {
+    var r = el('div', 'row');
+    var k = el('span', 'k', key);
+    if (keyTitle) k.title = keyTitle;
+    var v = el('span', 'v');
+    if (valueNode instanceof Node) v.appendChild(valueNode);
+    else v.textContent = valueNode === undefined || valueNode === null ? '—' : String(valueNode);
+    r.appendChild(k);
+    r.appendChild(v);
+    box.appendChild(r);
+  }
+
+  function bar(box, label, valueText, pct, subText, cls) {
+    var wrap = el('div', 'bar-wrap');
+    var head = el('div', 'bar-head');
+    head.appendChild(el('span', 'k', label));
+    head.appendChild(el('span', 'v', valueText));
+    var track = el('div', 'bar');
+    var fill = el('i', cls || '');
+    fill.style.width = Math.max(0, Math.min(100, Number.isFinite(pct) ? pct : 0)) + '%';
+    track.appendChild(fill);
+    wrap.appendChild(head);
+    wrap.appendChild(track);
+    if (subText) wrap.appendChild(el('div', 'bar-sub', subText));
+    box.appendChild(wrap);
+  }
+
+  function clear(box) { while (box.firstChild) box.removeChild(box.firstChild); }
+
+  function errorNote(box, msg) {
+    box.appendChild(el('p', 'note bad', msg || '采集失败'));
+  }
+
+  function renderServices(data) {
+    var box = $('#services');
+    clear(box);
+    if (!data || !Array.isArray(data.items)) { errorNote(box, data && data.error ? '服务状态读取失败：' + data.error : '服务状态不可用'); return; }
+    data.items.forEach(function (s) {
+      var item = el('div', 'svc');
+      var dotCls = 'dot ' + (s.active ? 'ok' : (s.state === 'activating' ? 'warn' : 'bad'));
+      item.appendChild(el('span', dotCls));
+      item.appendChild(el('span', 'name', SERVICE_LABEL[s.name] || s.name));
+      var st = el('span', 'st ' + (s.active ? 'ok' : 'bad'), STATE_TEXT[s.state] || s.state || '未知');
+      item.appendChild(st);
+      box.appendChild(item);
+    });
+  }
+
+  function renderMetrics(st) {
+    var box = $('#metrics');
+    clear(box);
+    var disk = st.disk;
+    if (disk && disk.ok) {
+      bar(box, '磁盘 /', disk.usePct + '% 已用', disk.usePct,
+        fmtBytes(disk.availBytes) + ' 可用 / ' + fmtBytes(disk.totalBytes), level(disk.usePct, 85, 93));
+    } else {
+      row(box, '磁盘 /', disk && disk.error ? disk.error : '不可用');
+    }
+
+    var mem = st.memory;
+    if (mem && mem.ok) {
+      bar(box, '内存', mem.usePct + '% 已用', mem.usePct,
+        '可用 ' + fmtBytes(mem.availBytes) + ' / ' + fmtBytes(mem.totalBytes), level(mem.usePct, 85, 93));
+    } else {
+      row(box, '内存', mem && mem.error ? mem.error : '不可用');
+    }
+
+    var load = st.load || {};
+    row(box, '负载', (load.one != null ? load.one : '—') + ' / ' + (load.five != null ? load.five : '—') + ' / ' + (load.fifteen != null ? load.fifteen : '—'), '1m / 5m / 15m');
+    row(box, '运行时间', fmtUptime(st.uptimeSec));
+  }
+
+  function tunnelText(t) {
+    if (!t) return '—';
+    if (t.listening) return 'HTTP ' + t.status + ' · ' + t.ms + 'ms';
+    return t.error || '不可用';
+  }
+
+  function renderTunnels(data) {
+    var box = $('#tunnels');
+    clear(box);
+    if (!data || !Array.isArray(data.items)) { errorNote(box, data && data.error ? '隧道探测失败：' + data.error : '隧道状态不可用'); return; }
+    data.items.forEach(function (t) {
+      var r = el('div', 'row');
+      r.appendChild(el('span', 'k', ':' + t.port));
+      var v = el('span', 'v ' + (t.listening ? 'ok' : 'bad'), tunnelText(t));
+      r.appendChild(v);
+      box.appendChild(r);
+    });
+    box.appendChild(el('div', 'bar-sub', '探测目标 100.109.125.37:<端口>/go，3 秒超时'));
+  }
+
+  function renderRestic(r) {
+    var box = $('#restic');
+    clear(box);
+    if (!r) { errorNote(box, 'restic 状态不可用'); return; }
+    row(box, '快照数', r.snapshots == null ? '—' : r.snapshots + ' 个');
+    if (r.latest) {
+      var latest = el('span', null);
+      latest.appendChild(document.createTextNode(fmtDateTime(r.latest) + ' '));
+      var ageSpan = el('small', null, '（' + fmtAge(r.latestAgeHours) + '前）');
+      if (r.latestAgeHours > 26) ageSpan.className = 'bad';
+      latest.appendChild(ageSpan);
+      row(box, '最新快照', latest);
+    } else {
+      row(box, '最新快照', '—');
+    }
+    row(box, '仓库大小', fmtBytes(r.sizeBytes));
+    var locks = el('span', r.locks > 0 ? 'bad' : (r.locks === 0 ? 'ok' : 'muted'),
+      r.locks == null ? '—' : r.locks + ' 个' + (r.locks > 0 ? '（有锁，备份可能被阻塞）' : ''));
+    row(box, '锁', locks);
+    if (r.error) box.appendChild(el('p', 'note warn', r.error));
+  }
+
+  function renderMisc(st) {
+    var box = $('#misc');
+    clear(box);
+    var g = st.gitmirror;
+    if (g && g.ok) {
+      var cls = g.ageHours > 48 ? 'bad' : (g.ageHours > 30 ? 'warn' : 'ok');
+      row(box, 'git 镜像', el('span', cls, fmtAge(g.ageHours) + '前'), '最后运行时间');
+    } else {
+      row(box, 'git 镜像', g && g.error ? g.error : '不可用');
+    }
+
+    var sec = st.security;
+    if (sec && typeof sec.count === 'number') {
+      var secCls = sec.count > 0 ? 'warn' : 'ok';
+      var node = el('span', secCls, sec.count + ' 项');
+      if (sec.stale) node.appendChild(el('small', null, '（缓存，刷新失败）'));
+      row(box, '安全更新', node, 'apt-get -s dist-upgrade 中 ^Inst.*security 的行数');
+    } else {
+      row(box, '安全更新', sec && sec.error ? sec.error : '不可用');
+    }
+
+    row(box, '主机', st.host || '—');
+  }
+
+  function updateEntries(tunnels) {
+    var map = {};
+    var items = (tunnels && tunnels.items) || [];
+    items.forEach(function (t) { map[String(t.port)] = t; });
+    var links = document.querySelectorAll('[data-tunnel]');
+    Array.prototype.forEach.call(links, function (a) {
+      var t = map[a.getAttribute('data-tunnel')];
+      var badge = a.querySelector('[data-badge]');
+      if (!t) return;
+      if (t.listening) {
+        a.classList.remove('disabled');
+        a.removeAttribute('aria-disabled');
+        if (badge) {
+          badge.textContent = 'HTTP ' + t.status + ' · ' + t.ms + 'ms';
+          badge.className = 'badge ok';
+        }
+      } else {
+        a.classList.add('disabled');
+        a.setAttribute('aria-disabled', 'true');
+        if (badge) {
+          badge.textContent = t.error || '不可用';
+          badge.className = 'badge bad';
+        }
+      }
+    });
+  }
+
+  function updateMiniserve(m) {
+    var a = document.getElementById('miniserve-link');
+    if (!a) return;
+    var badge = a.querySelector('[data-badge]');
+    if (m && m.ok && m.url) {
+      a.setAttribute('href', m.url);
+      a.classList.remove('disabled');
+      a.removeAttribute('aria-disabled');
+      if (badge) { badge.textContent = '打开 ↗'; badge.className = 'badge ok'; }
+    } else {
+      a.removeAttribute('href');
+      a.classList.add('disabled');
+      a.setAttribute('aria-disabled', 'true');
+      if (badge) { badge.textContent = '未配置'; badge.className = 'badge bad'; }
+    }
+  }
+
+  function renderAll(st) {
+    state.status = st;
+    $('#hostline').textContent = (st.host || '未知主机') + ' · DSH Console v' + (st.version || '1.0.0');
+    $('#ts').textContent = '更新于 ' + fmtClock(st.ts) + (st.cached ? ' · 缓存' : '');
+    renderServices(st.services);
+    renderMetrics(st);
+    renderTunnels(st.tunnels);
+    renderRestic(st.restic);
+    renderMisc(st);
+    updateEntries(st.tunnels);
+    updateMiniserve(st.miniserve);
+    syncButtons();
+  }
+
+  function syncButtons() {
+    var dis = state.localBusy || Boolean(state.status && state.status.busy);
+    Array.prototype.forEach.call(document.querySelectorAll('[data-action]'), function (b) {
+      b.disabled = dis;
+    });
+  }
+
+  function setBanner(msg, kind) {
+    var b = $('#banner');
+    if (!msg) { b.hidden = true; return; }
+    b.hidden = false;
+    b.textContent = msg;
+    b.className = 'banner' + (kind ? ' ' + kind : '');
+  }
+
+  function refreshStatus() {
+    if (state.inFlight) return;
+    state.inFlight = true;
+    var btn = $('#refresh');
+    btn.disabled = true;
+    btn.textContent = '↻ 刷新中…';
+
+    var ctrl = new AbortController();
+    var timer = setTimeout(function () { ctrl.abort(); }, 25000);
+
+    fetch('/api/status', { cache: 'no-store', signal: ctrl.signal, headers: { Accept: 'application/json' } })
+      .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function (st) {
+        renderAll(st);
+        setBanner('');
+      })
+      .catch(function (err) {
+        var reason = err && err.name === 'AbortError' ? '请求超时' : (err && err.message ? err.message : '未知错误');
+        if (state.status) setBanner('状态更新失败，页面显示的是上次数据（' + reason + '）', '');
+        else setBanner('无法获取状态：' + reason, 'bad');
+      })
+      .finally(function () {
+        clearTimeout(timer);
+        state.inFlight = false;
+        btn.disabled = false;
+        btn.textContent = '↻ 刷新';
+      });
+  }
+
+  function outSection(title, text) {
+    var frag = document.createDocumentFragment();
+    frag.appendChild(el('h4', null, title));
+    frag.appendChild(el('pre', null, text));
+    return frag;
+  }
+
+  function renderActionResult(d) {
+    var title = $('#out-title');
+    title.textContent = (d.label || d.action || '动作') + ' · ' + (d.ok ? '成功' : '失败');
+    title.className = 'title ' + (d.ok ? 'ok' : 'bad');
+
+    var meta = [];
+    if (d.rc !== undefined && d.rc !== null) meta.push('rc=' + d.rc);
+    if (d.timedOut) meta.push('超时');
+    if (d.durationMs != null) meta.push((d.durationMs / 1000).toFixed(1) + 's');
+    if (d.locksAfter !== undefined && d.locksAfter !== null) meta.push('执行后锁 ' + d.locksAfter);
+    meta.push(fmtClock(d.finishedAt));
+    $('#out-meta').textContent = meta.join(' · ');
+
+    var body = $('#out-body');
+    clear(body);
+    if (d.timedOut) body.appendChild(el('p', 'note warn', '等待命令返回超时；systemd 单元可能仍在后台执行，请查看下面的 journal。'));
+    if (d.stdout && d.stdout.trim()) body.appendChild(outSection('标准输出', d.stdout));
+    if (d.stderr && d.stderr.trim()) body.appendChild(outSection('标准错误', d.stderr));
+    if (d.journal && d.journal.trim()) body.appendChild(outSection('journal（最后 30 行）', d.journal));
+    else if (d.journalError) body.appendChild(el('p', 'note warn', 'journal 读取失败：' + d.journalError));
+    if (!body.childElementCount) body.appendChild(el('p', 'note muted', '命令没有输出'));
+  }
+
+  function renderActionError(msg) {
+    $('#out-title').textContent = '执行失败';
+    $('#out-title').className = 'title bad';
+    $('#out-meta').textContent = fmtClock();
+    var body = $('#out-body');
+    clear(body);
+    body.appendChild(el('p', 'note bad', msg));
+  }
+
+  function doAction(action) {
+    if (!ACTION_CONFIRM[action]) return;
+    if (!window.confirm(ACTION_CONFIRM[action])) return;
+
+    state.localBusy = true;
+    syncButtons();
+    var out = $('#action-out');
+    out.hidden = false;
+    $('#out-title').textContent = '执行中：' + action;
+    $('#out-title').className = 'title warn';
+    $('#out-meta').textContent = '';
+    var body = $('#out-body');
+    clear(body);
+    body.appendChild(el('p', 'note muted', '等待服务端返回…（prune / check 可能需要几十秒到数分钟）'));
+
+    fetch('/api/action', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'dsh-console',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({ action: action })
+    })
+      .then(function (r) {
+        return r.json().catch(function () { return { error: '响应不是 JSON（HTTP ' + r.status + '）' }; })
+          .then(function (data) { return { status: r.status, data: data }; });
+      })
+      .then(function (res) {
+        if (res.data && res.data.error) renderActionError(res.data.error);
+        else renderActionResult(res.data || {});
+      })
+      .catch(function (err) {
+        renderActionError('请求失败：' + (err && err.message ? err.message : '未知错误'));
+      })
+      .finally(function () {
+        state.localBusy = false;
+        syncButtons();
+        refreshStatus();
+      });
+  }
+
+  $('#refresh').addEventListener('click', refreshStatus);
+  Array.prototype.forEach.call(document.querySelectorAll('[data-action]'), function (btn) {
+    btn.addEventListener('click', function () { doAction(btn.getAttribute('data-action')); });
+  });
+  document.addEventListener('click', function (e) {
+    var a = e.target && e.target.closest ? e.target.closest('a.disabled') : null;
+    if (a) { e.preventDefault(); }
+  });
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) refreshStatus();
+  });
+
+  setInterval(function () {
+    if (!document.hidden) refreshStatus();
+  }, REFRESH_MS);
+
+  refreshStatus();
+})();
+</script>
+</body>
+</html>

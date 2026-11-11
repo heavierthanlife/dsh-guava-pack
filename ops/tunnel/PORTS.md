@@ -14,7 +14,8 @@
 | 3000 | TCP | tailnet | rest-server | restic 仓库（HTTP，**append-only** + basic auth） | 仓库路径 `/srv/backup/dsh`，客户端只能追加 |
 | 3001 | TCP | tailnet | uptime-kuma | 监控面板 + push 接收端 | `http://100.109.125.37:3001` |
 | 8080 | TCP | tailnet | ntfy | 手机推送 | topic 在 `/etc/ntfy/topic` |
-| 8081 | TCP | tailnet | miniserve | 手机↔PC 文件中转 | basic auth，目录 `/srv/exchange` |
+| 8090 | TCP | tailnet | dsh-console | **统一图形入口**（状态+动作+各服务跳转） | basic auth，用户名 `dsh` |
+| 8081 | TCP | tailnet | miniserve | 手机↔PC 文件中转 | **随机路径前缀当令牌**（Basic 在手机上会被键盘输入搞挂），目录 `/srv/exchange` |
 
 ## 凭据 / 密钥位置（都不进 git）
 
@@ -24,10 +25,12 @@
 | `~/.restic-repo-url`（PC） | 600 | `rest:http://restic:…@100.109.125.37:3000/dsh/` | `restic-backup.sh` / `restic-ctl.sh` |
 | `~/.restic-pass`（PC） | 600 | 仓库加密口令（丢了数据就没了） | restic |
 | `/etc/restic/repo-password` | 640 root:restic | 同一把仓库口令（VPS 侧 prune/check 用） | `restic-prune` / `restic-check` / janitor |
-| `/etc/miniserve/password` | 600 root | 明文口令（方便查看）；`auth` 是 miniserve 认证文件 | 手机/平板登录 |
+| `/etc/miniserve/env` | 600 root | `PREFIX=` 令牌路径（访问 `http://100.109.125.37:8081/<PREFIX>/`） | 手机/平板直接点链接，无需输入 |
+| `/etc/dsh-console/password` | 600 root | 控制台口令（用户名 `dsh`） | 手机/平板打开 `http://100.109.125.37:8090` |
 | `/etc/ntfy/topic` | 640 root:ntfy | 推送 topic（等同访问令牌） | 手机 ntfy App 订阅 |
 | `/etc/kuma/push-tokens.env` | 600 root | Kuma push 监控令牌 | `dsh-health-push.sh` / `dsh-backup-freshness-push.sh` |
 | `/root/.ssh/gitmirror_ed25519` | 600 root | Deploy key（仅当以后要 VPS 直连私有仓库时用） | 当前未启用（镜像由 PC 推送） |
+| `/etc/rclone/rclone.conf` | 600 root | 异地对象存储（OSS）的 RAM AK/SK；占位符未填时同步任务明确退出 3 | `dsh-offsite-sync.sh`（A3） |
 
 ## 定时任务（VPS）
 
@@ -36,6 +39,7 @@
 | 每 30 分钟 | `dsh-health-push.timer` | 磁盘/内存/锁/服务/git 镜像新鲜度 → Kuma |
 | 00/06/12/18:20 | `dsh-backup-freshness.timer` | restic 最新快照 >26h → 报警 |
 | 每日 03:00 | `restic-lock-janitor.timer` | 清理 >30 分钟的陈旧锁（早于 PC 03:30 备份） |
+| 每日 04:10 | `offsite-sync.timer` | 把加密仓库文件镜像到异地 OSS（A3，需填 AK/SK） |
 | 每月 1 日 04:30 | `restic-prune.timer` | 仓库 prune（append-only 下只能在 VPS 做） |
 | 每周日 05:00 | `restic-check.timer` | `restic check --read-data-subset=2%` |
 

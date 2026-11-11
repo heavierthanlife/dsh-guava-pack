@@ -1,0 +1,31 @@
+[Unit]
+Description=miniserve file exchange (tailnet only, token path)
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=exchange
+Group=exchange
+EnvironmentFile=/etc/miniserve/env
+# 用「随机路径前缀」当令牌，而不是 HTTP Basic：
+# 手机/平板上 Basic 认证要被键盘输入（Android 用户名框还会自动首字母大写，
+# 实测反复 Invalid credentials）。令牌路径点开即用，且仍然只绑 tailnet。
+ExecStart=/usr/local/bin/miniserve \
+  --interfaces 100.109.125.37 --port 8081 \
+  --route-prefix "${PREFIX}" \
+  --upload-files --no-symlinks --hide-version-footer \
+  --title "DSH Exchange" \
+  /srv/exchange
+Restart=always
+RestartSec=3
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/srv/exchange
+PrivateDevices=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

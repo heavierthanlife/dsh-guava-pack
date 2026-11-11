@@ -133,18 +133,46 @@ python3 kuma-configure.py
 单位是 oneshot + 推 Kuma push 端点；状态变化时 Kuma 会经 ntfy 推到手机。
 手动触发：`systemctl start dsh-health-push.service`。
 
-### 4. miniserve（文件中转，tailnet-only + basic auth）
+### 4. miniserve（文件中转，tailnet-only + **令牌路径**）
 
-`/srv/exchange`（User=exchange）；`http://100.109.125.37:8081`，账号 `share`，
-口令在 `/etc/miniserve/password`。支持上传（`--upload-files`）、禁符号链接、隐藏版本页脚。
+`/srv/exchange`（User=exchange）；访问 `http://100.109.125.37:8081/<PREFIX>/`，
+PREFIX 在 `/etc/miniserve/env`（600）。支持上传、禁符号链接、隐藏版本页脚。
 
-回滚：`systemctl disable --now miniserve.service`。
+> 为什么不用 HTTP Basic：手机上 Basic 认证要手动输入，Android 用户名框还会
+> 自动首字母大写，实测反复 `Invalid credentials for HTTP authentication`。
+> 改为高熵随机路径前缀当令牌：点链接即用，仍然只绑 tailnet。
+> 代价：拿到链接的人就能读写该目录（等价于一个 capability URL），别截图外传。
+
+回滚：`systemctl disable --now miniserve.service`（旧的 basic auth 版本见 git 历史）。
 
 ### 5. rest-server（append-only 仓库）+ 维护任务
 
 见 [`../backup/README.md`](../backup/README.md) 的「append-only」一节。
 
-### 6. BBR + 自动安全更新
+#### 5.5 重建所需单元文件（都在本目录）
+
+`ntfy.service` / `rest-server.service` / `miniserve.service` 的原样副本，以及
+`ntfy-server.yml.example`、`miniserve.env.example`。重建 VPS 时：
+
+```bash
+# 单元
+install -m 644 ops/vps/{ntfy,rest-server,miniserve}.service /etc/systemd/system/
+# 配置示例（改掉占位符）
+install -m 640 ops/vps/ntfy-server.yml.example /etc/ntfy/server.yml
+install -m 600 ops/vps/miniserve.env.example /etc/miniserve/env   # 填 PREFIX
+systemctl daemon-reload && systemctl enable --now ntfy rest-server miniserve
+```
+
+rest-server 的认证文件用 `python3 -c` + `crypt.mksalt(crypt.METHOD_BLOWFISH)` 生成
+（格式 `restic:$2b$...`，见首次安装记录），不放仓库。
+
+## 6. 统一入口 dsh-console（`:8090`）
+
+一个页面看全部：DSH 入口（22022/22023）、Kuma、ntfy、miniserve、备份状态与动作、doctor。
+实现与运维见 [`../console/README.md`](../console/README.md)；口令在 `/etc/dsh-console/password`。
+动作白名单只有 `prune` / `check` / `unlock` / `doctor`，二次确认 + CSRF 头，不接受任意命令。
+
+### 7. BBR + 自动安全更新
 
 - `/etc/sysctl.d/99-dsh-bbr.conf`：`net.core.default_qdisc=fq`、`net.ipv4.tcp_congestion_control=bbr`
   （实测中继/备份走的移动网络吞吐更稳；`sysctl --system` 立即生效，重启保持）；
