@@ -56,7 +56,11 @@ A3 把 `/srv/backup/dsh` 的**加密文件**镜像到异地对象存储（阿里
    权限「私有」，存储类型「低频访问」或「归档」都可（仓库是密文，不怕冷）；
 2. RAM 用户，只授权这个 bucket：`oss:PutObject` / `oss:GetObject` / `oss:ListObjects` /
    `oss:DeleteObject` / `oss:AbortMultipartUpload`（bucket 级别）；
-3. 在 VPS 上填配置（模板在 `ops/backup/rclone.conf.example`）：
+3. 在 VPS 上填配置（模板在 `ops/backup/rclone.conf.example`）。
+   **格式自检**：AccessKey ID 通常是 `LTAI` 开头、24 位；Secret 是 **30 位**。
+   长度明显不对（例如 16/15 位）就是复制错了（2026-11-11 实际踩到：
+   `InvalidAccessKeyId: The OSS Access Key Id you provided does not exist in our records`）。
+   `endpoint` 的地域必须与 bucket 一致（bucket 在杭州就写 `oss-cn-hangzhou.aliyuncs.com`）。
    ```bash
    sudoedit /etc/rclone/rclone.conf     # 权限保持 600，把 CHANGE_ME_AK/SK 换掉
    sudo rclone --config /etc/rclone/rclone.conf lsd offsite:   # 应列出 bucket

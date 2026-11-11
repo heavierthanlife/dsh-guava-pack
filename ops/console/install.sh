@@ -75,6 +75,25 @@ fi
 chown root:root "$PASSWORD_FILE"
 chmod 0600 "$PASSWORD_FILE"
 
+# 一次性登录令牌（可选，但强烈建议）：一次点开 `/?k=<token>` 就种 cookie，
+# 手机/平板不用再手打 Basic 口令。文件不存在时 server 会自动禁用该入口。
+TOKEN_FILE="$ETC_DIR/token"
+if [ -s "$TOKEN_FILE" ]; then
+  log "令牌文件已存在，保持不变：$TOKEN_FILE"
+else
+  OLD_UMASK="$(umask)"
+  umask 077
+  TMP_TOKEN="$(mktemp "$ETC_DIR/.token.XXXXXX")"
+  openssl rand -hex 16 > "$TMP_TOKEN"
+  chown root:root "$TMP_TOKEN"
+  chmod 0600 "$TMP_TOKEN"
+  mv -f "$TMP_TOKEN" "$TOKEN_FILE"
+  umask "$OLD_UMASK"
+  log "已生成登录令牌：$TOKEN_FILE（600 root；本脚本不显示内容）"
+fi
+chown root:root "$TOKEN_FILE"
+chmod 0600 "$TOKEN_FILE"
+
 # ---------------------------------------------------------------- 4. restic 缓存
 # 只给控制台读快照用，独立于既有的 /var/cache/restic，
 # 避免改变 restic-prune / restic-check 的既有行为。
@@ -163,6 +182,7 @@ printf '  监听        : http://%s:%s （仅 tailnet）\n' "$BIND_ADDR" "$PORT"
 printf '  认证        : HTTP Basic，用户名 dsh\n'
 printf '  口令文件    : %s（600 root）\n' "$PASSWORD_FILE"
 printf '  查看口令    : sudo cat %s\n' "$PASSWORD_FILE"
+printf '  一键登录    : cat %s，然后打开 http://%s:%s/?k=<令牌>\n' "$TOKEN_FILE" "$BIND_ADDR" "$PORT"
 printf '  服务状态    : systemctl status %s\n' "$APP_NAME"
 printf '  日志        : journalctl -u %s -f\n' "$APP_NAME"
 printf '  回滚        : systemctl disable --now %s && rm -f %s && rm -rf %s\n' \

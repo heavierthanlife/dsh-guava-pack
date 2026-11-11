@@ -4,7 +4,9 @@
 看推送、传文件，并查看整机状态、安全地触发固定运维动作。
 
 - 监听：**`100.109.125.37:8090`**（只绑 tailnet，不监听 `0.0.0.0`，公网 EIP 不开端口）
-- 认证：HTTP Basic，用户名 **`dsh`**，口令随机生成于 VPS `/etc/dsh-console/password`（600 root）
+- 认证：HTTP Basic，用户名 **`dsh`**，口令随机生成于 VPS `/etc/dsh-console/password`（600 root）；
+  另有**一键登录令牌** `/etc/dsh-console/token`：访问 `http://100.109.125.37:8090/?k=<token>`
+  会种一个 HttpOnly cookie（30 天）后跳到首页，手机/平板不用手打口令（Basic 仍然可用）
 - 依赖：仅 Node.js 20 标准库（**无 npm 包**），静态页由 `server.mjs` 同目录的 `index.html` 提供
 - 仓库内**不含任何明文口令**；口令只存在于 VPS 的 `/etc/dsh-console/password`
 
@@ -25,8 +27,21 @@ VPS 侧安装后的路径：
 | `/opt/dsh-console/index.html` | 页面 |
 | `/opt/dsh-console/README.md` | 本文件副本（systemd `Documentation=file:` 指向它） |
 | `/etc/dsh-console/password` | 首次安装生成，600 root；**升级时绝不覆盖** |
+| `/etc/dsh-console/token` | 一键登录令牌（32 位 hex，600 root）；删除/改内容后 `systemctl restart dsh-console` 即作废旧链接 |
 | `/etc/systemd/system/dsh-console.service` | 单元（`Restart=always`，root + 沙箱） |
 | `/var/cache/dsh-console/restic` | 控制台自己读 restic 快照用的缓存（restic:restic 0750） |
+
+## 一键登录（手机/平板）
+
+```bash
+sudo cat /etc/dsh-console/token
+# 浏览器打开： http://100.109.125.37:8090/?k=<令牌>
+```
+
+令牌以 cookie 形式记住 30 天；换设备/清 cookie 后重新点一次链接即可。
+URL 里带令牌，注意别把链接截图发到公开地方；要作废就重写 token 文件并重启服务。
+若 Windows 浏览器因为公司 VPN/代理访问不到 `100.x`，在 WSL 里 `systemctl --user enable --now
+console-forward.service`（见 `../tunnel/console-forward.service`），然后打开 `http://localhost:8090`。
 
 ## 为什么服务以 root 运行
 

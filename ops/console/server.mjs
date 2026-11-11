@@ -27,6 +27,12 @@ const VERSION = '1.0.0';
 const BIND = process.env.DSH_CONSOLE_BIND || '100.109.125.37';
 const PORT = Number(process.env.DSH_CONSOLE_PORT || 8090);
 const PASSWORD_FILE = process.env.DSH_CONSOLE_PASSWORD_FILE || '/etc/dsh-console/password';
+// 可选的一次性令牌（点开即用）：/etc/dsh-console/token，32 位十六进制。
+// 手机/平板输入 Basic 口令太痛苦（键盘自动大写、反复弹框），
+// 访问 `/?k=<token>` 会种一个 HttpOnly cookie 再跳到 `/`，之后不再要求输入。
+const TOKEN_FILE = process.env.DSH_CONSOLE_TOKEN_FILE || '/etc/dsh-console/token';
+const COOKIE_NAME = 'dsh_console_session';
+const COOKIE_MAX_AGE = 30 * 24 * 3600;
 const INDEX_PATH = path.join(__dirname, 'index.html');
 
 const USERNAME = 'dsh';
@@ -88,7 +94,48 @@ function loadPassword() {
 const PASSWORD = loadPassword();
 const EXPECTED_DIGEST = createHash('sha256').update(USERNAME).update('\0').update(PASSWORD).digest();
 
+/** 读可选令牌；格式不对/不存在一律当作"没配置"。 */
+function loadAccessToken() {
+  let raw;
+  try {
+    raw = readFileSync(TOKEN_FILE, 'utf8');
+  } catch {
+    return null;
+  }
+  const token = raw.trim();
+  if (!/^[a-f0-9]{16,64}$/i.test(token)) {
+    console.error(`[warn] ${TOKEN_FILE} 格式不对（期望 16-64 位十六进制），忽略令牌登录`);
+    return null;
+  }
+  return token;
+}
+
+const ACCESS_TOKEN = loadAccessToken();
+
+/** 常量时间比较两个字符串（长度不同直接 false）。 */
+function safeEqual(a, b) {
+  const left = Buffer.from(String(a));
+  const right = Buffer.from(String(b));
+  return left.length === right.length && timingSafeEqual(left, right);
+}
+
+/** cookie 里带着有效令牌 = 已登录（等同 Basic）。 */
+function cookieAllowed(req) {
+  if (ACCESS_TOKEN === null) return false;
+  const raw = req.headers.cookie;
+  if (typeof raw !== 'string' || raw === '') return false;
+  for (const part of raw.split(';')) {
+    const idx = part.indexOf('=');
+    if (idx < 0) continue;
+    const name = part.slice(0, idx).trim();
+    if (name !== COOKIE_NAME) continue;
+    return safeEqual(part.slice(idx + 1).trim(), ACCESS_TOKEN);
+  }
+  return false;
+}
+
 function checkAuth(req) {
+  if (cookieAllowed(req)) return true;
   const header = req.headers.authorization;
   if (typeof header !== 'string' || !/^Basic\s+/i.test(header)) return false;
   let decoded;
@@ -601,6 +648,21 @@ const server = createServer(async (req, res) => {
     if (!hostAllowed(req)) {
       log(`reject host=${req.headers.host || '-'} path=${pathname} ip=${ip}`);
       return sendText(req, res, 421, '不接受的 Host');
+    }
+
+    // 一次性令牌入口：GET /?k=<token> → 种 cookie → 302 回首页。
+    // 不记录 k 的值（日志只写 pathname）。
+    if ((req.method === 'GET' || req.method === 'HEAD') && ACCESS_TOKEN !== null) {
+      const supplied = url.searchParams.get('k');
+      if (supplied !== null) {
+        if (safeEqual(supplied, ACCESS_TOKEN)) {
+          res.statusCode = 302;
+          res.setHeader('Set-Cookie', `${COOKIE_NAME}=${ACCESS_TOKEN}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${COOKIE_MAX_AGE}`);
+          res.setHeader('Location', '/');
+          return res.end();
+        }
+        log(`token rejected ip=${ip}`);
+      }
     }
 
     if (!checkAuth(req)) {

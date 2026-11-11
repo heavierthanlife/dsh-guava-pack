@@ -1,0 +1,23 @@
+[Unit]
+# 在 PC 的 WSL 里把 VPS 控制台转发到本机 8090。
+# 适用场景：Windows 侧浏览器因为公司 VPN/代理/分流规则访问不到 100.x 时，
+# 用 WSL（已能 ssh 到 VPS）做本机中转：Windows 打开 http://localhost:8090 即可。
+Description=Forward DSH Console (VPS:8090) to localhost:8090
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/dsh/tunnel.env
+# 只绑 0.0.0.0 在 WSL 的虚拟网卡里（Windows 通过 localhost 转发访问；不对 LAN 暴露）。
+ExecStart=/usr/bin/ssh -F /dev/null -N \
+  -o ExitOnForwardFailure=yes \
+  -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
+  -o StrictHostKeyChecking=yes \
+  -L 0.0.0.0:8090:${VPS_TAILNET_IP}:8090 \
+  root@${VPS_TAILNET_IP}
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -27,10 +27,22 @@
 | `/etc/restic/repo-password` | 640 root:restic | 同一把仓库口令（VPS 侧 prune/check 用） | `restic-prune` / `restic-check` / janitor |
 | `/etc/miniserve/env` | 600 root | `PREFIX=` 令牌路径（访问 `http://100.109.125.37:8081/<PREFIX>/`） | 手机/平板直接点链接，无需输入 |
 | `/etc/dsh-console/password` | 600 root | 控制台口令（用户名 `dsh`） | 手机/平板打开 `http://100.109.125.37:8090` |
+| `/etc/dsh-console/token` | 600 root | 一键登录令牌（`/?k=<token>`，种 30 天 cookie） | 手机点链接即用，不用手打口令 |
 | `/etc/ntfy/topic` | 640 root:ntfy | 推送 topic（等同访问令牌） | 手机 ntfy App 订阅 |
 | `/etc/kuma/push-tokens.env` | 600 root | Kuma push 监控令牌 | `dsh-health-push.sh` / `dsh-backup-freshness-push.sh` |
 | `/root/.ssh/gitmirror_ed25519` | 600 root | Deploy key（仅当以后要 VPS 直连私有仓库时用） | 当前未启用（镜像由 PC 推送） |
 | `/etc/rclone/rclone.conf` | 600 root | 异地对象存储（OSS）的 RAM AK/SK；占位符未填时同步任务明确退出 3 | `dsh-offsite-sync.sh`（A3） |
+
+## PC 浏览器访问不到 100.x 时
+
+Windows 侧若被公司 VPN/代理接管了路由，浏览器打不开 `http://100.109.125.37:8090` 是正常的
+（请求根本没到 VPS）。两个办法：
+
+1. 在 Windows 上 `Test-NetConnection 100.109.125.37 -Port 8090`；失败就是路由/代理问题，
+   检查 Tailscale 是否 connected、`netsh winhttp show proxy`、浏览器代理设置；
+2. **兜底（已在本机装好）**：WSL 里 `systemctl --user enable --now console-forward.service`
+   （单元见 [`console-forward.service`](console-forward.service)），Windows 打开
+   `http://localhost:8090` —— 走 WSL→VPS 的 22 端口转发，不经过浏览器代理。
 
 ## 定时任务（VPS）
 
