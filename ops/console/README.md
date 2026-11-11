@@ -43,6 +43,24 @@ URL 里带令牌，注意别把链接截图发到公开地方；要作废就重�
 若 Windows 浏览器因为公司 VPN/代理访问不到 `100.x`，在 WSL 里 `systemctl --user enable --now
 console-forward.service`（见 `../tunnel/console-forward.service`），然后打开 `http://localhost:8090`。
 
+## 主题
+
+内置 5 套**暗色**主题（不含粉/紫/绿），右上角下拉切换，选择存 `localStorage`（键
+`dsh-console-theme`），刷新/换设备后保持；每套主题同时改写 `<meta theme-color>`，
+手机浏览器状态栏颜色会跟随。
+
+| 值 | 名称 | 主色 |
+|---|---|---|
+| `graphite` | 石墨金（默认） | 琥珀金 `#f2b23e` |
+| `cyber` | 赛博柠檬 | 亮柠檬黄 `#f6ff00`（与 DSH 赛博主题一致） |
+| `navy` | 深海蓝 | 亮蓝 `#47c2ff` |
+| `ember` | 熔岩橙 | 橙 `#ff8a3d` |
+| `ice` | 冷银蓝 | 冰蓝 `#b9dcff` |
+
+实现：`index.html` 顶部 `:root` / `html[data-theme="…"]` 定义 42 个 CSS 变量
+（背景/面板/边框/文字/强调色/状态色/辉光等），所有规则只引用变量；
+`<head>` 里有一小段内联脚本在首屏渲染前套用主题，避免闪白。
+
 ## 为什么服务以 root 运行
 
 题面允许在 README 说明选择。这里的取舍是：
