@@ -14,7 +14,7 @@ EnvironmentFile=/etc/miniserve/env
 ExecStart=/usr/local/bin/miniserve \
   --interfaces 100.109.125.37 --port 8081 \
   --route-prefix "${PREFIX}" \
-  --upload-files --no-symlinks --hide-version-footer \
+  --upload-files --mkdir --rm-files --no-symlinks --hide-version-footer \
   --title "DSH Exchange" \
   /srv/exchange
 Restart=always

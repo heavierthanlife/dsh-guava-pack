@@ -15,7 +15,7 @@
 | 3001 | TCP | tailnet | uptime-kuma | 监控面板 + push 接收端 | `http://100.109.125.37:3001` |
 | 8080 | TCP | tailnet | ntfy | 手机推送 | topic 在 `/etc/ntfy/topic` |
 | 8090 | TCP | tailnet | dsh-console | **统一图形入口**（状态+动作+各服务跳转） | basic auth，用户名 `dsh` |
-| 8081 | TCP | tailnet | miniserve | 手机↔PC 文件中转 | **随机路径前缀当令牌**（Basic 在手机上会被键盘输入搞挂），目录 `/srv/exchange` |
+| 8081 | TCP | tailnet | miniserve | 手机↔PC 文件中转（可上传/删除/建目录） | **随机路径前缀当令牌**（Basic 在手机上会被键盘输入搞挂），目录 `/srv/exchange` |
 
 ## 凭据 / 密钥位置（都不进 git）
 

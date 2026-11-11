@@ -136,7 +136,7 @@ python3 kuma-configure.py
 ### 4. miniserve（文件中转，tailnet-only + **令牌路径**）
 
 `/srv/exchange`（User=exchange）；访问 `http://100.109.125.37:8081/<PREFIX>/`，
-PREFIX 在 `/etc/miniserve/env`（600）。支持上传、禁符号链接、隐藏版本页脚。
+PREFIX 在 `/etc/miniserve/env`（600）。支持上传、**删除（每行 ✗）**、建目录（`--mkdir`）、禁符号链接、隐藏版本页脚；删除是立即生效、没有回收站，只能删 `/srv/exchange` 内的东西。
 
 > 为什么不用 HTTP Basic：手机上 Basic 认证要手动输入，Android 用户名框还会
 > 自动首字母大写，实测反复 `Invalid credentials for HTTP authentication`。
