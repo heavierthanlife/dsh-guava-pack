@@ -1,0 +1,6 @@
+# /etc/apt/apt.conf.d/52-dsh-retries —— 防止阿里云镜像偶发断连让整轮
+# unattended-upgrades 中止（2026-11-11 实测：下载 gcc-12 包时
+# "Method http has died unexpectedly"，升级整轮放弃，75 个安全更新卡住）。
+Acquire::Retries "5";
+Acquire::http::Timeout "30";
+Acquire::https::Timeout "30";

@@ -178,3 +178,8 @@ rest-server 的认证文件用 `python3 -c` + `crypt.mksalt(crypt.METHOD_BLOWFIS
   （实测中继/备份走的移动网络吞吐更稳；`sysctl --system` 立即生效，重启保持）；
 - `unattended-upgrades` + `/etc/apt/apt.conf.d/51-dsh-unattended`：**只自动装安全更新**，
   不自动重启；需要重启时 `dsh-health-push` 会在消息里写「需要重启」。
+- `52-dsh-retries.conf.example` → `/etc/apt/apt.conf.d/52-dsh-retries`：阿里云镜像偶发
+  `Method http has died unexpectedly` 会让整轮升级中止（2026-11-11 实测 75 个安全更新卡住），
+  加 5 次重试 + 30s 超时后手动跑一轮已清零。
+- 内核更新后需要重启才生效：`cat /var/run/reboot-required.pkgs` 看是哪个包，
+  择机 `systemctl reboot`（重启只影响 VPS 上的中继/面板，PC 本机 DSH 不受影响）。
