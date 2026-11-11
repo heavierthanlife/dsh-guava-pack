@@ -51,8 +51,13 @@
     "test:mobile": "node tools/mobile-audit.mjs"
   },
   "dependencies": {
+    "@deepseek-ai/dsh-commands": "0.2.1-rc.5",
+    "@deepseek-ai/dsh-compaction": "0.2.1-rc.5",
+    "@deepseek-ai/dsh-compaction-basic": "0.2.1-rc.5",
+    "@deepseek-ai/dsh-llm": "0.2.1-rc.5",
+    "@deepseek-ai/dsh-tools": "0.2.1-rc.5",
+    "dsh-context-acp": "file:./plugins/dsh-context-acp",
     "undici": "^7.0.0",
-    "zod": "^4.6.7",
-    "dsh-context-acp": "file:./plugins/dsh-context-acp"
+    "zod": "^4.6.7"
   }
 }
