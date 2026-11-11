@@ -13,10 +13,20 @@
  *   · pack 里有、工作副本已没有的 → 跳过并报告，**不删**（之前被删掉的就不用管了）。
  *   · 工作副本有、pack 里没有的 → 只报告；要纳入得改 cordis.patch.yml + install.mjs。
  *
+ * 方向：默认「工作副本 -> pack」。加了 --from-pack 就反过来（pack -> 工作副本），
+ * 用于把分发副本里领先的实现回收进工作副本（本机就是这样：pack 更新了 6 个插件，
+ * 工作副本还停在旧版，此时按默认方向跑会用旧的覆盖新的）。
+ *
+ * 保护：任何**目标侧比源侧更新**的文件都会跳过并点名（--force 才覆盖）。
+ * 这条是踩出来的 —— 曾经用旧的工作副本把 pack 里 2228 行新代码覆盖掉，
+ * 事后只能 git checkout 回滚。
+ *
  * 用法（在 pack 目录下）：
- *   node tools/sync-plugins.mjs --dry-run     # 只看会改什么
- *   node tools/sync-plugins.mjs               # 真同步
- *   node tools/sync-plugins.mjs --from <dir>  # 指定工作副本根目录
+ *   node tools/sync-plugins.mjs --dry-run               # 只看会改什么
+ *   node tools/sync-plugins.mjs                         # 真同步（工作副本 -> pack）
+ *   node tools/sync-plugins.mjs --from-pack              # 反向（pack -> 工作副本）
+ *   node tools/sync-plugins.mjs --from <dir>             # 指定工作副本根目录
+ *   node tools/sync-plugins.mjs --force                  # 忽略「目标侧更新」保护
  */
 
 import { existsSync, readdirSync, readFileSync, mkdirSync, writeFileSync, rmSync, statSync } from 'node:fs';
@@ -26,6 +36,12 @@ import { fileURLToPath } from 'node:url';
 const PACK = dirname(dirname(fileURLToPath(import.meta.url)));
 const argv = process.argv.slice(2);
 const DRY = argv.includes('--dry-run');
+/** 反向同步：pack -> 工作副本。 */
+const REVERSE = argv.includes('--from-pack');
+/** 忽略「目标侧更新」保护。 */
+const FORCE = argv.includes('--force');
+/** 被保护挡下的文件（目标侧 mtime 更新），跑完统一汇报。 */
+const AHEAD = [];
 const fromFlag = argv.indexOf('--from');
 const FROM = fromFlag >= 0 && argv[fromFlag + 1] ? argv[fromFlag + 1] : join(PACK, '..');
 
@@ -118,8 +134,17 @@ function mirror(src, dst, packRel) {
   const changed = [];
   for (const rel of srcFiles) {
     const target = join(dst, rel);
-    if (!existsSync(target)) added.push(rel);
-    else if (!readFileSync(join(src, rel)).equals(readFileSync(target))) changed.push(rel);
+    if (!existsSync(target)) {
+      added.push(rel);
+      continue;
+    }
+    if (readFileSync(join(src, rel)).equals(readFileSync(target))) continue;
+    // 目标侧更新 = 反向漂移。覆盖它会丢掉更新的那份（真实事故：-2228 行）。
+    if (!FORCE && statSync(target).mtimeMs > statSync(join(src, rel)).mtimeMs) {
+      AHEAD.push({ rel, target });
+      continue;
+    }
+    changed.push(rel);
   }
   const kept = dstFiles.filter((rel) => !srcSet.has(rel));
 
@@ -145,6 +170,7 @@ function packPluginByName(name) {
 }
 
 function main() {
+  if (REVERSE) return mainReverse();
   console.log(`dsh-guava-pack 插件同步${DRY ? '（dry-run）' : ''}\n`);
   console.log(`  工作副本根: ${FROM}`);
   console.log(`  pack:       ${PACK}\n`);
@@ -224,8 +250,98 @@ function main() {
     }
   }
 
+  reportAhead();
   console.log(`\n结果：${synced} 个已同步、${clean} 个本来就一致${DRY ? '（dry-run）' : ''}`);
   if (!DRY && synced > 0) console.log('建议接着跑：node install.mjs --check');
+  return 0;
+}
+
+/** 「目标侧更新」统一汇报：这些文件一个字都没写。 */
+function reportAhead() {
+  if (AHEAD.length === 0) return;
+  console.log(`\n\u26a0\ufe0f  ${AHEAD.length} 个文件在目标侧更新，已跳过（疑似反向漂移）：`);
+  for (const item of AHEAD) console.log(`      \u23eb ${relative(PACK, item.target) || item.target}`);
+  console.log('      确认要覆盖就加 --force；否则先把方向搞对（--from-pack 是 pack -> 工作副本）。');
+}
+
+/** 反向：pack -> 工作副本。按 package.json 的 name 配对，只增改不删除。 */
+function mainReverse() {
+  console.log(`dsh-guava-pack 插件同步：pack -> 工作副本${DRY ? '（dry-run）' : ''}\n`);
+  console.log(`  pack:       ${PACK}`);
+  console.log(`  工作副本根: ${FROM}\n`);
+
+  if (!isDir(FROM)) {
+    console.error(`工作副本根目录不存在：${FROM}`);
+    return 1;
+  }
+
+  // 工作副本根下按 package name 建索引（目录名可能与包名不同：theme-manager）
+  const wsByName = new Map();
+  for (const dir of readdirSync(FROM)) {
+    const full = join(FROM, dir);
+    if (!isDir(full) || full === PACK) continue;
+    const pkg = readJson(join(full, 'package.json'));
+    if (pkg?.name) wsByName.set(pkg.name, full);
+  }
+
+  const packRoot = join(PACK, 'plugins');
+  const packDirs = existsSync(packRoot) ? readdirSync(packRoot).filter((d) => isDir(join(packRoot, d))) : [];
+
+  let synced = 0;
+  let clean = 0;
+  let missing = 0;
+
+  console.log('插件：');
+  for (const dir of packDirs) {
+    const src = join(packRoot, dir);
+    const pkg = readJson(join(src, 'package.json'));
+    if (pkg?.name === undefined) continue;
+    const target = wsByName.get(pkg.name);
+    if (target === undefined) {
+      missing++;
+      warn(`${pkg.name}：pack 有、工作副本没有 —— 跳过（不新建目录，改点只发生在已有镜像上）`);
+      continue;
+    }
+    // packRel 仍按 pack 根算：.gitignore 里的跳过规则（router.log / mode.json / …）才对得上
+    const diff = mirror(src, target, join('plugins', dir));
+    const n = diff.added.length + diff.changed.length;
+    if (n === 0) {
+      clean++;
+      console.log(`  = ${pkg.name}：已是最新`);
+    } else {
+      synced++;
+      ok(`${pkg.name}：+${diff.added.length} ~${diff.changed.length}${DRY ? '（dry-run，未写）' : ''}`);
+      for (const f of diff.added) console.log(`      + ${f}`);
+      for (const f of diff.changed) console.log(`      ~ ${f}`);
+    }
+    if (diff.skipped.length > 0) console.log(`      跳过（.gitignore/备份）: ${diff.skipped.join(', ')}`);
+    if (diff.kept.length > 0) console.log(`      保留工作副本独有: ${diff.kept.join(', ')}`);
+  }
+
+  const svcRoot = join(PACK, 'services');
+  if (existsSync(svcRoot)) {
+    const svcDirs = readdirSync(svcRoot).filter((d) => isDir(join(svcRoot, d)));
+    const pending = svcDirs.filter((d) => isDir(join(FROM, d)));
+    if (pending.length > 0) {
+      console.log('\n服务：');
+      for (const d of pending) {
+        const diff = mirror(join(svcRoot, d), join(FROM, d), join('services', d));
+        const n = diff.added.length + diff.changed.length;
+        if (n === 0) console.log(`  = ${d}：已是最新`);
+        else {
+          ok(`${d}：+${diff.added.length} ~${diff.changed.length}`);
+          for (const f of diff.added) console.log(`      + ${f}`);
+          for (const f of diff.changed) console.log(`      ~ ${f}`);
+        }
+        if (diff.skipped.length > 0) console.log(`      跳过（.gitignore/备份）: ${diff.skipped.join(', ')}`);
+        if (diff.kept.length > 0) console.log(`      保留工作副本独有: ${diff.kept.join(', ')}`);
+      }
+    }
+  }
+
+  reportAhead();
+  console.log(`\n结果：${synced} 个已同步、${clean} 个本来就一致、${missing} 个无对应工作副本${DRY ? '（dry-run）' : ''}`);
+  if (!DRY && synced > 0) console.log('工作副本变了 —— 记得在 ~/dsh 里提交。');
   return 0;
 }
 
