@@ -45,6 +45,20 @@ MONITORS = [
         "maxredirects": 10,
     },
     {
+        # 第二台（MSI）的入口。每台 PC 在 VPS 上独占一个 220xx 端口，
+        # 所以每台都要单独一条 —— 只监控 22022 时，本机隧道挂掉没有任何告警。
+        # 命名带端口，便于在手机通知里区分是哪台。
+        "name": "DSH /go (22023 MSI)",
+        "type": "http",
+        "interval": 60,
+        "retry_interval": 60,
+        "url": "http://100.109.125.37:22023/go",
+        # 同上：302→401 都表示服务活着，真正挂掉是 5xx/超时。
+        "accepted_statuscodes_json": '["200-399", "401"]',
+        "method": "GET",
+        "maxredirects": 10,
+    },
+    {
         "name": "DSH 备份新鲜度",
         "type": "push",
         "interval": 86400,
