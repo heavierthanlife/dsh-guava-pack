@@ -1,0 +1,12 @@
+[Unit]
+Description=DSH PC health self-check (push to Uptime Kuma)
+Documentation=file:///home/guava5tar_/dsh-guava-pack/ops/pc-health/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# install.sh 会把这里的路径改成本机 pack 的真实位置
+ExecStart=/home/guava5tar_/dsh-guava-pack/ops/pc-health/dsh-pc-health.sh
+Nice=10
+IOSchedulingClass=idle

@@ -59,6 +59,25 @@ MONITORS = [
         "maxredirects": 10,
     },
     {
+        # 每台 PC 一条：PC 侧自检（DSH/桥接/路由/入口/隧道/磁盘）用 push 推上来。
+        # 外部 HTTP 探测只能发现"整个链路挂了"；DSH 自己崩而入口代理还在时，
+        # 外部仍然 302，只有 PC 内部检查能发现。
+        "name": "PC 健康 (主力 22022)",
+        "type": "push",
+        "interval": 3600,
+        "retry_interval": 600,
+        "url": "http://100.109.125.37:3001",
+        "push_env": "KUMA_PUSH_PC_MAIN",
+    },
+    {
+        "name": "PC 健康 (MSI 22023)",
+        "type": "push",
+        "interval": 3600,
+        "retry_interval": 600,
+        "url": "http://100.109.125.37:3001",
+        "push_env": "KUMA_PUSH_PC_MSI",
+    },
+    {
         "name": "DSH 备份新鲜度",
         "type": "push",
         "interval": 86400,
