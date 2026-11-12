@@ -1023,8 +1023,7 @@
       .finally(function () {
         state.localBusy = false;
         syncButtons();
-        applyEntryHrefs();
-  refreshStatus();
+        refreshStatus();
       });
   }
 
@@ -1060,6 +1059,7 @@
     if (!document.hidden) refreshStatus();
   }, REFRESH_MS);
 
+  applyEntryHrefs();
   refreshStatus();
 })();
 </script>
