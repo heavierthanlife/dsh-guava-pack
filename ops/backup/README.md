@@ -41,7 +41,7 @@ alias rk='bash ops/backup/restic-ctl.sh'   # 可选，装个短名字
 
 ## ⚠️ 两台机器共用一个仓库：恢复必须区分机器
 
-两台 PC（`YGY12` 主力 / `MSI`）备份进**同一仓库、同一路径**（`/home/guava5tar_/dsh`）、
+两台 PC（`YGY12` 公司 T14p / `MSI` 家里 GE75）备份进**同一仓库、同一路径**（`/home/guava5tar_/dsh`）、
 同一用户名 `guava5tar_`、同一 tag（`dsh-nightly`），所以 `latest` 指的是
 「**所有机器**里最新的那一份」，而且**不报错、静默命中另一台**：
 
@@ -124,7 +124,7 @@ RESTIC_REPOSITORY='sftp:root@100.109.125.37:/srv/backup/dsh' rk snapshots
 3. 恢复**永远先到 `/tmp`**，确认无误再覆盖；
 4. 恢复**永远带 `--host`**（两台共用一个仓库，`latest` 会静默串台）。
 
-## 第二台（pack 不在 `~/dsh` 下的机器）怎么启用
+## 另一台（pack 不在 `~/dsh` 下的机器）怎么启用
 
 `dsh-backup.service` 里的 `ExecStart` 写的是第一台布局
 （`<DSH_HOME>/playground/themes/dsh-guava-pack/...`）。pack 在别处时**本机单元要改路径**，

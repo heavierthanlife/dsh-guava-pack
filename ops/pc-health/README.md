@@ -21,10 +21,15 @@ Kuma 从**外部**探 `http://VPS:<REMOTE_PORT>/go`，只能发现「隧道 + �
 
 ## 两台机器的对应关系
 
+两台是**对等**关系（公司用 T14p、家里用 GE75），不分主备：
+
 | 机器 | VPS 端口 | Kuma 监控名 | 令牌变量 |
 |---|---|---|---|
-| 主力机 | 22022 | `PC 健康 (主力 22022)` | `KUMA_PUSH_PC_MAIN` |
-| 第二台（MSI）| 22023 | `PC 健康 (MSI 22023)` | `KUMA_PUSH_PC_MSI` |
+| 公司 ThinkPad T14p（YGY12） | 22022 | `PC 健康 (主力 22022)` | `KUMA_PUSH_PC_MAIN` |
+| 家里 GE75（MSI） | 22023 | `PC 健康 (MSI 22023)` | `KUMA_PUSH_PC_MSI` |
+
+> 监控名里的「主力」与令牌变量名是历史命名，**改它要同步 VPS 的
+> `/etc/kuma/push-tokens.env` 和 Kuma 里的监控项**，收益不大，暂不改。
 
 ## 安装（在要监控的那台 PC 上跑）
 

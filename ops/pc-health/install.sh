@@ -7,7 +7,8 @@
 #
 # 令牌从哪来（在 VPS 上，root）：
 #   grep -E 'KUMA_PUSH_PC' /etc/kuma/push-tokens.env
-#   # 主力机(22022) 用 KUMA_PUSH_PC_MAIN，第二台(22023) 用 KUMA_PUSH_PC_MSI
+#   # 公司 T14p(22022) 用 KUMA_PUSH_PC_MAIN，家里 GE75(22023) 用 KUMA_PUSH_PC_MSI
+#   # （令牌变量名沿用旧命名，改它就要同步 VPS 的 push-tokens.env 与 Kuma 监控）
 #
 # 幂等：重复执行只会覆盖 env 与两个 unit，然后重启 timer。
 set -euo pipefail

@@ -90,12 +90,13 @@ bash ops/tunnel/check.sh <VPS tailnet IP>
 
 ## 多台 PC 同时接入（2026-11-09）
 
-每台 PC 在 VPS 上占一个**独立端口**，手机/平板按端口区分两台 DSH：
+每台 PC 在 VPS 上占一个**独立端口**，手机/平板按端口区分两台 DSH。
+两台是**对等**关系（公司用 T14p、家里用 GE75），不分主备：
 
 | PC | VPS 端口 | 入口 |
 |---|---|---|
-| 主力机 | 22022 | `http://100.109.125.37:22022/go` |
-| 第二台 | 22023（自动分配） | `http://100.109.125.37:22023/go` |
+| 公司 T14p（YGY12） | 22022 | `http://100.109.125.37:22022/go` |
+| 家里 GE75（MSI） | 22023（自动分配） | `http://100.109.125.37:22023/go` |
 
 VPS 侧**不用改任何配置**（`GatewayPorts clientspecified` 已允许绑定 tailnet 地址），
 新端口只出现在 `ss -ltn` 里，且只绑 `100.x`，公网看不到。
@@ -105,7 +106,7 @@ VPS 侧**不用改任何配置**（`GatewayPorts clientspecified` 已允许绑�
 1. **Tailscale**：装好并 `tailscale up`，加入同一 tailnet
    （WSL2 镜像模式下 Tailscale 跑在 Windows 宿主，Linux 侧没有 CLI 也能通）。
 2. **授权 SSH**：把第二台的 `~/.ssh/id_ed25519.pub` 追加到 VPS 的
-   `/root/.ssh/authorized_keys`。最省事：在主力机上执行
+   `/root/.ssh/authorized_keys`。最省事：在已能 SSH 的那台上执行
    `ssh root@100.109.125.37 'echo "<第二台公钥>" >> /root/.ssh/authorized_keys'`。
 3. **跑脚本**（第二台上，pack 目录内）：
 

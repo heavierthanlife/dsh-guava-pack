@@ -9,8 +9,8 @@
 |---|---|---|---|---|---|
 | 41641 | UDP | `0.0.0.0` | tailscaled | WireGuard 直连 | **安全组必须放行**，否则退回东京 DERP |
 | 22 | TCP | `0.0.0.0:22` | sshd | 管理 / PC 反向隧道 | iptables `DSH_SSH_TAILNET` 只放行 `tailscale0`、`lo`、`100.104.0.0/16`，其余 DROP |
-| 22022 | TCP | tailnet | sshd（反向隧道） | 主力 PC 的 DSH（→ `127.0.0.1:3098`） | `GatewayPorts clientspecified`，公网不可见 |
-| 22023 | TCP | tailnet | sshd（反向隧道） | 第二台 PC 的 DSH | 端口表约定，见 `ops/tunnel/` |
+| 22022 | TCP | tailnet | sshd（反向隧道） | 公司 ThinkPad T14p（YGY12）的 DSH → `127.0.0.1:3098` | `GatewayPorts clientspecified`，公网不可见 |
+| 22023 | TCP | tailnet | sshd（反向隧道） | 家里 GE75（MSI）的 DSH | 两台对等；端口约定见 `ops/tunnel/` |
 | 3000 | TCP | tailnet | rest-server | restic 仓库（HTTP，**append-only** + basic auth） | 仓库路径 `/srv/backup/dsh`，客户端只能追加 |
 | 3001 | TCP | tailnet | uptime-kuma | 监控面板 + push 接收端 | `http://100.109.125.37:3001` |
 | 8080 | TCP | tailnet | ntfy | 手机推送 | topic 在 `/etc/ntfy/topic` |

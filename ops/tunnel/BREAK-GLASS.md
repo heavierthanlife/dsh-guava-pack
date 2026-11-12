@@ -421,7 +421,7 @@ rm -f tmp
 
 ### 8.17 两台机器共用一个 restic 仓库：`restore latest` 会拿到另一台的
 
-**症状**：在主力机上 `restic ls latest` / `restore latest`，列出的 / 恢复出的内容
+**症状**：在公司那台（T14p）上 `restic ls latest` / `restore latest`，列出的 / 恢复出的内容
 属于 MSI（或反过来）—— 因为两台备份到**同一仓库、同一路径 `/home/guava5tar_/dsh`、
 同一用户名 `guava5tar_`、同一 tag `dsh-nightly`**，restic 的 `latest` 只按时间取，
 **不知道"本机"是哪个**。

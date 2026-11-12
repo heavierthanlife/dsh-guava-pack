@@ -153,7 +153,7 @@ else
 
 $(cat "$HOME/.ssh/id_ed25519.pub" 2>/dev/null || echo '（dry-run：公钥将在非 dry-run 时生成）')
 
-  方便的做法：在主力机（已能 SSH 上 VPS 的那台）执行
+  方便的做法：在已能 SSH 上 VPS 的那台（如公司 T14p）执行
 
     ssh root@$VPS_TS 'echo "上面这行公钥" >> /root/.ssh/authorized_keys'
 
