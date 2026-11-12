@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import secrets
 import shutil
 import sqlite3
@@ -34,6 +35,7 @@ SERVICE = "uptime-kuma"
 MONITORS = [
     {
         "name": "DSH /go",
+        "machine": "ygy12",
         "type": "http",
         "interval": 60,
         "retry_interval": 60,
@@ -49,6 +51,7 @@ MONITORS = [
         # 所以每台都要单独一条 —— 只监控 22022 时，本机隧道挂掉没有任何告警。
         # 命名带端口，便于在手机通知里区分是哪台。
         "name": "DSH /go (22023 MSI)",
+        "machine": "msi",
         "type": "http",
         "interval": 60,
         "retry_interval": 60,
@@ -150,6 +153,50 @@ def upsert_notification(cur: sqlite3.Cursor, ntfy_url: str, topic: str) -> int:
     nid = cur.lastrowid
     print(f"  · 新建通知 ntfy (VPS)：id={nid}")
     return nid
+
+
+# ── 端口映射：唯一真相源 config/machines.json ──────────────────────────────
+# 只覆盖 http 类入口监控的 URL 主机端口；push 类监控指向 Kuma 自己，不参与。
+# 文件缺失/解析失败 → 原样返回（回退到上面写死的值）。
+# 注意：监控 name 里含端口数字，将来真改端口时需手工同步文案；Kuma 以 id 为准，
+# 改 name 不会重建监控，但会让人看不懂。
+# 优先 DSH_MACHINES_JSON（VPS 上脚本可能被拷到 /tmp 运行），否则按仓库布局推断。
+_MACHINES_JSON = os.environ.get("DSH_MACHINES_JSON") or os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "config", "machines.json")
+
+
+def _apply_machine_ports(monitors: list[dict]) -> list[dict]:
+    try:
+        with open(_MACHINES_JSON, encoding="utf-8") as fh:
+            cfg = json.load(fh)
+    except Exception:
+        return monitors
+
+    vps_ip = ((cfg.get("vps") or {}).get("tailnet_ip") or "").strip()
+    by_host = {
+        str(m.get("host", "")).lower(): m
+        for m in (cfg.get("machines") or [])
+        if isinstance(m, dict)
+    }
+    if not vps_ip or not by_host:
+        return monitors
+
+    out = []
+    for spec in monitors:
+        host = str(spec.get("machine", "")).lower()
+        machine = by_host.get(host)
+        if spec.get("type") == "http" and machine:
+            port = machine.get("tunnel_port")
+            if isinstance(port, int) and port > 0:
+                spec = {**spec, "url": re.sub(r"//[^/]+", f"//{vps_ip}:{port}", spec["url"], count=1)}
+            else:
+                spec = {**spec, "url": re.sub(r"//[^/]+", f"//{vps_ip}", spec["url"], count=1)}
+        out.append(spec)
+    return out
+
+
+MONITORS = _apply_machine_ports(MONITORS)
 
 
 def load_push_tokens() -> dict[str, str]:

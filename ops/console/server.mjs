@@ -23,6 +23,30 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// ── 端口映射：唯一真相源是 config/machines.json ────────────────────────────
+// 三个候选位置（VPS 部署副本 / 仓库内 / 环境变量），第一个能解析的生效；
+// 全都失败就回退到写死的两台 —— 保证没拉取新配置的机器照常工作。
+const DEFAULT_TUNNEL_PORTS = [22022, 22023];
+function tunnelPorts() {
+  const candidates = [
+    process.env.DSH_MACHINES_JSON,
+    path.join(__dirname, 'machines.json'),
+    path.join(__dirname, '..', '..', 'config', 'machines.json'),
+  ].filter(Boolean);
+  for (const file of candidates) {
+    try {
+      const cfg = JSON.parse(readFileSync(file, 'utf8'));
+      const ports = (cfg.machines || [])
+        .map((m) => Number(m && m.tunnel_port))
+        .filter((n) => Number.isInteger(n) && n > 0);
+      if (ports.length) return ports;
+    } catch {
+      // 换下一个候选
+    }
+  }
+  return DEFAULT_TUNNEL_PORTS;
+}
+
 const VERSION = '1.0.0';
 const BIND = process.env.DSH_CONSOLE_BIND || '100.109.125.37';
 const PORT = Number(process.env.DSH_CONSOLE_PORT || 8090);
@@ -297,7 +321,7 @@ function probeTunnel(port) {
 }
 
 async function collectTunnels() {
-  const items = await Promise.all([22022, 22023].map((port) => probeTunnel(port)));
+  const items = await Promise.all(tunnelPorts().map((port) => probeTunnel(port)));
   return { ok: true, items };
 }
 

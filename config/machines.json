@@ -1,0 +1,27 @@
+{
+  "$comment": "两台 PC 与 VPS 的端口映射 —— 唯一真相源。消费方（console / kuma-configure / tunnel check）在文件缺失或解析失败时都会回退到各自的硬编码默认值，所以另一台机器没拉取本文件也不会坏。",
+  "vps": {
+    "tailnet_ip": "100.109.125.37",
+    "ports": {
+      "console": 8090,
+      "kuma": 3001,
+      "ntfy": 8080,
+      "miniserve": 8081,
+      "rest_server": 3000
+    }
+  },
+  "machines": [
+    {
+      "host": "ygy12",
+      "label": "主力机",
+      "tunnel_port": 22022,
+      "ssr_proxy": 2080
+    },
+    {
+      "host": "msi",
+      "label": "MSI",
+      "tunnel_port": 22023,
+      "ssr_proxy": 2099
+    }
+  ]
+}

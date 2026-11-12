@@ -136,3 +136,34 @@ cd ~/dsh && ./bootstrap-machine.sh
      `bootstrap-machine.sh` 现在会主动删除 `~/.local/bin/{pnpm,pnpx}` 里的 corepack shim。
 9. **`HANDOFF.md` 已不存在**（2026-10-04~06 之间删掉的，`~/dsh/` 与 `D:\ZZZArea\` 两处都没了）：
    现行文档 = 本文件 + `playground/themes/PROVIDER_ROUTING_PLAN.md`，**都在仓库内**，不用再手动同步副本。
+
+---
+
+## 协作纪律（2026-11-12 新增）
+
+两台机器共用本仓库的 `master` 分支，所以：
+
+### 1. 推送只用脚本
+
+```bash
+bash ops/git-push.sh            # 先 pull --rebase 再 push
+bash ops/git-push.sh --dry-run  # 只看会推什么
+```
+
+手工 `git push` 被拒（`non-fast-forward`）说明另一台已经推过了；脚本会自动处理。
+
+### 2. 改动的目录分区（避免同一文件两边改）
+
+| 机器 | 主要改这里 |
+|---|---|
+| 主力机 YGY12 | `plugins/`、`services/`、`tools/`、`ops/backup/`、`ops/console/` |
+| MSI | `ops/pc-health/`、`ops/HANDOFF-*-MSI.md` |
+
+**`ops/SYNC.md`、`ops/HANDOFF-*.md`、`package.json`、`install.mjs` 是两台的公共区**：
+改之前先 `git pull --rebase`，改完立刻推，别攒着。
+
+### 3. 端口映射的唯一真相源
+
+`config/machines.json`。`ops/console/server.mjs`、`ops/vps/kuma-configure.py`、
+`ops/tunnel/check.sh` 都从这里读，文件缺失时各自回退到硬编码默认值（不会坏）。
+**加第三台机器 = 在 `machines.json` 加一项 + 在 VPS 上多映射一个 220xx 端口**。
