@@ -45,8 +45,8 @@ Kuma 监控（VPS `100.109.125.37:3001`）：
 |---|---|---|
 | 8 | DSH /go (22023 MSI) | **UP** |
 | 10 | PC 健康 (MSI 22023) | **UP** |
-| 5 | DSH /go（主力机 22022） | **DOWN**（那台离线中） |
-| 9 | PC 健康 (主力 22022) | NO-DATA（待装） |
+| 5 | DSH /go（主力机 22022） | **已恢复**（09:31 起 22022 与 22023 同时在听，均 302） |
+| 9 | PC 健康 (主力 22022) | NO-DATA（那台还没装自检，见待办 1） |
 | 6 | DSH 备份新鲜度 | UP |
 | 7 | VPS 健康 | UP |
 | 2 / 4 | TCP Port / HTTP（指向 22022） | DOWN（老监控） |
@@ -120,10 +120,12 @@ Kuma 监控（VPS `100.109.125.37:3001`）：
 
 ## 5. 待办（按优先级）
 
-1. **主力机 22022 离线**：Kuma 已在报 DOWN。恢复后需：
+1. **主力机 22022 已恢复**（2026-11-12 09:31 起 22022/22023 同时在听）。它那边还差：
    - 装 PC 健康：`bash ops/pc-health/install.sh --token <KUMA_PUSH_PC_MAIN> --remote-port 22022`
-     （令牌在 VPS `/etc/kuma/push-tokens.env`）
+     （令牌在 VPS `/etc/kuma/push-tokens.env`；装完 Kuma id=9 才会 UP）
    - 顺带确认它也有 `dsh-backup.timer`、`model-policy.timer`
+   - 它刚推了 2 个提交（`c906381` 自启 VBS UTF-16LE、`cfcce90` BREAK-GLASS 15 条 + doctor 加 Kuma 心跳），
+     本机已 rebase 到 `916d4c2`
 2. **ntfy 是否真的推到手机**：未验证。可临时把某条监控置为 down 观察手机。
 3. **老监控清理**：Kuma id=2（TCP Port）、id=4（HTTP）仍指向 22022，语义与 id=5 重复，可删或改。
 4. **`model-policy` 定时任务**：依赖 `tools/run-model-policy.sh` 从凭证库导出 key；
