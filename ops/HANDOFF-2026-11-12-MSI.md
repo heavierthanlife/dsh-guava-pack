@@ -107,6 +107,14 @@ Kuma 监控（VPS `100.109.125.37:3001`）：
   **手机收到**。该监控本就要删，所以不需要回滚。
 - **共享仓库隐患**：实测 `restore latest` 不带 `--host` 会静默选中**另一台**的快照，
   已写进 `ops/backup/README.md`（新增 ⚠️ 节 + 铁律第 4 条）。
+- **live profile 迁移到 `agentrouter-responses`**（11:00，用户批准）：旧 `agentrouter`
+  （`anthropic-messages` + 已下线的 `deepseek-v4-flash`）整块替换为 `openai-responses`
+  + 三个 gpt 模型；`allowedModels` 补齐为 6 条真实可用的
+  （mimo / gpt-5.6-sol / antigravity sonnet+opus+gemini / commandcode）。
+  用凭证库 key 复核 `/agentrouter/v1/models` 确认上游正是这三个。
+  备份留在 `profiles/web/cordis.patch.yml.bak-20261112-1105`。
+  `tools/tests/model-policy.mjs` → **150 passed / 0 failed**。
+  ⚠️ 生效需重启 DSH（`dump-config` 已能解析新配置，但运行中进程仍是旧模型表）。
 - **tag 方案已上线**（主力机 `f5aa36f`，10:11）：`restic-backup.sh` 自动打
   `host-<短主机名小写>`；13/13 条历史快照已在 VPS 侧补标（`host-msi`=2、`host-ygy12`=11，
   已实测过滤生效）。`--tag` 与 `--host` 两种过滤都可用，推荐前者。
@@ -155,14 +163,12 @@ Kuma 监控（VPS `100.109.125.37:3001`）：
 
 本轮收掉了交接里的 3 条（见 3.6），共享仓库那条也已由主力机修完。
 
-1. **⚠️ 本机 live profile 与 pack 的模型策略漂移（`npm test` 4 条失败，需决策）**：
-   `tools/tests/model-policy.mjs` 第 17 节要求 live profile 按 **2026-10-27** 的迁移走
-   `agentrouter-responses`，但本机 `~/dsh/profiles/web/cordis.patch.yml` 仍是老的
-   `agentrouter:` + `api: anthropic-messages` + `deepseek-v4-flash`（该模型上游已下线），
-   `allowedModels` 也只有 2 条（模板 5 条），antigravity 的模型也没进 allowedModels。
-   后果：面板里能选到一个必然 503 的模型。修法 = 用模板的 `agentrouter-responses` 块
-   替换旧块、对齐 `allowedModels`，然后**重启 DSH**（改 profile 必须重启）。
-   实际影响面（用户能看到/选到什么）没在面板上确认过，重启前先决定。
+1. **⚠️ 全量 `npm test` 在本机卡在 `acp-engine.mjs`**（不是 profile 问题）：
+   `Cannot find package '@deepseek-ai/cordis'` —— 本机 pack 在 `~/dsh` 之外，
+   而该包只装在 `~/dsh/node_modules`，pack 的 `package.json` 里也没声明。
+   主力机 pack 在 `~/dsh/playground/themes` 下，Node 向上能找到，所以**只有本机踩**。
+   修法：往 pack 的 `dependencies` 加 `@deepseek-ai/cordis` 并 `pnpm install`（需用户点头，
+   因为这是共享仓库的依赖变更）。在修之前，本机能跑的自洽测试只有各单测文件本身。
 2. ✅ **共享仓库 `latest` 串台 —— 已修**（`f5aa36f`）：备份自动打 `host-*` tag，
    历史 13 条已补标。恢复用 `--tag host-msi` / `--tag host-ygy12`（`--host` 仍可用）。
    注意补标重写了快照 → **旧短 ID 全部失效**。
