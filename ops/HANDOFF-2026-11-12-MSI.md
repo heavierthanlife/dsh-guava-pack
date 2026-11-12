@@ -136,6 +136,25 @@ Kuma 监控（VPS `100.109.125.37:3001`）：
 `dsh-remote-entry` 重启后 3098 正常；`dump-config` 退出 0 无警告；
 **全量 `npm test` = 41 passed / 0 failed**（`@deepseek-ai/cordis` 现在能沿目录向上解析）。
 迁移备份（旧单元 + mode.json）在 `~/.cache/dsh-migration-backup/`。
+
+### 3.8 合入主力机的 7 个提交（17:45，`f222675`）
+
+拉动前本地无分叉（远端严格领先），fast-forward 到 `f222675`；只有 `package.json`
+的 test 脚本加了 `console-entry-links.mjs`，**无依赖变更**，不用重新 install。
+新增/变更：`config/machines.json`（端口唯一真相源）、`kuma-configure.py` 读它
+（`DSH_MACHINES_JSON` 只在脚本被拷到别处时才需要）、console 入口链接修复、
+`restic-backup/restic-ctl` 把 tailnet 排除出 HTTP_PROXY。全量 `npm test` = 41/0。
+
+核对结论（主力机建议的两条，MSI 都不用做）：
+
+- **`kuma-configure.py --dry-run` 在本机跑不了**：它读 `/etc/ntfy/topic`，
+  MSI 上没有 → `FileNotFoundError`；而且即使能跑，`--dry-run` 只打印静态清单、
+  **不读 DB**，证明不了任何对齐。VPS 上的实际状态上午已核：6 条监控名称与新
+  `MONITORS` 列表逐字一致，无需变更。
+- **`DSH_SSR_PROXY` 早就设了**：`~/.bashrc:119` = `http://127.0.0.1:2099`；
+  `plugins/provider-router/start.sh` 会自己 `eval` `.bashrc` 里的 `DSH_*`
+  （`router.log` 实测 `DSH_SSR_PROXY=http://127.0.0.1:2099`）；2099 代理实测通
+  （google 204）；`config/machines.json` 的 `msi.ssr_proxy` 也是 2099。三方一致。
 - **tag 方案已上线**（主力机 `f5aa36f`，10:11）：`restic-backup.sh` 自动打
   `host-<短主机名小写>`；13/13 条历史快照已在 VPS 侧补标（`host-msi`=2、`host-ygy12`=11，
   已实测过滤生效）。`--tag` 与 `--host` 两种过滤都可用，推荐前者。
