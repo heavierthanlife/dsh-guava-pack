@@ -17,7 +17,7 @@ alias rk='bash ops/backup/restic-ctl.sh'   # 可选，装个短名字
 | 想做什么 | 命令 |
 |---|---|
 | 看有哪些快照 | `rk snapshots` |
-| 看某快照里有什么 | `rk ls latest /home/guava5tar_/dsh/sessions` |
+| 看某快照里有什么 | `rk ls latest --host MSI /home/guava5tar_/dsh/sessions` |
 | 仓库统计（压缩率、去重收益） | `rk stats` |
 | 完整性校验（只读，本地跑） | `rk check` |
 | 对比两个快照 | `rk diff <id1> <id2>` |
@@ -39,16 +39,34 @@ alias rk='bash ops/backup/restic-ctl.sh'   # 可选，装个短名字
 > **PC 上原来的 `dsh-prune.timer` 已作废**（append-only 会拒绝）。卸载：
 > `systemctl --user disable --now dsh-prune.timer && rm ~/.config/systemd/user/dsh-prune.{service,timer}`
 
+## ⚠️ 两台机器共用一个仓库：`latest` 必须配 `--host`
+
+两台 PC 备份进**同一仓库、同一路径**（`/home/guava5tar_/dsh`）、同一 tag（`dsh-nightly`），
+所以 `latest` 指的是「**所有机器**里最新的那一份」，而且**不报错、静默命中另一台**：
+
+```text
+# 2026-11-12 实测（两台都快照在库）
+$ restic restore latest --target /tmp/rtest --include '/nonexistent'
+restoring snapshot 152c638e ... by guava5tar_@YGY12      ← 本想恢复 MSI，静默给了 YGY12
+```
+
+规则：
+
+- 恢复**一律带 `--host`**：`--host YGY12`（主力机） / `--host MSI`（第二台），
+  名字取自 `restic snapshots --compact --group-by host`；
+- `restic snapshots --latest n` 是**每个 host 各 n 条**，不带 `--host` 会列出多台；
+- 计划给备份脚本加 `host-<主机名>` tag 彻底区分，**尚未上线**，别依赖 tag 判断来源。
+
 ## 恢复（最常用的部分）
 
 ```bash
-rk ls latest /home/guava5tar_/dsh/sessions | head
+rk ls latest --host MSI /home/guava5tar_/dsh/sessions | head
 
 # 恢复到临时目录（不要直接覆盖生产目录！）
-rk restore latest --target /tmp/restore --include '/home/guava5tar_/dsh/sessions'
+rk restore latest --host MSI --target /tmp/restore --include '/home/guava5tar_/dsh/sessions'
 
 # 只恢复单个文件
-rk restore latest --target /tmp/restore --include '/home/guava5tar_/dsh/profiles/web/cordis.yml'
+rk restore latest --host MSI --target /tmp/restore --include '/home/guava5tar_/dsh/profiles/web/cordis.patch.yml'
 ```
 
 ## 手动补一次备份
@@ -83,7 +101,8 @@ RESTIC_REPOSITORY='sftp:root@100.109.125.37:/srv/backup/dsh' rk snapshots
 
 1. **密码丢了 = 数据永久丢失**（仓库是加密的；VPS 上那份口令只是给 prune 用，不改变这一点）；
 2. **定期做一次恢复演练**——没恢复过的备份不叫备份；
-3. 恢复**永远先到 `/tmp`**，确认无误再覆盖。
+3. 恢复**永远先到 `/tmp`**，确认无误再覆盖；
+4. 恢复**永远带 `--host`**（两台共用一个仓库，`latest` 会静默串台）。
 
 ## 第二台（pack 不在 `~/dsh` 下的机器）怎么启用
 
@@ -116,5 +135,6 @@ RESTIC_LIMIT_KB=0 <pack>/ops/backup/restic-backup.sh
 ```
 
 **实测（2026-11-12，MSI）**：首跑 296 MiB 逻辑 / 97 MiB 实存，用时 1:28；
-仓库里出现 `host=MSI` 的快照，`restic ls latest` 能列出 profile 与 sessions。
+仓库里出现 `host=MSI` 的快照，`restic ls latest --host MSI` 能列出 profile 与 sessions
+（两台都在库里之后，不带 `--host` 的 `latest` 见上面「⚠️」那节）。
 注意 `dsh-backup.service` 里的 git 镜像步骤指向第一台路径，本机不存在时会静默跳过（无害）。
