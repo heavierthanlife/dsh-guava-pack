@@ -39,10 +39,11 @@ alias rk='bash ops/backup/restic-ctl.sh'   # 可选，装个短名字
 > **PC 上原来的 `dsh-prune.timer` 已作废**（append-only 会拒绝）。卸载：
 > `systemctl --user disable --now dsh-prune.timer && rm ~/.config/systemd/user/dsh-prune.{service,timer}`
 
-## ⚠️ 两台机器共用一个仓库：`latest` 必须配 `--host`
+## ⚠️ 两台机器共用一个仓库：恢复必须区分机器
 
-两台 PC 备份进**同一仓库、同一路径**（`/home/guava5tar_/dsh`）、同一 tag（`dsh-nightly`），
-所以 `latest` 指的是「**所有机器**里最新的那一份」，而且**不报错、静默命中另一台**：
+两台 PC（`YGY12` 主力 / `MSI`）备份进**同一仓库、同一路径**（`/home/guava5tar_/dsh`）、
+同一用户名 `guava5tar_`、同一 tag（`dsh-nightly`），所以 `latest` 指的是
+「**所有机器**里最新的那一份」，而且**不报错、静默命中另一台**：
 
 ```text
 # 2026-11-12 实测（两台都快照在库）
@@ -50,12 +51,30 @@ $ restic restore latest --target /tmp/rtest --include '/nonexistent'
 restoring snapshot 152c638e ... by guava5tar_@YGY12      ← 本想恢复 MSI，静默给了 YGY12
 ```
 
-规则：
+### 两种区分方式（都可用，推荐 tag）
 
-- 恢复**一律带 `--host`**：`--host YGY12`（主力机） / `--host MSI`（第二台），
-  名字取自 `restic snapshots --compact --group-by host`；
-- `restic snapshots --latest n` 是**每个 host 各 n 条**，不带 `--host` 会列出多台；
-- 计划给备份脚本加 `host-<主机名>` tag 彻底区分，**尚未上线**，别依赖 tag 判断来源。
+| 方式 | 用法 | 说明 |
+|---|---|---|
+| **机器 tag**（推荐） | `--tag host-msi` | `restic-backup.sh` 自 2026-11-12 起自动打 `host-<短主机名小写>`；与主机名大小写无关，最稳 |
+| restic `--host` | `--host MSI` | 取备份时的 hostname；历史快照也有效 |
+
+```bash
+# 只看本机 / 只恢复 MSI
+restic snapshots --tag host-ygy12
+restic restore --tag host-msi latest --target /tmp/restore-msi --include '/home/guava5tar_/dsh/profiles'
+
+# 用封装脚本时同理
+bash ops/backup/restic-ctl.sh restore --tag host-msi latest --target /tmp/restore-msi
+```
+
+其他两条规则：
+
+- `restic snapshots --latest n` 是**每个 host 各 n 条**，不带过滤会列出多台；
+- 历史快照已全部补标：**13/13 条都带 `host-*`**（2026-11-12 在 VPS 侧完成，
+  append-only 下客户端改不了快照元数据）。
+
+> ⚠️ `restic tag` 会**重写快照文件 → 短 ID 变化**。历史快照补标后旧短 ID 全部失效，
+> 引用过旧 ID 的笔记/脚本要一起更新。
 
 ## 恢复（最常用的部分）
 

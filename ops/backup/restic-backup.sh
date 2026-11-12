@@ -25,6 +25,15 @@ export RESTIC_REPOSITORY
 SSH_ARGS="-F /dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15"
 LIMIT="${RESTIC_LIMIT_KB:-200}"
 
+# 机器标识 tag（2026-11-12）：
+# 两台 PC（YGY12 主力 / MSI）备份到**同一个仓库、同一路径、同一用户名**，只靠
+# `--host` 区分。`restic ls latest` / `restore latest` 会随机命中另一台 —— 实测踩过。
+# 这里额外打一个 `host-<短主机名>` tag，恢复时可以 `--tag host-MSI` 精确锁定。
+# 兼容：老快照没有这个 tag，但一律带 `dsh-nightly`，历史不受影响。
+HOST_TAG="host-$(hostname -s 2>/dev/null || hostname | cut -d. -f1)"
+HOST_TAG="$(printf '%s' "$HOST_TAG" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9._-' '-' )"
+HOST_TAG="${HOST_TAG%-}"
+
 # 只有 sftp 后端才需要这几个 ssh 参数；rest: 走 HTTP，传了也没用。
 OPTS=()
 case "$RESTIC_REPOSITORY" in
@@ -42,6 +51,7 @@ esac
   --exclude '__pycache__' \
   --exclude '.cache' \
   --tag dsh-nightly \
+  --tag "$HOST_TAG" \
   "$@"
 rc=$?
 

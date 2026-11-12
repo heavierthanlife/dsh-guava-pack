@@ -419,6 +419,45 @@ rm -f tmp
 **当前状态**：生成处已修 + 加了自检（BOM 与裸 LF 校验，不通过会当场告警）+
 回归测试 `node tools/tests/vbs-autostart.mjs`（已进 `npm test`）。
 
+### 8.17 两台机器共用一个 restic 仓库：`restore latest` 会拿到另一台的
+
+**症状**：在主力机上 `restic ls latest` / `restore latest`，列出的 / 恢复出的内容
+属于 MSI（或反过来）—— 因为两台备份到**同一仓库、同一路径 `/home/guava5tar_/dsh`、
+同一用户名 `guava5tar_`、同一 tag `dsh-nightly`**，restic 的 `latest` 只按时间取，
+**不知道"本机"是哪个**。
+
+**真因**：区分维度只有 restic 的 `--host`（取备份时的 hostname），
+而默认用法（`latest`、`ls latest`）不带你就会随机命中。2026-11-12 实测踩到。
+
+**修复（已落地）**：`restic-backup.sh` 额外打机器 tag `host-<短主机名小写>`：
+
+| 机器 | tag |
+|---|---|
+| YGY12（主力） | `host-ygy12` |
+| MSI | `host-msi` |
+
+```bash
+# 只看本机 / 只恢复 MSI
+restic snapshots --tag host-ygy12
+restic restore --tag host-msi latest --target /tmp/restore-msi --include '/home/guava5tar_/dsh/profiles'
+```
+
+**给历史快照补标**：append-only 下客户端改不了（403），只能在 VPS 侧做：
+
+```bash
+ssh -F /dev/null root@100.109.125.37 '
+  RS="runuser -u restic -- env RESTIC_REPOSITORY=/srv/backup/dsh \
+      RESTIC_PASSWORD_FILE=/etc/restic/repo-password RESTIC_CACHE_DIR=/var/cache/restic \
+      /usr/local/bin/restic"
+  $RS snapshots --no-lock --json | python3 -c "..."   # 按 hostname 归出短 id
+  $RS tag --add host-msi <短 id>'
+```
+
+> ⚠️ `restic tag` 会**重写快照文件 → 短 ID 变化**。如果别处引用过旧短 ID
+> （笔记、脚本），要一起更新。2026-11-12 补标 12 条历史快照时全部 ID 都变了。
+
+**判据**：`restic snapshots --json | jq '.[].tags'` 里每条都应有 `host-*`。
+
 ### 8.15 排查顺序（省时间的模板）
 
 ```
