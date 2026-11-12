@@ -196,6 +196,7 @@ node tools/tests/acp-mount.mjs    # P0：preset 覆盖组合 + 引擎真实激�
 node tools/tests/acp-engine.mjs   # P1：引擎/屏障/compress 规划（纯单测）
 node tools/tests/acp-ledger.mjs   # P2：账本/恢复/检索/status（纯单测）
 node tools/tests/acp-nudge.mjs    # P3：nudge/命令/设置/提示段（纯单测）
+node tools/tests/acp-nudge-banner.mjs  # 横幅「已响应→4 秒自动收起」行为门禁（真渲染）
 node tools/tests/acp-e2e.mjs      # P1 级端到端（真实隔离 DSH 进程 + preset agent）
 node tools/tests/acp-e2e.mjs --strict   # P4 级：再加账本/tier2/恢复/检索硬断言
 node tools/tests/acp-client.mjs   # 面板客户端模块能进 boot 清单并编译出 bundle
@@ -212,6 +213,15 @@ node tools/gen-acp-preset.mjs --check   # 上游漂移
   才落到进程级 `latestNudgeOf`（兼容路径，横幅已不再用它）。
 - **横幅文案在手机与桌面一致**：不再按 430px 隐藏「建议压缩」或把「上下文 N%」
   压成「N%」——实测手机宽度放得下完整一行。
+- **模型照办后横幅会自己走掉（2026-11-12）**：横幅接上 `contextAcp` 投影的 `lastAt`
+  （最近一次 `compaction/summary` 的 `event.time`）。`lastAt >= nudge.at` 就说明这次
+  提醒已经有回应 → 横幅从琥珀色「建议压缩」切成蓝色「已压缩 · 4 秒后自动收起」，
+  底部走一条倒计时进度条，4 秒后自动写 `sessionStorage` 并消失，**不需要手动点 ×**。
+  没被响应的提醒仍然常驻（那才需要人处理），15 分钟自然过期。
+  修之前它只数 `Date.now() - at < 15min`，完全不知道已压过，于是压完还要杵满
+  15 分钟。行为门禁：`node tools/tests/acp-nudge-banner.mjs`（node:vm 里真渲染 +
+  假时钟推进）。
+
 - **面板只暴露两个可调项**（阈值%、增长 tokens）；`decompressPageSize` / `searchLimit`
   仍可在 `config/acp.json` + 面板 HTTP 路由的 `setSettings` 调整，只是没放成步进控件。
 - **`compactRegion` 需要在 turn 内调用**：模型在 turn 中调 `compress` 天然满足；

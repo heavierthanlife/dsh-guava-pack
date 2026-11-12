@@ -510,6 +510,42 @@ ssh -F /dev/null root@100.109.125.37 '
 
 **判据**：`restic snapshots --json | jq '.[].tags'` 里每条都应有 `host-*`。
 
+### 8.18 ACP nudge 横幅「压完了不消失」= 只数时间，不认回应
+
+**症状**：照着输入框上沿那条「上下文 N% · 建议压缩」压缩成功，横幅还在那儿杵着，
+要手动点 × 才走。用户原话：「有点不够高级」。
+
+**真因**：横幅的显隐条件只有 `Date.now() - lastNudge.at < 15min`（`client.js` 的
+`AcpNudge`）。它**不知道**模型是否已经照办 —— `lastNudge` 是 host 侧的瞬时状态，
+压缩成功是会话日志里的 `compaction/summary`，两条线没接上。于是正确操作之后
+横幅还要显示满 15 分钟。
+
+**修复（2026-11-12）**：横幅接上 `contextAcp` 投影的 `lastAt`（= 最近一次
+`compaction/summary` 的 `event.time`，毫秒）。
+
+```
+lastAt >= nudge.at  →  已响应 → 蓝色「已压缩 · 4 秒后自动收起」+ 倒计时条 → 自动写
+                       sessionStorage 并消失（不用点 ×）
+lastAt <  nudge.at  →  未响应 → 照旧琥珀色「建议压缩」，常驻（那才需要人处理）
+```
+
+三个容易踩的点：
+
+1. **时间单位**：`event.time` 是 `Date.now()` 毫秒。别处同名时间可能是秒级 epoch，
+   客户端用 `toEpochMs()` 归一（`< 1e11` 视为秒），不归一会差 1000 倍 → 永远判"没压过"。
+2. **不能拿旧压缩冒充**：必须 `lastAt >= at`。会话里本来就有历史压缩，直接看
+   `lastAt > 0` 会让第一次 nudge 就立刻显示"已压缩"。
+3. **倒计时条要 `position:relative` + `overflow:hidden`** 的父容器，否则 2px 的条
+   从圆角里溢出来。
+
+**门禁**：`node tools/tests/acp-nudge-banner.mjs`（node:vm 里真渲染组件 + 假时钟
+推进，证明 3.9 秒还在、4 秒后没了）；`acp-client.mjs` 另外断言这套逻辑真的进了
+**编译后的 bundle**（5 个标记），因为"源码对、产物被摇掉"是另一类静默失败。
+
+> ⚠️ 写这类测试时**必须把 `Date` 也塞进 vm sandbox**。只假 `setTimeout` 不假
+> `Date.now()`，组件会拿真实时间跟固定的 nudge 时间比，一律判成过期 → 渲染
+> `null`，你会以为修复没生效（本次实测踩过）。
+
 ### 8.15 排查顺序（省时间的模板）
 
 ```

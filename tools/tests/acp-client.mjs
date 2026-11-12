@@ -173,6 +173,20 @@ try {
     if (body.includes('__ModuleLoader__') && body.includes('dsh-context-acp')) pass('bundle 内容是我们模块的 ModuleLoader 产物');
     else fail('bundle 内容', '没找到 __ModuleLoader__ 或 dsh-context-acp 标记');
     if (/esbuild|Transform failed|Unexpected|SyntaxError/i.test(body) && body.length < 4096) fail('bundle 编译错误', body.slice(0, 800));
+
+    // 光"编译通过"不够：这里断言 **nudge 自动收起** 那套新代码真的进了产物。
+    // 2026-11-12 用户实测的 bug 是「压完了横幅不消失」；修复横跨 source/CSS/状态三处，
+    // 任何一处被 esbuild 摇掉或写错都会让横幅重新变傻，而静态 grep 源文件看不出来。
+    const NUDGE_MARKERS = [
+      ['已压缩', '响应后切成功回执的文案'],
+      ['acp_nudge_progress', '倒计时进度条的元素/类名'],
+      ['data-resolved', '已响应状态标记'],
+      ['NUDGE_AUTO_CLOSE_MS', '自动收起时长常量'],
+      ['toEpochMs', '时间戳归一（秒/毫秒）'],
+    ];
+    const missing = NUDGE_MARKERS.filter(([needle]) => !body.includes(needle)).map(([needle, why]) => `${needle}（${why}）`);
+    if (missing.length === 0) pass('bundle 含 nudge 自动收起逻辑', NUDGE_MARKERS.length + ' 个标记齐全');
+    else fail('bundle 缺少 nudge 自动收起逻辑', missing.join('、'));
   }
 
   // 宿主侧装配错误（例如 preset override 失效）也会写 stderr，一并检查。

@@ -192,6 +192,34 @@ window.__ModuleLoader__.load({
       return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
     }
 
+    /**
+     * 把宿主给的时间戳归一成毫秒。
+     *
+     * 会话事件与投影的 `time` 都是 `Date.now()` 毫秒，但同名字段在别处可能是
+     * 秒级 epoch —— 不归一的话「已压缩」会被误判成「没压」（差 1000 倍里外）。
+     * 现在的毫秒 epoch 是 1.7e12 量级，< 1e11 只可能是秒（或 0）。
+     */
+    function toEpochMs(value) {
+      const numeric = num(value);
+      if (numeric === undefined) return undefined;
+      if (numeric <= 0) return 0;
+      return numeric < 1e11 ? numeric * 1000 : numeric;
+    }
+
+    /** `useProjection` 缺失（旧宿主）时的读写口：不投影就等于「什么都不知道」。 */
+    function readNoProjection() {
+      return undefined;
+    }
+
+    /**
+     * 模型已响应后，成功回执停留多久再自动收起。
+     *
+     * 4 秒的依据：够看清「已压缩」这行字（手机上滑一眼的余量），又不会在用户
+     * 已经开始看回答时还占着输入框上沿。它只是**回执**，不是需要操作的东西，
+     * 所以必须自己走掉 —— 用户原话是「手动不是不行，就是有点不够高级」。
+     */
+    const NUDGE_AUTO_CLOSE_MS = 4000;
+
     /** 千分位；大数用 K/M，和宿主 pill 的紧凑风格一致。 */
     function compact(value) {
       if (value === undefined) return '—';
@@ -584,6 +612,9 @@ window.__ModuleLoader__.load({
      * 设计要点（经设计顾问评审 + 实测对比度校准）：
      *   · 位置：手机端独占 dock 第 3 行（grid-row:3），不跟「ACP 1 块」抢第 2 行；
      *   · 常驻：最近 15 分钟发生过 nudge 就显示，不做"1 秒就消失"的 toast；
+     *   · **有回应就自动收**：本会话在 nudge 之后发生过压缩（投影 `contextAcp.lastAt`
+     *     晚于 nudge 的 `at`）说明模型已经照办 —— 立刻从「建议压缩」切成一条
+     *     成功回执，带 4 秒倒计时进度条后自动消失，不需要用户手动点 ×；
      *   · 动效：入场 2 次脉冲后**收敛为静态**，不做无限循环（避免视觉疲劳）；
      *   · 降级：prefers-reduced-motion 时彻底静态，靠描边+图标传达；
      *   · 主题：亮/暗走宿主 token 的等效安全色，赛博 2077 用霓虹黄底黑字。
@@ -601,7 +632,9 @@ window.__ModuleLoader__.load({
 .acp_nudge{box-sizing:border-box;display:flex;align-items:center;gap:8px;width:100%;height:26px;
   padding:0 10px 0 8px;border-radius:var(--dsw-radius-md);font-size:12px;font-weight:600;
   line-height:1;white-space:nowrap;color:#78350f;background:#fff8e6;border:1px solid #fde68a;
-  box-shadow:0 1px 8px rgba(180,83,9,.18)}
+  box-shadow:0 1px 8px rgba(180,83,9,.18);
+  /* 倒计时条是绝对定位的子元素：需要定位上下文 + 裁掉圆角外的部分。 */
+  position:relative;overflow:hidden}
 .acp_nudge_badge{display:inline-flex;align-items:center;justify-content:center;
   width:18px;height:18px;border-radius:50%;flex:none;
   background:#b45309;color:#fff;font-size:11px;font-weight:700}
@@ -610,6 +643,23 @@ window.__ModuleLoader__.load({
   width:18px;height:18px;border:0;border-radius:50%;padding:0;flex:none;cursor:pointer;
   background:transparent;color:inherit;opacity:.55;font-size:14px;line-height:1;margin-left:auto}
 .acp_nudge_close:hover{opacity:1}
+/* 倒计时进度条：贴在横幅底沿，走完就自动收起（模型已响应时才有）。
+   容器需要 relative + overflow:hidden，否则 2px 的条会溢出圆角。 */
+.acp_nudge_progress{position:absolute;left:0;right:0;bottom:0;height:2px;
+  background:currentColor;opacity:.5;transform-origin:left center;
+  animation:dsh-acp-nudge-countdown var(--acp-nudge-auto-close-ms,4000ms) linear forwards}
+@keyframes dsh-acp-nudge-countdown{from{transform:scaleX(1)}to{transform:scaleX(0)}}
+/* 已响应：模型真的压缩过了 —— 从"建议压缩"的警报切成一条回执。
+   用蓝色而不是绿色：绿色在这里会与"正常/无需操作"混淆，蓝色读作"已处理"。 */
+.acp_nudge[data-resolved="true"]{color:#1e3a8a;background:#eff6ff;border-color:#bfdbfe;
+  box-shadow:0 1px 8px rgba(37,99,235,.16)}
+.acp_nudge[data-resolved="true"] .acp_nudge_badge{background:#2563eb;color:#fff}
+.acp_nudge[data-resolved="true"] .acp_nudge_hint{opacity:.7}
+body[data-ds-dark-theme] .acp_nudge[data-resolved="true"],
+:root[data-ds-theme-source="dark"] .acp_nudge[data-resolved="true"]{color:#93c5fd;background:#0b1f33;
+  border-color:#1e40af;box-shadow:0 0 0 1px rgba(37,99,235,.25),0 2px 10px rgba(0,0,0,.45)}
+body[data-ds-dark-theme] .acp_nudge[data-resolved="true"] .acp_nudge_badge,
+:root[data-ds-theme-source="dark"] .acp_nudge[data-resolved="true"] .acp_nudge_badge{background:#3b82f6;color:#04101f}
 /* 暗色：深琥珀底 + 亮琥珀字（10.4:1） */
 body[data-ds-dark-theme] .acp_nudge,
 :root[data-ds-theme-source="dark"] .acp_nudge{color:#ffc94d;background:#231904;border-color:#7a5200;
@@ -632,21 +682,42 @@ body[data-ds-dark-theme] .acp_nudge_cyber .acp_nudge_badge,
 body[data-ds-dark-theme] .acp_nudge_cyber .acp_nudge_hint,
 :root[data-ds-theme-source="dark"] .acp_nudge_cyber .acp_nudge_hint,
 .acp_nudge_cyber .acp_nudge_hint{color:#e8f1ff;opacity:.8}
+/* 赛博主题下的「已响应」：上面的 .acp_nudge_cyber .acp_nudge（0,2,0）与
+   .acp_nudge[data-resolved="true"]（0,2,0）同权重且在后面，会把蓝色回执压回霓虹黄 ——
+   于是「压完了」和「该压了」在赛博主题下长得一样。这里用更高权重(0,3,0)显式给出
+   青蓝回执色：赛博主题的语义是"信息高亮"，青蓝比柠檬黄更适合表示"已完成"。 */
+body[data-ds-dark-theme] .acp_nudge_cyber .acp_nudge[data-resolved="true"],
+:root[data-ds-theme-source="dark"] .acp_nudge_cyber .acp_nudge[data-resolved="true"],
+.acp_nudge_cyber .acp_nudge[data-resolved="true"]{
+  color:#7dfcff;background:#04141b;border-color:#7dfcff;
+  box-shadow:0 0 8px rgba(125,252,255,.35),inset 3px 0 0 #7dfcff;
+  text-shadow:0 0 6px rgba(125,252,255,.5)}
+body[data-ds-dark-theme] .acp_nudge_cyber .acp_nudge[data-resolved="true"] .acp_nudge_badge,
+:root[data-ds-theme-source="dark"] .acp_nudge_cyber .acp_nudge[data-resolved="true"] .acp_nudge_badge,
+.acp_nudge_cyber .acp_nudge[data-resolved="true"] .acp_nudge_badge{background:#7dfcff;color:#04141b}
 /* 入场：1 次上浮 + 2 次脉冲即收敛，不无限循环 */
 .acp_nudge[data-fresh="true"]{animation:dsh-acp-nudge-in .24s cubic-bezier(.16,1,.3,1)}
 @keyframes dsh-acp-nudge-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion: reduce){
   .acp_nudge{animation:none!important;transition:none!important}
+  /* 倒计时条靠动画走完；减弱动效时动画被关掉，条会僵在满格变谎话。
+     所以直接藏条，只留「N 秒后自动收起」的文字承诺 —— JS 计时器照旧收起。 */
+  .acp_nudge_progress{display:none!important}
 }
 /* 小屏不再精简文案：手机宽度放得下完整一行「上下文 N% · 建议压缩」。
    以前 430px 以下把文案压成「N%」并藏掉提示，用户实测明确要求与桌面一致。 */
 `;
 
     /** 本会话最近一次 nudge 的可见提示。失败时静默返回 null，绝不影响主界面。 */
-    function AcpNudge({ sessionId }) {
+    function AcpNudge({ sessionId, useProjection }) {
       // 没有会话作用域（例如还没有会话的 hero 输入框）就不可能有"本会话的 nudge"。
       // 注意：这里**不能**提前 return —— hooks 必须每次都跑，只能最后按 hasSession 渲染 null。
       const hasSession = typeof sessionId === 'string' && sessionId !== '';
+      // 本会话的压缩投影：`lastAt` 是最近一次 compaction/summary 的 event.time。
+      // 它是"模型已经照办"的唯一权威信号 —— 提醒横幅自己数不到这件事。
+      // `contextAcp` 由本插件的 host 侧投影注册（settings.mjs），本槽位的
+      // standardProps 里 `useProjection` 一定有；投影未就绪时返回 undefined。
+      const acp = (typeof useProjection === 'function' ? useProjection : readNoProjection)('contextAcp');
       const [state, setState] = React.useState(null);
       // 收起状态必须按会话分开存：在 A 会话点过 × 不能把 B 会话的提醒也吞掉。
       const dismissStoreKey = hasSession ? `dsh-acp-nudge-dismissed:${sessionId}` : null;
@@ -700,6 +771,37 @@ body[data-ds-dark-theme] .acp_nudge_cyber .acp_nudge_hint,
         };
       }, [sessionId, hasSession]);
 
+      /**
+       * 「模型已经照办」的判定：本会话在**这次 nudge 之后**发生过压缩。
+       *
+       * 为什么必须比时间而不是看别的：nudge 的 `at` 在 host 侧是 nudge 发生的那一刻，
+       * 压缩的 `lastAt` 是 `compaction/summary` 的 `event.time`。两者同源（都是
+       * 会话/进程的毫秒时钟），所以 `compactAt >= at` 就是"压过了"的硬证据。
+       * 用 `>=` 而不是 `>`：同一毫秒内完成也是完成；代价只是极罕见的假阳性，
+       * 而那只会让一条提醒早 4 秒消失，不会掩盖真实压力（下一次 nudge 会再来）。
+       *
+       * 为什么以前没有它：横幅只数 `Date.now() - at < 15min`，完全不知道用户是否
+       * 已经照着提醒压过了 —— 于是压完之后横幅还要杵满 15 分钟，只能手动点 ×。
+       */
+      const at = num(state?.lastNudge?.at);
+      const compactAt = toEpochMs(acp?.lastAt);
+      const resolved = at !== undefined && compactAt !== undefined && compactAt > 0 && compactAt >= at;
+
+      // 自动收起：只对"已响应"的提醒生效，且每次 nudge 只排一次定时器。
+      // 未响应的提醒继续常驻 —— 那是还需要用户/模型处理的东西，不该自己消失。
+      const autoClosedAt = React.useRef(undefined);
+      React.useEffect(() => {
+        if (!hasSession || !resolved || at === undefined) return undefined;
+        if (autoClosedAt.current === at) return undefined;
+        autoClosedAt.current = at;
+        const timer = setTimeout(() => {
+          // 写进 sessionStorage：刷新后也不该再冒出来（这次 nudge 已经办完了）。
+          try { sessionStorage.setItem(dismissStoreKey, String(at)); } catch { /* 隐私模式忽略 */ }
+          setDismissedAt(at);
+        }, NUDGE_AUTO_CLOSE_MS);
+        return () => clearTimeout(timer);
+      }, [hasSession, resolved, at, dismissStoreKey]);
+
       // 赛博 2077 主题在根节点上没有类名（它的 cp2077-on 只加在面板按钮上），
       // 只能靠它插入的 <style data-cyberpunk-theme> 来判定。轮询时重算一次即可。
       let cyber = false;
@@ -709,13 +811,11 @@ body[data-ds-dark-theme] .acp_nudge_cyber .acp_nudge_hint,
         cyber = false;
       }
 
-      const at = num(state?.lastNudge?.at);
       if (!hasSession) return null;
       if (at === undefined || at <= 0) return null;
       if (dismissedAt === at) return null;
       const ageMs = Date.now() - at;
       if (ageMs > 15 * 60 * 1000) return null;
-
       const used = num(state?.lastNudge?.usedTokens);
       const window = num(state?.lastNudge?.contextWindow);
       const percent = used !== undefined && window !== undefined && window > 0
@@ -734,13 +834,18 @@ body[data-ds-dark-theme] .acp_nudge_cyber .acp_nudge_hint,
             className: 'acp_nudge',
             role: 'status',
             'data-fresh': fresh ? 'true' : undefined,
-            title: `上次 nudge：${when}${percent === undefined ? '' : `（上下文 ${percent}%）`} · 模型可选择压缩历史`,
+            'data-resolved': resolved ? 'true' : undefined,
+            style: resolved ? { '--acp-nudge-auto-close-ms': `${NUDGE_AUTO_CLOSE_MS}ms` } : undefined,
+            title: resolved
+              ? `上次 nudge：${when}${percent === undefined ? '' : `（上下文 ${percent}%）`} · 模型已压缩，回执即将自动收起`
+              : `上次 nudge：${when}${percent === undefined ? '' : `（上下文 ${percent}%）`} · 模型可选择压缩历史`,
           },
-          h('span', { key: 'badge', className: 'acp_nudge_badge' }, '!'),
+          h('span', { key: 'badge', className: 'acp_nudge_badge' }, resolved ? '✓' : '!'),
           // 只用一份文案：手机与桌面完全一致（以前 430px 以下会换成精简版）。
           h('span', { key: 'text', className: 'acp_nudge_text' },
-            percent === undefined ? '上下文压力' : `上下文 ${percent}%`),
-          h('span', { key: 'hint', className: 'acp_nudge_hint' }, '建议压缩'),
+            resolved ? '已压缩' : (percent === undefined ? '上下文压力' : `上下文 ${percent}%`)),
+          h('span', { key: 'hint', className: 'acp_nudge_hint' },
+            resolved ? `${NUDGE_AUTO_CLOSE_MS / 1000} 秒后自动收起` : '建议压缩'),
           h('button', {
             key: 'close', type: 'button', className: 'acp_nudge_close',
             'aria-label': '收起提醒', title: '收起提醒（下次 nudge 再出现）',
@@ -750,6 +855,10 @@ body[data-ds-dark-theme] .acp_nudge_cyber .acp_nudge_hint,
               setDismissedAt(at);
             },
           }, '×'),
+          // 倒计时条只在已响应时出现：它是"自己会走掉"的可视承诺。
+          resolved
+            ? h('span', { key: 'progress', className: 'acp_nudge_progress', 'aria-hidden': true })
+            : null,
         ),
       );
     }

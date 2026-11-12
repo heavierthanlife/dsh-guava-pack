@@ -963,14 +963,40 @@ test('客户端：nudge 挂在输入框上沿，且赛博黄色规则压过暗�
   );
   assert(/#f6ff00/.test(client), '赛博黄应为亮柠檬黄 #f6ff00');
 
+  // 2026-11-12：「已响应」的配色必须能压过赛博主题规则。
+  // `.acp_nudge_cyber .acp_nudge`（0,2,0）与 `.acp_nudge[data-resolved="true"]`（0,2,0）
+  // 同权重，前者在文件里更靠后 → 会把蓝色回执压回霓虹黄，于是「压完了」和「该压了」
+  // 在赛博主题下长得一模一样。必须有一条 (0,3,0) 的显式覆盖。
+  assert(
+    /\.acp_nudge_cyber \.acp_nudge\[data-resolved="true"\]/.test(client),
+    '赛博主题必须为已响应状态提供更高权重的覆盖（否则回执色被压回警报色）',
+  );
+  // 减弱动效时动画被关掉，进度条会僵在满格变成谎话 → 必须藏掉。
+  // 注意块内还有别的规则（`}` 不连续），不能用 [^}]* 一路匹配。
+  const reducedMotionBlock = /@media \(prefers-reduced-motion: reduce\)\{([\s\S]*?)\n\}/.exec(client)?.[1] ?? '';
+  assert(
+    /\.acp_nudge_progress\{display:none!important\}/.test(reducedMotionBlock),
+    'prefers-reduced-motion 下应隐藏倒计时条（否则条停在满格与"即将收起"矛盾）',
+  );
+
   // 旧的手机 dock 分格规则已不适用（nudge 不再在 dock 里）。
   assert(!/\.dsh-mobile-dock \.acp_nudge_anchor/.test(client), '不应残留 dock 网格定位规则');
 
   // 2026-11-06：横幅必须按会话取数，否则任何会话都会显示别的会话的 nudge。
-  assert(/function AcpNudge\(\{ sessionId \}\)/.test(client), 'nudge 横幅应接收标准 props 里的 sessionId');
+  // 断言「解构了 sessionId」而不是写死整个签名：2026-11-12 起它还多接一个
+  // `useProjection`（读 contextAcp.lastAt 判断模型是否已响应），签名会继续演进。
+  assert(/function AcpNudge\(\{[^}]*\bsessionId\b[^}]*\}\)/.test(client), 'nudge 横幅应接收标准 props 里的 sessionId');
   assert(/payload: \{ sessionId \}/.test(client), 'nudge 请求应带上 sessionId');
   assert(/dsh-acp-nudge-dismissed:\$\{sessionId\}/.test(client), '收起状态应按会话分开存');
   assert(!/payload: \{\}/.test(client), '不应再有"不带 sessionId 直接要进程级 nudge"的请求');
+
+  // 2026-11-12：模型响应后必须自动收起（用户实测：压完了横幅还杵满 15 分钟）。
+  // 行为细节由 tools/tests/acp-nudge-banner.mjs 在 node:vm 里真渲染验证；
+  // 这里只守住「接线还在」—— 少了任何一根，自动收起会静默变成永不发生。
+  assert(/useProjection\('contextAcp'\)/.test(client), 'nudge 横幅应读 contextAcp 投影');
+  assert(/toEpochMs\(acp\?\.lastAt\)/.test(client), '应用投影的 lastAt 判断压缩是否已发生');
+  assert(/NUDGE_AUTO_CLOSE_MS/.test(client), '应有自动收起的时长常量');
+  assert(/setDismissedAt\(at\)/.test(client), '自动收起必须落到 dismissed 状态上');
 
   // 2026-11-06：手机上不再精简文案，必须与桌面完全一致。
   assert(!/acp_nudge_compact/.test(client), '不应残留手机精简文案 span');
