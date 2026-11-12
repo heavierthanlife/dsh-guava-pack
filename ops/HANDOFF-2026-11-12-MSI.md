@@ -13,7 +13,7 @@
 | 主机名 | **MSI**（WSL2，Ubuntu 26.04，systemd 开启） |
 | Windows 用户 | `YGY12` |
 | `DSH_HOME` | `/home/guava5tar_/dsh` |
-| guava pack | **`/home/guava5tar_/dsh-guava-pack`**（注意：**不在 `~/dsh` 里面**，与主力机布局不同） |
+| guava pack | **`/home/guava5tar_/dsh/playground/themes/dsh-guava-pack`**（2026-11-12 已归位到 `~/dsh` 内，与主力机一致） |
 | GUI | `http://127.0.0.1:3080` |
 | 中继入口（手机） | `http://100.109.125.37:22023/go`（VPS 端口 **22023**；主力机是 22022） |
 | SSR 代理 | `http://127.0.0.1:**2099**`（主力机是 2080；`.bashrc` 里 `DSH_SSR_PROXY`） |
@@ -115,6 +115,27 @@ Kuma 监控（VPS `100.109.125.37:3001`）：
   备份留在 `profiles/web/cordis.patch.yml.bak-20261112-1105`。
   `tools/tests/model-policy.mjs` → **150 passed / 0 failed**。
   ⚠️ 生效需重启 DSH（`dump-config` 已能解析新配置，但运行中进程仍是旧模型表）。
+
+### 3.7 布局归位：pack 搬进 `~/dsh`（11:30–11:45）
+
+两台现在同布局：`<DSH_HOME>/playground/themes/dsh-guava-pack`。搬迁时连带修掉的引用：
+
+- **systemd 单元 ×4**：`dsh-remote-entry.service`、`dsh-backup.service`、`dsh-pc-health.service`
+  的 `ExecStart`/`Documentation`，以及 `model-policy.service.d/override.conf` 的
+  `WorkingDirectory`/`ExecStart`（base 单元的 `%h/dsh/playground/themes/...` 本来就对）；
+- **`~/dsh/dsh` 启动器**：`GUAVA_PACK` 从写死 `$HOME/dsh-guava-pack` 改成候选探测
+  （`DSH_GUAVA_PACK` → 新路径 → 旧路径），找不到时仍会大声报错；
+- **profile 的 bundle 链接**：`~/dsh/profiles/web/package.json` 的
+  `"dsh-guava-pack": "link:..."`、`pnpm-lock.yaml` 的 specifier/version、
+  以及 `node_modules/dsh-guava-pack` 软链，全部改指新路径（这个不修，重启后 bundle 加载不到）；
+- **pack 内模板/脚本**：`ops/pc-health/dsh-pc-health.service`、`ops/tunnel/join-relay.sh` 说明、
+  `tools/lib/yaml.mjs` 注释；
+- **`~/dsh/.gitignore`** 加 `playground/themes/dsh-guava-pack/`（嵌套独立仓库，避免 git 噪音）。
+
+验证：单元 `ExecStart` 都已解析到新路径；手动跑 `dsh-pc-health.service` → `up`（Kuma 收到推送）；
+`dsh-remote-entry` 重启后 3098 正常；`dump-config` 退出 0 无警告；
+**全量 `npm test` = 41 passed / 0 failed**（`@deepseek-ai/cordis` 现在能沿目录向上解析）。
+迁移备份（旧单元 + mode.json）在 `~/.cache/dsh-migration-backup/`。
 - **tag 方案已上线**（主力机 `f5aa36f`，10:11）：`restic-backup.sh` 自动打
   `host-<短主机名小写>`；13/13 条历史快照已在 VPS 侧补标（`host-msi`=2、`host-ygy12`=11，
   已实测过滤生效）。`--tag` 与 `--host` 两种过滤都可用，推荐前者。
@@ -129,8 +150,10 @@ Kuma 监控（VPS `100.109.125.37:3001`）：
 2. **`pkill -f` 会杀掉自己**：命令行里含同样字符串时，连当前 shell 一起杀。
    用 `pgrep` 取 pid、或 `ss -lntp` 反查端口所属进程。
 3. **`/tmp` 不跨 bash 调用保留**（每次调用是新沙箱），中间结果要放持久路径。
-4. **pack 在 `~/dsh` 之外** → Node 解析不到 `~/dsh/node_modules`：
-   任何 `@deepseek-ai/*` 或第三方依赖（如 `undici`）都必须在 **pack 自己的 node_modules** 里。
+4. ~~**pack 在 `~/dsh` 之外** → Node 解析不到 `~/dsh/node_modules`~~ —— **2026-11-12 已归位**：
+   现在两台都是 `<DSH_HOME>/playground/themes/dsh-guava-pack`，`@deepseek-ai/*` 能沿目录向上
+   解析到 `~/dsh/node_modules`（全量 `npm test` 从此不用再给 pack 单独装 `@deepseek-ai/cordis`）。
+   但仍建议关键依赖在 pack 自己的 `package.json` 里显式声明，别吃隐式解析。
 5. **WSL 关机 = 当前对话必断**（systemd 服务会随发行版停）。会话中断通常不是 DSH 崩。
 6. ~~**agentrouter 必须用 `anthropic-messages`**~~ —— **2026-10-27 起该结论作废**：
    上游把 AgentRouter 模型全部挪到 `/v1/responses`，Anthropic 路由唯一的
@@ -218,6 +241,9 @@ cat /home/guava5tar_/dsh/playground/themes/provider-router/mode.json
 
 # 配置（运行中真实生效值）
 cd ~/dsh && ./dsh --profile web --dump-config | less
+
+# pack（自 2026-11-12 起与主力机同布局）
+cd ~/dsh/playground/themes/dsh-guava-pack && git pull && npm test
 ```
 
 ---
@@ -226,11 +252,11 @@ cd ~/dsh && ./dsh --profile web --dump-config | less
 
 | 文件 | 说明 |
 |---|---|
-| `~/dsh-guava-pack/ops/pc-health/` | PC 健康自检（脚本 + 安装器 + README） |
-| `~/dsh-guava-pack/ops/backup/` | restic 备份脚本与 README（含第二台步骤） |
-| `~/dsh-guava-pack/ops/vps/kuma-configure.py` | Kuma 监控项定义（6 条，含本机 22023 与 PC 健康） |
-| `~/dsh-guava-pack/ops/REMOTE-ACCESS.md` | 中继/访问方式总说明 |
-| `~/dsh-guava-pack/ops/PROVIDER_ROUTING_PLAN.md` | 供应商路由设计 + 全测矩阵 + 三个大坑 |
+| `~/dsh/playground/themes/dsh-guava-pack/ops/pc-health/` | PC 健康自检（脚本 + 安装器 + README） |
+| `~/dsh/playground/themes/dsh-guava-pack/ops/backup/` | restic 备份脚本与 README（含第二台步骤） |
+| `~/dsh/playground/themes/dsh-guava-pack/ops/vps/kuma-configure.py` | Kuma 监控项定义（6 条，含本机 22023 与 PC 健康） |
+| `~/dsh/playground/themes/dsh-guava-pack/ops/REMOTE-ACCESS.md` | 中继/访问方式总说明 |
+| `~/dsh/playground/themes/dsh-guava-pack/ops/PROVIDER_ROUTING_PLAN.md` | 供应商路由设计 + 全测矩阵 + 三个大坑 |
 | `~/dsh/profiles/web/cordis.patch.yml` | **运行中的 profile**（改它之后必须重启 DSH） |
 | `~/.config/systemd/user/` | dsh / remote-entry / tunnel / backup / pc-health / model-policy |
 | `~/.config/dsh/pc-health.env` | PC 健康自检配置（含 Kuma 令牌，600） |

@@ -8,7 +8,7 @@
  *     import yaml from '/home/guava5tar_/dsh/node_modules/js-yaml/dist/js-yaml.mjs';
  *
  * 这在本人机器上能跑，但它是整套规则书里最容易在别处炸的一行 ——
- * 换了用户名、把 pack 装到 `~/dsh-guava-pack`、或者从 systemd/cron 里跑
+ * 换了用户名、把 pack 装在别处（如 `~/dsh-guava-pack`）、或者从 systemd/cron 里跑
  * （家目录解析不同）都会直接 `ERR_MODULE_NOT_FOUND`，连"降级"都没有。
  * 定时任务里这种崩溃最难发现：它只在无人值守时发生。
  *
