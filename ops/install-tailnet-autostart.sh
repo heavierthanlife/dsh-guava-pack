@@ -105,13 +105,45 @@ EOF
     if [ -n "$STARTUP" ] && [ -d "$STARTUP" ]; then
       VBS="$STARTUP/dsh-wsl-autostart.vbs"
       # WScript.Shell.Run 第二参 0 = 隐藏窗口；不阻塞登录。
-      cat > "$VBS" <<EOF
-' 由 dsh-guava-pack/ops/install-tailnet-autostart.sh 生成：登录时静默拉起 WSL
-' （WSL 起来后 systemd user linger 会自动启动 dsh.service 与 dsh-entry.service）
-Set sh = CreateObject("WScript.Shell")
-sh.Run "$WSL_WIN -d $DISTRO --exec /bin/sh -c ""sleep infinity""", 0, False
-EOF
-      say "  ✓ 已写入启动文件夹：$VBS（登录时隐藏运行，无需管理员）"
+      #
+      # 必须写成 CRLF + UTF-16LE(BOM)：VBScript 解析器按 UTF-16 读取 .vbs，
+      # 且不认 LF-only 换行 —— 纯 LF 时第 3 行会被并进上面那行注释里，
+      # `Set sh = ...` 根本没执行，第 4 行 `sh.Run` 直接报
+      # 「缺少对象: 'sh'（800A01A8）」。
+      # 2026-11-12 在 Windows 上实测踩到（脚本生成的文件 CR=0、只有 4 个 LF）。
+      # 用 printf 拼 CRLF 再 iconv 转 UTF-16LE，避免 heredoc 把换行/编码写坏。
+      {
+        printf "' 由 dsh-guava-pack/ops/install-tailnet-autostart.sh 生成：登录时静默拉起 WSL\r\n"
+        printf "' （WSL 起来后 systemd user linger 会自动启动 dsh.service 与 dsh-entry.service）\r\n"
+        printf 'Set sh = CreateObject("WScript.Shell")\r\n'
+        printf 'sh.Run "%s -d %s --exec /bin/sh -c ""sleep infinity""", 0, False\r\n' "$WSL_WIN" "$DISTRO"
+      } | iconv -f UTF-8 -t UTF-16LE > "$VBS.utf16.tmp" 2>/dev/null || {
+        # 没有 iconv 就退回"UTF-8 + CRLF"（多数现代 Windows 也能跑，只是不保证中文注释）
+        say "  ⚠️ 没有 iconv，改用 UTF-8 + CRLF 写入"
+        {
+          printf "' 由 dsh-guava-pack/ops/install-tailnet-autostart.sh 生成：登录时静默拉起 WSL\r\n"
+          printf "' （WSL 起来后 systemd user linger 会自动启动 dsh.service 与 dsh-entry.service）\r\n"
+          printf 'Set sh = CreateObject("WScript.Shell")\r\n'
+          printf 'sh.Run "%s -d %s --exec /bin/sh -c ""sleep infinity""", 0, False\r\n' "$WSL_WIN" "$DISTRO"
+        } > "$VBS.utf16.tmp"
+      }
+      # UTF-16LE 需要 BOM（FF FE），否则照样解析失败
+      { printf '\377\376'; cat "$VBS.utf16.tmp"; } > "$VBS"
+      rm -f "$VBS.utf16.tmp"
+      # 自检：BOM 必须是 FF FE，且不能有裸 LF（否则 VBScript 报「缺少对象: 'sh'」）。
+      vbs_bom=$(head -c 2 "$VBS" | od -An -tx1 | tr -d ' \n')
+      vbs_bare_lf=$(python3 - "$VBS" <<'VPY'
+import sys
+d = open(sys.argv[1], 'rb').read()
+print(d.count(b'\n\x00') - d.count(b'\r\x00\n\x00'))
+VPY
+)
+      if [ "$vbs_bom" = "fffe" ] && [ "$vbs_bare_lf" = "0" ]; then
+        say "  ✓ 已写入启动文件夹：$VBS（UTF-16LE + CRLF 自检通过，登录时隐藏运行，无需管理员）"
+      else
+        say "  ⚠️ VBS 自检不通过：BOM=$vbs_bom（应为 fffe）、裸 LF=$vbs_bare_lf（应为 0）"
+        say "     该文件在 Windows 登录时会报「缺少对象: 'sh'（800A01A8）」"
+      fi
     else
       say "  ⚠️ 找不到启动文件夹，跳过。手动把下列命令放进『启动』文件夹快捷方式："
       say "     $WSL_WIN -d $DISTRO --exec /bin/sh -c \"sleep infinity\""

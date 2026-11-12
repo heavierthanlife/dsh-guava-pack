@@ -384,6 +384,41 @@ bash ops/backup/restic-ctl.sh forget <id>     # 自动 SSH 到 VPS，以 restic 
 bash ops/backup/restic-ctl.sh prune           # 触发 VPS 的 oneshot
 ```
 
+### 8.16 Windows 登录弹「缺少对象: 'sh'（800A01A8）」= VBS 换行/编码问题
+
+**症状**：Windows 登录时弹 VBScript 错误框，指向
+`…\Startup\dsh-wsl-autostart.vbs` 第 3 行 `Set sh = …`，报
+`缺少对象: 'sh'`，错误码 `800A01A8`。
+
+**真因**：该 `.vbs` 由 `ops/install-tailnet-autostart.sh` 生成。旧实现用
+`cat > "$VBS" <<EOF`，在 WSL 上写出的是 **LF + UTF-8**。VBScript 不认 LF-only：
+
+- 第 3 行被并进上一行注释（`'` 开头），`Set sh = ...` **从未执行**；
+- 第 4 行 `sh.Run …` 于是引用不存在的对象 → 800A01A8。
+
+代码本身没错，纯粹换行符 + 编码问题。
+
+**正确的字节契约**：`UTF-16LE(BOM=FF FE)` + 每行 `CRLF`（4 个），不能有裸 LF。
+
+**已验证的修复方式**（脚本里已改成这个；2026-11-12 已与 Windows 上人工修好的文件逐字节比对一致，556 字节）：
+
+```sh
+{
+  printf "' ...中文注释...\r\n"
+  printf "' ...\r\n"
+  printf 'Set sh = CreateObject("WScript.Shell")\r\n'
+  printf 'sh.Run "%s -d %s --exec /bin/sh -c ""sleep infinity""", 0, False\r\n' "$WSL_WIN" "$DISTRO"
+} | iconv -f UTF-8 -t UTF-16LE > tmp
+{ printf '\377\376'; cat tmp; } > "$VBS"        # 补 BOM
+rm -f tmp
+```
+
+**现场应急**（不想重跑脚本时）：把那个 `.vbs` 用记事本另存为「Unicode」，
+或 `unix2dos` 之后用 `iconv -f UTF-8 -t UTF-16LE` 重写并补 BOM。
+
+**当前状态**：生成处已修 + 加了自检（BOM 与裸 LF 校验，不通过会当场告警）+
+回归测试 `node tools/tests/vbs-autostart.mjs`（已进 `npm test`）。
+
 ### 8.15 排查顺序（省时间的模板）
 
 ```
