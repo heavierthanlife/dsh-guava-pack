@@ -31,6 +31,18 @@ VPS 侧安装后的路径：
 | `/etc/systemd/system/dsh-console.service` | 单元（`Restart=always`，root + 沙箱） |
 | `/var/cache/dsh-console/restic` | 控制台自己读 restic 快照用的缓存（restic:restic 0750） |
 
+## 入口链接跟随当前访问地址
+
+入口卡**不写死** `100.109.125.37`：HTML 里只有 `data-port`（和 `data-path`），
+由前端用 `location.hostname + ':' + port` 拼出链接。原因：控制台可能经 tailnet 直连
+（`100.109.125.37:8090`），也可能经 WSL 转发（`localhost:8090`）；
+写死 tailnet IP 时，后者点卡片会跳到浏览器打不开的 `100.x`（代理 / HTTPS-First）。
+
+miniserve 的令牌链接同理：服务端返回的是绝对地址，前端会把 host 换成本机 host。
+
+配套：`ops/tunnel/console-forward.service` 转发 **8090 / 3001 / 8080 / 8081 / 22022 / 22023**
+六个端口，所以六个入口在 `localhost` 下都能直接打开。
+
 ## 一键登录（手机/平板）
 
 ```bash

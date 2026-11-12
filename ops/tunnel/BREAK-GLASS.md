@@ -269,6 +269,31 @@ systemctl --user enable --now console-forward.service
 # Windows 打开 http://localhost:8090（以及 :3001 / :8080 / :8081）
 ```
 
+### 8.6b 控制台能开、但里面点「监控面板/推送/文件中转」打不开
+
+**症状**：经 `http://localhost:8090` 打开控制台正常，但点入口卡跳到
+`http://100.109.125.37:3001` 之类的地址就打不开（8.6 那类代理/HTTPS-First 问题）。
+
+**真因**：入口卡当时把 `100.109.125.37` **写死在 HTML 里**。控制台本身是经 WSL 转发
+（`localhost:8090`）访问的，但卡片链接指向 tailnet IP —— 浏览器对 `100.x` 走代理/升级
+https 失败，于是"控制台能开、其它都点不开"。
+
+**修复（已落地）**：卡片改用 `data-port`，由 JS 按**当前访问的主机名**拼链接
+（`location.hostname + ':' + port`），miniserve 的令牌链接也在前端把服务端返回的
+绝对地址换成本机 host。同时 `console-forward.service` 补齐了 `22022/22023` 转发，
+所以六个入口在 `localhost` 下都可用。
+
+**验证**：
+
+```bash
+for p in 8090 3001 8080 8081 22022 22023; do
+  printf "localhost:%-6s -> " "$p"; curl -s -o /dev/null -w '%{http_code}\n' -m 6 "http://127.0.0.1:$p/"
+done
+```
+
+预期：8090=401（要认证）、3001=302、8080=200、8081=404（令牌路径，正常）、
+22022/22023=401 或 302（取决于隧道是否在）。
+
 ### 8.7 `apt` 镜像偶发断连，会让安全更新「卡好几天」
 
 **症状**：`unattended-upgrades` 日志里

@@ -2,7 +2,8 @@
 # 在 PC 的 WSL 里把 VPS 上的几个 Web 入口转发到本机，绕开 Windows 侧
 # 公司 VPN / 代理 / 分流规则对 100.64.0.0/10 的拦截。
 #
-# 转发：8090 控制台、3001 Kuma、8080 ntfy、8081 miniserve
+# 转发：8090 控制台、3001 Kuma、8080 ntfy、8081 miniserve、
+#       22022/22023 两台 DSH（这样控制台里的入口卡全部能用 localhost 打开）
 # 用法：systemctl --user enable --now console-forward.service
 #       Windows 浏览器打开 http://localhost:<端口>
 Description=Forward VPS web entries (console/kuma/ntfy/miniserve) to localhost
@@ -20,6 +21,8 @@ ExecStart=/usr/bin/ssh -F /dev/null -N \
   -L 0.0.0.0:3001:${VPS_TAILNET_IP}:3001 \
   -L 0.0.0.0:8080:${VPS_TAILNET_IP}:8080 \
   -L 0.0.0.0:8081:${VPS_TAILNET_IP}:8081 \
+  -L 0.0.0.0:22022:${VPS_TAILNET_IP}:22022 \
+  -L 0.0.0.0:22023:${VPS_TAILNET_IP}:22023 \
   root@${VPS_TAILNET_IP}
 Restart=always
 RestartSec=5
