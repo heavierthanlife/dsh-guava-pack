@@ -95,6 +95,44 @@ case "$kuma" in 200|302|401) ok "uptime-kuma HTTP $kuma" ;; *) bad "uptime-kuma 
 ntfy=$(curl -s -o /dev/null -w '%{http_code}' -m 5 http://100.109.125.37:8080/v1/health 2>/dev/null || true)
 case "$ntfy" in 200) ok "ntfy health 200" ;; *) bad "ntfy health ${ntfy:-timeout}" ;; esac
 [ -f /srv/git-mirror/.last-run ] && ok "git 镜像：$(cat /srv/git-mirror/.last-run)" || warn "git 镜像从未成功"
+# Kuma 各 push 监控的最后心跳。
+# 必须用 mode=ro（带 WAL）：kuma.db 是 WAL 模式，immutable=1 会忽略 -wal 文件，
+# 读到的是旧数据 —— 2026-11-12 实测因此误判成「主力机没上报」。
+KUMA_DB=/opt/uptime-kuma/data/kuma.db
+if [ -r "$KUMA_DB" ]; then
+  kuma_ages=$(python3 - "$KUMA_DB" <<'KPY' 2>/dev/null
+import sqlite3, sys, datetime
+db = sys.argv[1]
+con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+rows = con.execute("""
+    select m.id, m.name,
+           (select max(h.time) from heartbeat h where h.monitor_id = m.id)
+      from monitor m where m.type = 'push' and m.active = 1 order by m.id
+""").fetchall()
+for mid, name, last in rows:
+    if last is None:
+        print(f"{mid}\t{name}\t-1")
+        continue
+    try:
+        t = datetime.datetime.fromisoformat(str(last).replace('T', ' '))
+    except Exception:
+        print(f"{mid}\t{name}\t-1")
+        continue
+    print(f"{mid}\t{name}\t{(now - t).total_seconds() / 3600:.1f}")
+KPY
+)
+  if [ -n "$kuma_ages" ]; then
+    # 超过 3 小时没心跳 = 该 push 监控的定时器/脚本可能停了（Kuma 自身 3600s 就会报 Down）
+    stale=$(printf '%s\n' "$kuma_ages" | awk -F'\t' '$3 == "-1" || $3 > 3 {print "  #" $1 " " $2 " (" ($3 == "-1" ? "从未上报" : $3 "h 前") ")"}')
+    if [ -z "$stale" ]; then
+      ok "Kuma push 监控心跳新鲜（$(printf '%s\n' "$kuma_ages" | wc -l) 条）"
+    else
+      warn "Kuma push 监控心跳过期："
+      [ "$SHORT" = "1" ] || printf '%s\n' "$stale"
+    fi
+  fi
+fi
 
 section "最近 15 分钟错误日志"
 errs=$(journalctl --since '-15min' -p err -q --no-pager 2>/dev/null | grep -vE 'audit|aegis' | head -5)
