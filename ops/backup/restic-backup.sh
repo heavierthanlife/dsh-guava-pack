@@ -9,6 +9,12 @@
 # 用法：restic-backup.sh [--dry-run]
 set -uo pipefail
 export PATH="$HOME/.local/bin:$PATH"
+
+# restic 走 HTTP 访问 tailnet 上的 rest-server；交互式 shell 里的 HTTP_PROXY(SSR) 不认识
+# 100.64.0.0/10，会把请求送去代理然后卡满超时（实测 8s，现象是"备份仓库打不开"）。
+# 这里显式把 tailnet 段排除在代理之外。systemd 定时任务本来就没有代理，加这段也无害。
+export NO_PROXY="100.64.0.0/10,localhost,127.0.0.1${NO_PROXY:+,$NO_PROXY}"
+export no_proxy="$NO_PROXY"
 export RESTIC_PASSWORD_FILE="${RESTIC_PASSWORD_FILE:-$HOME/.restic-pass}"
 
 LEGACY_REPO="sftp:root@100.109.125.37:/srv/backup/dsh"

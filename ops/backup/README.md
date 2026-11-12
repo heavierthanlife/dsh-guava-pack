@@ -1,5 +1,18 @@
 # restic 备份速查
 
+> ## ⚠️ 恢复前必读：`latest` 必须配 `--host`
+>
+> 两台 PC（YGY12 / MSI）备份到**同一个仓库、同一个路径、同一个用户名**。
+> 不带 `--host` 的 `restic ls latest` / `restore latest` 会**随机命中另一台**的快照
+> ——实测踩过：在主力机上恢复，拿到的是 MSI 的文件。
+>
+> ```bash
+> bash ops/backup/restic-ctl.sh snapshots | grep host-      # 先看标签
+> bash ops/backup/restic-ctl.sh restore latest --host YGY12 --target /tmp/restore-drill --include /home/guava5tar_/dsh/profiles
+> ```
+>
+> 恢复永远先到 `/tmp`，核对完再拷回去。
+
 仓库：`rest:http://100.109.125.37:3000/dsh/`（VPS 上 rest-server，**append-only** + basic auth）
 密码：仓库加密口令在 `~/.restic-pass`；HTTP 认证口令在 `~/.restic-repo-url`（600，含 URL，别提交）
 
