@@ -107,6 +107,9 @@ Kuma 监控（VPS `100.109.125.37:3001`）：
   **手机收到**。该监控本就要删，所以不需要回滚。
 - **共享仓库隐患**：实测 `restore latest` 不带 `--host` 会静默选中**另一台**的快照，
   已写进 `ops/backup/README.md`（新增 ⚠️ 节 + 铁律第 4 条）。
+- **tag 方案已上线**（主力机 `f5aa36f`，10:11）：`restic-backup.sh` 自动打
+  `host-<短主机名小写>`；13/13 条历史快照已在 VPS 侧补标（`host-msi`=2、`host-ygy12`=11，
+  已实测过滤生效）。`--tag` 与 `--host` 两种过滤都可用，推荐前者。
 
 ---
 
@@ -121,7 +124,11 @@ Kuma 监控（VPS `100.109.125.37:3001`）：
 4. **pack 在 `~/dsh` 之外** → Node 解析不到 `~/dsh/node_modules`：
    任何 `@deepseek-ai/*` 或第三方依赖（如 `undici`）都必须在 **pack 自己的 node_modules** 里。
 5. **WSL 关机 = 当前对话必断**（systemd 服务会随发行版停）。会话中断通常不是 DSH 崩。
-6. **agentrouter 必须用 `anthropic-messages`**（见 3.2）。
+6. ~~**agentrouter 必须用 `anthropic-messages`**~~ —— **2026-10-27 起该结论作废**：
+   上游把 AgentRouter 模型全部挪到 `/v1/responses`，Anthropic 路由唯一的
+   `deepseek-v4-flash` 已下线（503 无可用渠道）。正确形态见 pack
+   `config/cordis.patch.example.yml` 的 `agentrouter-responses`（`api: openai-responses`）。
+   **本机 live profile 还没迁移，见待办 2。**
 7. **commandcode 的 `max_tokens` ≤ 200000**，而 opencode-go 允许 384000 —— 两家不能共用一个值。
 8. **opencode-go 需要 `x-opencode-session`**，由插件 `dsh-opencode-session-header` 按会话注入，
    不要在 profile 里写死（会破坏 prompt cache 亲和性并泄露真实 session id）。
@@ -134,8 +141,11 @@ Kuma 监控（VPS `100.109.125.37:3001`）：
     （bwrap `--unshare-pid`，systemctl 解析不到总线对端 PID）。改用
     `busctl --user get-property org.freedesktop.systemd1 <单元对象> ...Unit ActiveState`、
     `journalctl --user`，或 `busctl --user list` 确认总线本身是好的。真实终端里 systemctl 正常。
-12. **restic `latest` 跨机器静默串台**：两台共用仓库/路径/tag，不带 `--host` 的
-    `restore latest` **不报错**，会命中另一台。恢复一律带 `--host YGY12|MSI`。
+12. **restic `latest` 跨机器静默串台**：两台共用仓库/路径/tag，不带过滤的 `restore latest`
+    **不报错**，会命中另一台。2026-11-12 起备份自动带 `host-<短主机名小写>` tag，
+    推荐 `--tag host-msi`（`--host MSI` 仍然有效）。
+    ⚠️ **`restic tag` 会重写快照文件 → 短 ID 全变**：补标后旧 ID 全部失效，引用过旧 ID 的
+    笔记必须重取（本文档里的 `152c638e` 已换成 `4acb333f`）。
 13. **VPS 反向进不来**：ygy12（主力机，tailscale `100.126.220.49`）对 VPS 的 22/3080/3098
     全部 closed，VPS 也没有它的密钥 —— 想查主力机只能请用户在那边跑命令。
 
@@ -143,22 +153,26 @@ Kuma 监控（VPS `100.109.125.37:3001`）：
 
 ## 5. 待办（按优先级）
 
-本轮已收掉交接里的 3 条（见 3.6），剩下这些：
+本轮收掉了交接里的 3 条（见 3.6），共享仓库那条也已由主力机修完。
 
-1. **⚠️ 共享仓库 `latest` 串台**（2026-11-12 实测）：两台同仓库、同路径（`/home/guava5tar_/dsh`）、
-   同 tag（`dsh-nightly`），`restore latest` 不带 `--host` 会静默恢复成另一台
-   （实测选中 YGY12 的 `152c638e`）。
-   - 立刻可用：恢复一律 `--host YGY12` / `--host MSI`（已写进 `ops/backup/README.md` 的 ⚠️ 节）；
-   - 根本修法（**未做**，用户计划自己做）：备份脚本加 `host-<主机名>` tag，别再靠 `latest` 猜来源。
-2. **`~/dsh` 本地仓库（无 remote）有未提交改动**：`profiles/web/cordis.patch.yml` 里默认模型
-   已切成 `commandcode/deepseek/deepseek-v4.1-flash`（maxTokens 200000 + 注释），这是**运行中的
-   真实配置**却还没入库；该仓库只做本地历史，提不提交由用户定。
-3. **`dsh-opencode-session-header` 的 MSI 侧端到端验证**（低优先）：`PENDING-VERIFICATION.md`
-   里这条在主力机 2026-11-02 已验通过；本机没单独验，且当前默认模型是 `commandcode`，
-   走不到 opencode-go，等要切回去之前验一次即可。
-4. **`is-enabled` 要查 timer**：两个 timer 的 service 是 oneshot + `static`（无 `[Install]` 段），
-   查 service 会误判成「没启用」。正确写法：
-   `systemctl --user is-enabled dsh-backup.timer model-policy.timer`。
+1. **⚠️ 本机 live profile 与 pack 的模型策略漂移（`npm test` 4 条失败，需决策）**：
+   `tools/tests/model-policy.mjs` 第 17 节要求 live profile 按 **2026-10-27** 的迁移走
+   `agentrouter-responses`，但本机 `~/dsh/profiles/web/cordis.patch.yml` 仍是老的
+   `agentrouter:` + `api: anthropic-messages` + `deepseek-v4-flash`（该模型上游已下线），
+   `allowedModels` 也只有 2 条（模板 5 条），antigravity 的模型也没进 allowedModels。
+   后果：面板里能选到一个必然 503 的模型。修法 = 用模板的 `agentrouter-responses` 块
+   替换旧块、对齐 `allowedModels`，然后**重启 DSH**（改 profile 必须重启）。
+   实际影响面（用户能看到/选到什么）没在面板上确认过，重启前先决定。
+2. ✅ **共享仓库 `latest` 串台 —— 已修**（`f5aa36f`）：备份自动打 `host-*` tag，
+   历史 13 条已补标。恢复用 `--tag host-msi` / `--tag host-ygy12`（`--host` 仍可用）。
+   注意补标重写了快照 → **旧短 ID 全部失效**。
+3. **`~/dsh` 本地仓库（无 remote）有未提交改动**：默认模型已切
+   `commandcode/deepseek/deepseek-v4.1-flash`（maxTokens 200000），是运行中的真实配置
+   却未入库；提不提交由用户定（本地历史而已）。
+4. **`dsh-opencode-session-header` 的 MSI 侧端到端验证**（低优先）：主力机 2026-11-02 已验；
+   本机默认模型是 `commandcode`，走不到 opencode-go，切回去之前验一次即可。
+5. **`is-enabled` 要查 timer**：两个 timer 的 service 是 oneshot + `static`（无 `[Install]`），
+   查 service 会误判成没启用 —— `systemctl --user is-enabled dsh-backup.timer model-policy.timer`。
 
 已不再是待办（本轮核实过）：
 

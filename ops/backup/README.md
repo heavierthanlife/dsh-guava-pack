@@ -48,7 +48,8 @@ alias rk='bash ops/backup/restic-ctl.sh'   # 可选，装个短名字
 ```text
 # 2026-11-12 实测（两台都快照在库）
 $ restic restore latest --target /tmp/rtest --include '/nonexistent'
-restoring snapshot 152c638e ... by guava5tar_@YGY12      ← 本想恢复 MSI，静默给了 YGY12
+restoring snapshot 4acb333f ... by guava5tar_@YGY12      ← 本想恢复 MSI，静默给了 YGY12
+#（补标后新 ID；当时输出的是 152c638e，restic tag 重写快照后失效）
 ```
 
 ### 两种区分方式（都可用，推荐 tag）
