@@ -33,9 +33,9 @@ eval "$(node "$GUAVA_PACK/tools/export-provider-keys.mjs")"
 
 **结论：两处同名时，`.credentials.yaml` 生效。** 后执行的覆盖先执行的。
 
-> ⚠️ 已知不一致（2026-11-12 核查）：`COMMANDCODE_API_KEY` 在两个位置**值不同**，
-> 实际生效的是 `.credentials.yaml` 里的那份。`.bashrc` 里那份是历史残留，
-> 容易误导排查。**以 `.credentials.yaml` 为准。**
+> ✅ 2026-11-12 已对齐：`COMMANDCODE_API_KEY` 曾出现两处**值不同**（`.bashrc` 是旧值，
+> `.credentials.yaml` 生效）。现在 `.bashrc` 已改成与凭证库一致，两处指纹相同。
+> **改动任一处后，请同步另一处**，否则又会出现"看错源头"的问题。
 
 ---
 
@@ -49,9 +49,9 @@ eval "$(node "$GUAVA_PACK/tools/export-provider-keys.mjs")"
 | `ANTIGRAVITY_API_KEY` | Antigravity（本机 8045 反代） | ✅ | — |
 | `OPENCODE_GO_API_KEY` | OpenCode Go（$10/月订阅） | ✅ | — |
 | `XIAOMI_TOKEN_PLAN_CN_API_KEY` | 小米 Token Plan | ✅ | — |
-| `COMMANDCODE_API_KEY` | Command Code（经 8317 桥接） | ⚠️ 旧值 | ✅ **生效** |
-| `OPENROUTER_API_KEY` | OpenRouter | ❌ | ✅ |
-| `NVIDIA_API_KEY` | NVIDIA NIM | ❌ | ✅ |
+| `COMMANDCODE_API_KEY` | Command Code（经 8317 桥接） | ✅（2026-11-12 已对齐） | ✅ 生效 |
+| `OPENROUTER_API_KEY` | OpenRouter | ✅（2026-11-12 复制） | ✅ |
+| `NVIDIA_API_KEY` | NVIDIA NIM | ✅（2026-11-12 复制） | ✅ |
 
 另有一些**不在 profiles 里、但其它工具会用**的：
 

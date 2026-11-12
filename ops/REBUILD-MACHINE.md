@@ -182,4 +182,30 @@ bash ~/dsh/playground/themes/dsh-guava-pack/ops/tunnel/check.sh 100.109.125.37
 | `pnpm` 找不到 / 装到了 Windows | WSL 把 Windows 的 node/npm 透传进了 PATH |
 | `restic` 卡 8 秒后超时 | 交互式 shell 的 `HTTP_PROXY` 不认识 tailnet 的 100.x（脚本已内置 NO_PROXY） |
 | 恢复出另一台的文件 | `restore latest` 没带 `--host` |
+| `scp` 返回 0 但文件没传过去 | 这套环境的 scp 有问题；用 `ssh 'cat > 文件' < 本地文件` |
+| 改完代码但行为没变 | 只 `is-active` 不算数，要重启服务并核对 `ActiveEnterTimestamp` |
 | agentrouter 报 `400 tool_use ids ...` | `node_modules` 补丁被 `pnpm install` 覆盖；跑 `node install.mjs --patch` |
+
+---
+
+## 7. 往 VPS 传文件：**不要用 scp**
+
+这套环境里 `scp` 会**静默失效**——命令返回 `exit 0`，但文件根本没传过去
+（实测：VPS 上目标文件大小不变，差点以为部署成功）。用 `ssh + stdin`：
+
+```bash
+SSH="ssh -F /dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes root@100.109.125.37"
+
+# 上传（覆盖前先备份）
+$SSH 'cp -a /opt/dsh-console/server.mjs /opt/dsh-console/server.mjs.bak-$(date +%Y%m%d-%H%M%S)'
+$SSH 'cat > /tmp/server.mjs.new' < ops/console/server.mjs
+$SSH 'node --check /tmp/server.mjs.new && install -m 644 /tmp/server.mjs.new /opt/dsh-console/server.mjs'
+
+# 校验：本地与远端哈希必须一致
+sha256sum ops/console/server.mjs | cut -c1-16
+$SSH 'sha256sum /opt/dsh-console/server.mjs | cut -c1-16'
+```
+
+部署后一定要 `systemctl restart <unit>`，并确认
+`systemctl show <unit> -p ActiveEnterTimestamp` 的时间变了——**只看 `is-active`
+会骗人**（进程还活着，但跑的是内存里的旧代码）。
