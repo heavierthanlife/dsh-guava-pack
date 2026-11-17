@@ -24,6 +24,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import vm from 'node:vm';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PACK = dirname(dirname(HERE));
@@ -232,6 +233,33 @@ check('所有入口卡都用新标签页打开', notBlank.length === 0,
 const noOpener = cardAnchors.filter((tag) => /target=["']_blank["']/.test(tag) && !/rel=["'][^"']*noopener/.test(tag));
 check('新标签页都带 rel="noopener"', noOpener.length === 0,
   '缺 noopener 会让被打开的页面能操作本页');
+
+// ── 扫雷时间的单位口径（2026-11-17 真实 bug）──────────────────────────────
+// 扫雷的 best 存**毫秒**（33452 = 33.452 秒）。首页曾经直接
+// `Math.round(v) + 's'`，把毫秒当秒显示成「33452s」——用户反馈"我明明是 33 秒"。
+// 这类错误静态 grep 抓不到（代码完全合法），只能真跑格式化函数。
+console.log('\n扫雷时间格式化');
+{
+  const indexScript = [...readFileSync(join(PUBLIC, 'index.html'), 'utf8')
+    .matchAll(/<script(?![^>]*src=)[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]).pop();
+  const extracted = /(function normalizeMineMs[\s\S]*?\n  \})/.exec(indexScript);
+  const formatter = /(function formatScore[\s\S]*?\n  \})/.exec(indexScript);
+  if (extracted === null || formatter === null) {
+    check('首页能抽出 formatScore 与归一函数', false, '函数改名或删除会导致本门禁失效');
+  } else {
+    const sandbox = { console, Number, isFinite, Math };
+    vm.createContext(sandbox);
+    vm.runInContext(`${extracted[1]}\n${formatter[1]}\nglobalThis.f = formatScore;`, sandbox);
+    const format = sandbox.f;
+    check('毫秒记录显示为秒（33452 → 33s）', format('mines', { easy: 33452 }) === '初级 33s',
+      format('mines', { easy: 33452 }));
+    check('旧秒级记录也显示为秒（33 → 33s）', format('mines', { easy: 33 }) === '初级 33s',
+      format('mines', { easy: 33 }));
+    check('三档同时存在时都归一', format('mines', { easy: 33452, medium: 88500 }) === '初级 33s · 中级 89s',
+      format('mines', { easy: 33452, medium: 88500 }));
+    check('普通游戏的分数不受影响', format('g2048', 128) === '128 分', format('g2048', 128));
+  }
+}
 
 // ── 存档槽与记录管理 ────────────────────────────────────────────────────
 console.log('\n存档与记录');

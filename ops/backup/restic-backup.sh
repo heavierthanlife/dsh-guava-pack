@@ -65,8 +65,14 @@ rc=$?
 # 只真实备份（不带参数）时做；失败只告警，不改变备份的退出码。
 if [ "$rc" -eq 0 ] && [ "$#" -eq 0 ]; then
   MIRROR="$HOME/dsh/playground/themes/dsh-guava-pack/ops/backup/git-mirror-push.sh"
-  if [ -x "$MIRROR" ]; then
-    "$MIRROR" || echo "⚠️ git 镜像失败（备份本身成功，见上）" >&2
+  # 用 `-f` + `bash` 而不是 `-x` + 直接执行。
+  # 2026-11-17 真实事故：git-mirror-push.sh 在 git 里是 100644（不可执行），
+  # `[ -x ]` 判false 于是被**静默跳过**；镜像因此冻结 6 天，
+  # 健康检查报 ❌ 并把 Kuma 推送打成 down。退出码位不可靠，内容存在才可靠。
+  if [ -f "$MIRROR" ]; then
+    bash "$MIRROR" || echo "⚠️ git 镜像失败（备份本身成功，见上）" >&2
+  else
+    echo "⚠️ 找不到 git 镜像脚本：$MIRROR" >&2
   fi
 fi
 exit "$rc"

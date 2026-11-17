@@ -257,6 +257,22 @@
   var listBox = document.getElementById('rec-list');
 
   /** 把一条记录值格式化成人类可读；扫雷是对象（三档用时）。 */
+  /**
+   * 扫雷记录的时间单位归一。
+   *
+   * 扫雷的 best 值历史口径是**毫秒**（33452 表示 33.452 秒），更早的版本可能
+   * 按"秒"写过（33）。毫秒记录必然 >= 1000，所以 < 1000 只可能是秒。
+   *
+   * 2026-11-17 真实 bug：这里漏了归一，直接把 33452 当秒显示成 "33452s" ——
+   * 用户看到的是「我明明是 33 秒」。扫雷页自己有 normalizeBest，首页没同步，
+   * 于是同一个记录在两个地方显示成差 1000 倍的数字。
+   */
+  function normalizeMineMs(value) {
+    var n = typeof value === 'number' ? value : Number(value);
+    if (!isFinite(n) || n <= 0) return 0;
+    return n < 1000 ? n * 1000 : n;
+  }
+
   function formatScore(gameId, value) {
     if (value === null) return '暂无记录';
     if (gameId === 'mines') {
@@ -264,10 +280,8 @@
       var order = [['easy', '初级'], ['medium', '中级'], ['hard', '高级']];
       var parts = [];
       for (var i = 0; i < order.length; i++) {
-        var v = value[order[i][0]];
-        if (typeof v === 'number' && isFinite(v) && v > 0) {
-          parts.push(order[i][1] + ' ' + Math.round(v) + 's');
-        }
+        var ms = normalizeMineMs(value[order[i][0]]);
+        if (ms > 0) parts.push(order[i][1] + ' ' + Math.round(ms / 1000) + 's');
       }
       return parts.length === 0 ? '暂无记录' : parts.join(' · ');
     }
