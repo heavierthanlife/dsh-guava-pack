@@ -64,6 +64,26 @@ done < <(find "$SRC_DIR/public" -type f -print0)
 PUBLIC_COUNT="$(find "$SRC_DIR/public" -type f | wc -l)"
 log "程序已安装到 $APP_DIR（server.mjs + public/ 共 $PUBLIC_COUNT 个文件）"
 
+# 逐字节复核：安装后每个源文件都必须与目标**完全相同**。
+# 为什么需要（2026-11-17 真实发生）：先打了 tar 包、页面在那之后又被改了一版，
+# 结果 VPS 上跑的是旧文件 —— 而所有检查都显示"安装成功、页面 200"。
+# 尺寸漂移只有几十字节，靠 eye/curl 看不出来，必须机械比对。
+DRIFT=0
+while IFS= read -r -d '' file; do
+  rel="${file#"$SRC_DIR/public/"}"
+  target="$APP_DIR/public/$rel"
+  if ! cmp -s "$file" "$target"; then
+    echo "[install] 内容不一致：$rel" >&2
+    DRIFT=$((DRIFT + 1))
+  fi
+done < <(find "$SRC_DIR/public" -type f -print0)
+if ! cmp -s "$SRC_DIR/server.mjs" "$APP_DIR/server.mjs"; then
+  echo "[install] 内容不一致：server.mjs" >&2
+  DRIFT=$((DRIFT + 1))
+fi
+[ "$DRIFT" -eq 0 ] || die "安装后复核发现 $DRIFT 个文件与源不一致（升级时被占用/写入失败？）"
+log "逐字节复核通过（$((PUBLIC_COUNT + 1)) 个文件与源一致）"
+
 # ---------------------------------------------------------------- 3. 路径令牌
 install -d -m 0755 -o root -g root "$ETC_DIR"
 if [ -s "$TOKEN_FILE" ]; then
