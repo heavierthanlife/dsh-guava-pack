@@ -546,6 +546,91 @@ lastAt <  nudge.at  →  未响应 → 照旧琥珀色「建议压缩」，常�
 > `Date.now()`，组件会拿真实时间跟固定的 nudge 时间比，一律判成过期 → 渲染
 > `null`，你会以为修复没生效（本次实测踩过）。
 
+### 8.19 Uptime Kuma 大版本升级（1.x → 2.x）与两个静默坑
+
+**背景**：2026-11-17 把 VPS 的 Kuma 从 `1.23.16` 升到 `2.5.11`。
+2.x 是重写版，**心跳表要聚合成新格式**，官方要求：备份 data、中途不能中断、
+断了只能回滚重来。
+
+**别信 npm 的 `latest`**：`npm view uptime-kuma version` 当时给的是
+`2.0.0-dev.0`（开发预发布）。正确来源是 GitHub releases：
+
+```bash
+curl -s "https://api.github.com/repos/louislam/uptime-kuma/releases?per_page=5"   | python3 -c "import json,sys;[print(r['tag_name'], r['prerelease']) for r in json.load(sys.stdin)]"
+```
+
+**官方 `setup` 脚本会跑 vite build —— 这台 1.6 GB 的机器不建议**。
+2.x 的 release 附带预构建前端 `dist.tar.gz`，用官方这两步就够了：
+
+```bash
+cd /opt/uptime-kuma
+npm ci --omit dev --no-audit --no-fund   # 约 1.5 分钟，node_modules 约 260 MB
+npm run download-dist                     # 流式解包到 ./dist，约 8 分钟
+```
+
+**升级配方（可回滚）**：
+
+```bash
+TS=$(date +%Y%m%d-%H%M%S); BK=/root/kuma-backup-$TS; mkdir -p "$BK"
+systemctl stop uptime-kuma
+tar czf "$BK/kuma-data.tar.gz" -C /opt/uptime-kuma data   # 8.6 MB
+mv /opt/uptime-kuma /opt/uptime-kuma.1.23.16               # 旧版留着，回滚就是换回来
+tar xzf /tmp/kuma-2.5.11.tar.gz -C /tmp && mv /tmp/uptime-kuma-2.5.11 /opt/uptime-kuma
+cp -a /opt/uptime-kuma.1.23.16/data /opt/uptime-kuma/data
+cd /opt/uptime-kuma && npm ci --omit dev --no-audit --no-fund && npm run download-dist
+systemctl start uptime-kuma
+journalctl -u uptime-kuma -f     # 盯着 "Aggregate Table Migration Completed"
+```
+
+**实测**：6 个监控 / 17673 条历史心跳，迁移 **17 秒**完成。
+迁移后 `heartbeat` 表只剩近期的 3130 条（旧的聚合进
+`stat_minutely/stat_hourly/stat_daily`），这是 **2.x 的正常优化，不是丢数据**。
+判据：3 张 `stat_*` 表有数据、6 个监控名字不变、新心跳还在长。
+
+**回滚**：`systemctl stop uptime-kuma && mv /opt/uptime-kuma /opt/uptime-kuma.2.5.11
+&& mv /opt/uptime-kuma.1.23.16 /opt/uptime-kuma && systemctl start uptime-kuma`。
+**必须同时还原 data**（从 `$BK/kuma-data.tar.gz`），因为 2.x 已经改过表结构。
+
+**2.x 破坏性变更（会踩到的）**：
+- **JSON 备份/恢复被移除**，只剩"备份 data 目录"这一种方式；
+- 邮件通知模板改用 LiquidJS：变量**区分大小写**，不匹配的变量**静默忽略**
+  （以前自定义正则替换的模板会悄悄变成空白，务必核对告警正文）；
+- Node 最低 20.4（本机 20.19.5 OK）；
+- 徽章接口的 `:duration` 只接受 `24`/`24h`/`30d`/`1y` 这类写法。
+
+### 8.20 `[ -x ]` 判可执行位 —— 一个没人发现的静默失败
+
+**症状**：Kuma 里 `VPS 健康` 推送监控从 11-17 起报
+`push down: ❌ git 镜像 150h 未更新`，而备份本身一直是好的。
+
+**根因**：`restic-backup.sh` 里这段：
+
+```bash
+if [ "$rc" -eq 0 ] && [ "$#" -eq 0 ]; then
+  MIRROR="$HOME/.../ops/backup/git-mirror-push.sh"
+  if [ -x "$MIRROR" ]; then "$MIRROR" || echo "⚠️ ..." ; fi   # ← 这里
+fi
+```
+
+`git-mirror-push.sh` 在 git 里记录的是 **`100644`（不可执行）**、磁盘也是
+`-rw-------`，于是 `[ -x ]` 为假，镜像推送被**静默跳过**，从 11-11 冻结 6 天。
+
+**修法**（两层都做）：
+
+```bash
+# 1) 判断改用 -f + bash，不再依赖可执行位
+if [ -f "$MIRROR" ]; then bash "$MIRROR" || echo "⚠️ git 镜像失败" >&2; fi
+# 2) 文件本身补上可执行位并让 git 记录
+chmod 755 ops/backup/git-mirror-push.sh
+```
+
+**教训**：**退出码位/`-x` 不可靠**（`cp`、`tar`、编辑器、checkout 都可能丢）。
+判"这个脚本能不能跑"应该看"文件在不在"，然后用解释器显式执行。
+同类风险也在 `vps-restic-*.sh`（它们是 `100644`，但目前都由 `bash xxx.sh` 调用，没事）。
+
+**判据**：`cat /srv/git-mirror/.last-run` 的时间应当和最近一次备份同一档；
+健康推送日志出现 `push up: git 镜像 0h 前`。
+
 ### 8.15 排查顺序（省时间的模板）
 
 ```
