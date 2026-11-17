@@ -65,8 +65,10 @@ const RESTIC_CACHE = '/var/cache/dsh-console/restic';
 const GIT_MIRROR_STAMP = '/srv/git-mirror/.last-run';
 const MINISERVE_ENV = '/etc/miniserve/env';
 const MINISERVE_BASE = 'http://100.109.125.37:8081';
+const ARCADE_TOKEN_FILE = '/etc/dsh-arcade/token';
+const ARCADE_BASE = 'http://100.109.125.37:8091';
 
-const SERVICES = ['tailscaled', 'ssh', 'rest-server', 'uptime-kuma', 'ntfy', 'miniserve'];
+const SERVICES = ['tailscaled', 'ssh', 'rest-server', 'uptime-kuma', 'ntfy', 'miniserve', 'dsh-arcade'];
 
 const BASE_ENV = {
   ...process.env,
@@ -426,6 +428,18 @@ async function collectMiniserve() {
   return { ok: true, url: `${MINISERVE_BASE}/${prefix}/` };
 }
 
+// dsh-arcade（休闲角，:8091）同样是「令牌路径」：入口 /<token>/，根路径 404。
+// 令牌只从 /etc/dsh-arcade/token 读取，不硬编码、不进日志、不进错误信息。
+async function collectArcade() {
+  const raw = await readFile(ARCADE_TOKEN_FILE, 'utf8');
+  const token = raw.trim();
+  if (token === '') throw new Error('未配置（/etc/dsh-arcade/token 为空）');
+  // 与 dsh-arcade 服务端同一条格式校验：不合法就不拼 URL，
+  // 免得把脏值当链接发到页面上。
+  if (!/^[a-z0-9]{16,64}$/i.test(token)) throw new Error('未配置（token 格式异常）');
+  return { ok: true, url: `${ARCADE_BASE}/${token}/` };
+}
+
 let securityCache = { at: 0, value: null };
 const SECURITY_TTL_MS = 5 * 60 * 1000;
 
@@ -461,7 +475,7 @@ async function collectSecurity() {
 
 async function collectStatus() {
   const started = Date.now();
-  const [services, disk, memory, tunnels, restic, gitmirror, security, miniserve] = await Promise.all([
+  const [services, disk, memory, tunnels, restic, gitmirror, security, miniserve, arcade] = await Promise.all([
     attempt('services', collectServices),
     attempt('disk', collectDisk),
     attempt('memory', collectMemory),
@@ -470,6 +484,7 @@ async function collectStatus() {
     attempt('gitmirror', collectGitMirror),
     attempt('security', collectSecurity),
     attempt('miniserve', collectMiniserve),
+    attempt('arcade', collectArcade),
   ]);
   return {
     ok: true,
@@ -487,6 +502,7 @@ async function collectStatus() {
     gitmirror,
     security,
     miniserve,
+    arcade,
     busy: actionRunning,
   };
 }

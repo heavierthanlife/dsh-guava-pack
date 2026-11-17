@@ -504,6 +504,17 @@
         <span class="go" aria-hidden="true">↗</span>
       </a>
 
+      <a class="entry disabled" id="arcade-link" target="_blank" rel="noopener" aria-disabled="true">
+        <span class="ico" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="7.5" width="19" height="10" rx="4"/><path d="M7 10.5v4M5 12.5h4"/><circle cx="16" cy="11.5" r="1"/><circle cx="18.5" cy="14" r="1"/></svg>
+        </span>
+        <span class="meta">
+          <b>休闲角</b>
+          <small>小游戏 · 解压 · 小工具 · 令牌路径，离线可用</small>
+        </span>
+        <span class="badge" data-badge="arcade">读取中</span>
+      </a>
+
       <a class="entry disabled" id="miniserve-link" target="_blank" rel="noopener" aria-disabled="true">
         <span class="ico" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H10l2 2h6.5A2.5 2.5 0 0 1 21 9.5v7A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5z"/></svg>
@@ -865,24 +876,54 @@
     });
   }
 
-  function updateMiniserve(m) {
-    var a = document.getElementById('miniserve-link');
+  /**
+   * 把服务端返回的绝对 URL 换到「当前访问 host」上。
+   *
+   * 为什么必须换：控制台可能经 100.109.125.37 打开，也可能经 localhost 打开
+   * （WSL console-forward 兜底，绕开 Windows 系统代理）。服务端只知道 tailnet
+   * 地址，直接用会跳到 localhost 上打不开的 100.x。
+   *
+   * 两处细节：
+   *   · 端口按传进来的目标端口替换（文件和休闲角不在同一个端口）；
+   *   · localhost/127.0.0.1 走 console-forward，**需要链路带上该端口**
+   *     （见 ops/tunnel/console-forward.service 的 -L 列表），否则会出现
+   *     "地址对了但连不上"—— 这不是本函数的 bug，但提示要准确。
+   */
+  function retargetUrl(url, port) {
+    if (!url) return url;
+    return String(url).replace(/^https?:\/\/[^/]+/, location.protocol + '//' + location.hostname + ':' + port);
+  }
+
+  /**
+   * 把「令牌路径」类入口（文件中转 :8081、休闲角 :8091）的卡片刷成可用/不可用。
+   *
+   * 抽成一个函数而不是抄两份：这两处的失败方式完全一样（没配置 → 卡片必须
+   * 变成不可点，而不是留一个点了 404 的链接），抄两份迟早有一份漂移。
+   */
+  function updateTokenEntry(id, info, port, okLabel) {
+    var a = document.getElementById(id);
     if (!a) return;
     var badge = a.querySelector('[data-badge]');
-    if (m && m.ok && m.url) {
-      // 服务端返回的是 http://100.109.125.37:8081/<PREFIX>/，同样换成当前 host，
-      // 否则经 localhost 打开控制台时点"文件中转"会跳到打不开的 100.x。
-      var fixed = m.url.replace(/^https?:\/\/[^/]+/, location.protocol + '//' + location.hostname + ':8081');
-      a.setAttribute('href', fixed);
+    if (info && info.ok && info.url) {
+      a.setAttribute('href', retargetUrl(info.url, port));
       a.classList.remove('disabled');
       a.removeAttribute('aria-disabled');
-      if (badge) { badge.textContent = '打开 ↗'; badge.className = 'badge ok'; }
+      if (badge) { badge.textContent = okLabel || '打开 ↗'; badge.className = 'badge ok'; }
     } else {
+      // 没有链接就是不能点：留 href 等于给用户一个必 404 的卡片。
       a.removeAttribute('href');
       a.classList.add('disabled');
       a.setAttribute('aria-disabled', 'true');
       if (badge) { badge.textContent = '未配置'; badge.className = 'badge bad'; }
     }
+  }
+
+  function updateMiniserve(m) {
+    updateTokenEntry('miniserve-link', m, 8081);
+  }
+
+  function updateArcade(m) {
+    updateTokenEntry('arcade-link', m, 8091);
   }
 
   function renderAll(st) {
@@ -896,6 +937,7 @@
     renderMisc(st);
     updateEntries(st.tunnels);
     updateMiniserve(st.miniserve);
+    updateArcade(st.arcade);
     syncButtons();
   }
 

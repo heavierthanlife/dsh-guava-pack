@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0b0d10">
+<title>休闲角 · DSH</title>
+<link rel="stylesheet" href="shared.css">
+<style>
+  .hero { padding: 22px 16px 6px; max-width: 720px; margin: 0 auto; }
+  .hero h1 { margin: 0 0 6px; font-size: 22px; letter-spacing: .01em; }
+  .hero p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 156px), 1fr));
+    gap: 12px;
+    padding: 18px 16px 28px;
+    max-width: 720px;
+    margin: 0 auto;
+  }
+
+  .card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    /* 整张卡可点：手机上别让用户对准小字 */
+    min-height: 104px;
+    padding: 14px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: linear-gradient(160deg, var(--panel), var(--panel-2));
+    color: inherit;
+    text-decoration: none;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    transition: border-color .14s ease, transform .14s ease;
+  }
+
+  .card:hover, .card:focus-visible { border-color: var(--accent); transform: translateY(-2px); }
+  .card:active { transform: translateY(0); }
+
+  .card .icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px; height: 30px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--bg);
+    flex: none;
+  }
+  .card .icon svg { width: 16px; height: 16px; stroke: var(--accent); fill: none;
+    stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+
+  .card .name { font-size: 14px; font-weight: 600; }
+  .card .desc { font-size: 12px; color: var(--muted); line-height: 1.5; margin-top: auto; }
+
+  .section-title {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 6px 16px 0;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  footer {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 0 16px 32px;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.7;
+  }
+  footer code {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-size: 11px;
+  }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <h1>休闲角</h1>
+</header>
+
+<div class="hero">
+  <h1>随便玩玩</h1>
+  <p>几个不用装、不用登录、断网也能开的小页面。进度只存在你自己的浏览器里。</p>
+</div>
+
+<div class="section-title">游戏</div>
+<div class="grid">
+  <a class="card" href="g2048.html">
+    <span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><rect x="13" y="13" width="8" height="8" rx="1.5"/></svg></span>
+    <span class="name">2048</span>
+    <span class="desc">合并数字到 2048，五秒一局的开胃菜</span>
+  </a>
+  <a class="card" href="snake.html">
+    <span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 6h6a4 4 0 0 1 0 8H8a3 3 0 0 0 0 6h9"/><circle cx="18" cy="6" r="1.5"/></svg></span>
+    <span class="name">贪吃蛇</span>
+    <span class="desc">方向键或滑动，越吃越长</span>
+  </a>
+  <a class="card" href="mines.html">
+    <span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="6"/><path d="M12 7V3M9 4.5 7 2M15 4.5 17 2M5 9 2 8M19 9l3-1"/></svg></span>
+    <span class="name">扫雷</span>
+    <span class="desc">三档难度，长按插旗</span>
+  </a>
+  <a class="card" href="tetris.html">
+    <span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 4h6v6H4zM14 4h6v6h-6zM9 14h6v6H9z"/></svg></span>
+    <span class="name">俄罗斯方块</span>
+    <span class="desc">七种方块，消行加速</span>
+  </a>
+</div>
+
+<div class="section-title">解压</div>
+<div class="grid">
+  <a class="card" href="relax.html">
+    <span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 12c3-4 6-4 9 0s6 4 9 0"/><path d="M3 17c3-4 6-4 9 0s6 4 9 0"/></svg></span>
+    <span class="name">放松一下</span>
+    <span class="desc">白噪音 · 呼吸引导 · 番茄钟</span>
+  </a>
+</div>
+
+<div class="section-title">小工具</div>
+<div class="grid">
+  <a class="card" href="decide.html">
+    <span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 12 12 3M12 12l7.8 4.5"/></svg></span>
+    <span class="name">选择困难</span>
+    <span class="desc">转盘 / 骰子 / 抽签，选项可存</span>
+  </a>
+  <a class="card" href="pixel.html">
+    <span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 20 8 4l12 4-4 12z"/><path d="M10 12h.01M14 10h.01"/></svg></span>
+    <span class="name">像素画板</span>
+    <span class="desc">随手画，能导出 PNG</span>
+  </a>
+</div>
+
+<footer>
+  <p>只在你自己的浏览器里存档（最高分、设置、画板）。换设备不同步。</p>
+  <p>这些页面全部离线可用；没有统计、没有外链、不会联网。</p>
+</footer>
+
+</body>
+</html>

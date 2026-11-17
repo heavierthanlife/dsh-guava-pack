@@ -16,6 +16,7 @@
 | 8080 | TCP | tailnet | ntfy | 手机推送 | topic 在 `/etc/ntfy/topic` |
 | 8090 | TCP | tailnet | dsh-console | **统一图形入口**（状态+动作+各服务跳转） | basic auth，用户名 `dsh` |
 | 8081 | TCP | tailnet | miniserve | 手机↔PC 文件中转（可上传/删除/建目录） | **随机路径前缀当令牌**（Basic 在手机上会被键盘输入搞挂），目录 `/srv/exchange` |
+| 8091 | TCP | tailnet | dsh-arcade | 休闲角（小游戏/解压/小工具，纯静态） | **随机路径令牌**，`/<token>/`；非 root 运行，只发文件。见 [`ops/arcade/`](../arcade/README.md) |
 
 ## 凭据 / 密钥位置（都不进 git）
 
@@ -28,6 +29,7 @@
 | `/etc/miniserve/env` | 600 root | `PREFIX=` 令牌路径（访问 `http://100.109.125.37:8081/<PREFIX>/`） | 手机/平板直接点链接，无需输入 |
 | `/etc/dsh-console/password` | 600 root | 控制台口令（用户名 `dsh`） | 手机/平板打开 `http://100.109.125.37:8090` |
 | `/etc/dsh-console/token` | 600 root | 一键登录令牌（`/?k=<token>`，种 30 天 cookie） | 手机点链接即用，不用手打口令 |
+| `/etc/dsh-arcade/token` | 600 root | 休闲角路径令牌（访问 `http://100.109.125.37:8091/<token>/`） | 控制台「休闲角」入口卡读它拼链接 |
 | `/etc/ntfy/topic` | 640 root:ntfy | 推送 topic（等同访问令牌） | 手机 ntfy App 订阅 |
 | `/etc/kuma/push-tokens.env` | 600 root | Kuma push 监控令牌 | `dsh-health-push.sh` / `dsh-backup-freshness-push.sh` |
 | `/root/.ssh/gitmirror_ed25519` | 600 root | Deploy key（仅当以后要 VPS 直连私有仓库时用） | 当前未启用（镜像由 PC 推送） |

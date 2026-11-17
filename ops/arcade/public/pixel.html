@@ -1,0 +1,613 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0b0d10">
+<title>像素画板 · 休闲角</title>
+<link rel="stylesheet" href="shared.css">
+<style>
+  .toolbar {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin: 0 0 12px;
+  }
+  .toolbar .btn { flex: 1; min-width: 96px; padding: 0 12px; }
+
+  .board-shell {
+    position: relative;
+    padding: 10px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--panel-2);
+    margin: 0 0 14px;
+  }
+  /* touch-action: none 是必须的：手指拖动画格子时不能滚动页面 */
+  .board-wrap {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    max-width: min(100%, 520px);
+    margin: 0 auto;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+    border-radius: 6px;
+    overflow: hidden;
+    background:
+      repeating-conic-gradient(#15181d 0% 25%, #1b1f26 0% 50%) 0 0 / 24px 24px;
+  }
+  .board-wrap canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    touch-action: none;
+    image-rendering: pixelated;
+    cursor: crosshair;
+  }
+
+  .palette {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(var(--tap), 1fr));
+    gap: 8px;
+    margin: 0 0 12px;
+  }
+  .swatch {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    min-height: var(--tap);
+    padding: 0;
+    border: 2px solid var(--line);
+    border-radius: 8px;
+    background: var(--bg);
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .swatch .fill {
+    position: absolute;
+    inset: 5px;
+    border-radius: 5px;
+    background: var(--c, transparent);
+  }
+  .swatch.eraser .fill {
+    background:
+      linear-gradient(45deg, var(--bad) 45%, transparent 45% 55%, var(--bad) 55%),
+      var(--panel-2);
+  }
+  .swatch[aria-pressed="true"] {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-soft);
+  }
+  .swatch[aria-pressed="true"]::after {
+    content: '';
+    position: absolute;
+    right: 3px; top: 3px;
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+
+  .field {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0 0 12px;
+    flex-wrap: wrap;
+  }
+  .field > span { flex: none; font-size: 13px; color: var(--muted); }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip {
+    min-width: var(--tap);
+    min-height: var(--tap);
+    padding: 0 12px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--panel-2);
+    color: var(--muted);
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .chip[aria-pressed="true"] {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+
+  .current {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0 0 12px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .current .chip-color {
+    width: 22px; height: 22px;
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    background: var(--c, transparent);
+    flex: none;
+  }
+
+  .status { margin: 10px 0 0; min-height: 16px; font-size: 12px; color: var(--muted); line-height: 1.5; }
+  .status.warn { color: var(--warn); }
+  .status.ok { color: var(--ok); }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <a class="back" href="index.html" aria-label="返回首页">←</a>
+  <h1>像素画板</h1>
+</header>
+
+<main class="wrap">
+  <div class="field">
+    <span>尺寸</span>
+    <div class="chips" role="group" aria-label="画布尺寸">
+      <button class="chip" type="button" data-size="8" aria-pressed="false">8×8</button>
+      <button class="chip" type="button" data-size="16" aria-pressed="true">16×16</button>
+      <button class="chip" type="button" data-size="32" aria-pressed="false">32×32</button>
+      <button class="chip" type="button" data-size="48" aria-pressed="false">48×48</button>
+    </div>
+  </div>
+
+  <div class="board-shell">
+    <div class="board-wrap" id="boardWrap">
+      <canvas id="board" width="512" height="512" aria-label="像素画布"></canvas>
+    </div>
+  </div>
+
+  <div class="current">
+    <span class="chip-color" id="curColor"></span>
+    <span id="curLabel">当前颜色</span>
+  </div>
+
+  <div class="palette" id="palette" role="group" aria-label="调色板"></div>
+
+  <div class="toolbar">
+    <button class="btn" type="button" id="undoBtn">↶ 撤销</button>
+    <button class="btn" type="button" id="clearBtn">清空</button>
+    <button class="btn primary" type="button" id="exportBtn">导出 PNG</button>
+  </div>
+
+  <p class="status" id="status">用手指（或鼠标）按住拖动就能连续画。</p>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  var KEY = 'arcade.pixel.canvas';
+  var EXPORT_SCALE = 16;   /* 导出时每格 16px */
+  var MAX_UNDO = 12;
+
+  var PALETTE = [
+    '#000000', '#ffffff', '#6fb6ff', '#7ee0a8',
+    '#f2b23e', '#ff6b6b', '#b79cff', '#4fd1c5',
+    '#f0a07c', '#e0d07e', '#8a94a6', '#1f6fe0'
+  ];
+  var ERASER = 'eraser';
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  var board = $('board');
+  var wrap = $('boardWrap');
+  var curColorEl = $('curColor');
+  var curLabelEl = $('curLabel');
+  var statusEl = $('status');
+
+  var size = 16;
+  var cells = new Array(size * size).fill(null);
+  var color = PALETTE[2];
+  var erasing = false;
+  var undoStack = [];
+  var painting = false;
+  var lastIdx = -1;
+  var undoPushed = false;   /* 一笔只压一次撤销栈 */
+
+  function setStatus(text, kind) {
+    if (!statusEl) { return; }
+    statusEl.textContent = text || '';
+    statusEl.className = 'status' + (kind ? ' ' + kind : '');
+  }
+
+  /* ── 存档：存成紧凑字符数组（null → 空串），48×48 也只有几 KB ── */
+  function saveCanvas() {
+    try {
+      var data = { size: size, cells: cells };
+      localStorage.setItem(KEY, JSON.stringify(data));
+    } catch (e) {
+      setStatus('存不进去（可能是隐私模式或空间满了），这次画的内容不会保留。', 'warn');
+    }
+  }
+
+  function loadCanvas() {
+    var saved = null;
+    try {
+      var raw = localStorage.getItem(KEY);
+      if (raw) { saved = JSON.parse(raw); }
+    } catch (e) {
+      saved = null;
+    }
+    if (!saved || typeof saved !== 'object') { return; }
+
+    var s = parseInt(saved.size, 10);
+    if (s !== 8 && s !== 16 && s !== 32 && s !== 48) { s = 16; }
+    size = s;
+    cells = new Array(size * size).fill(null);
+
+    var src = saved.cells;
+    if (Array.isArray(src)) {
+      for (var i = 0; i < cells.length && i < src.length; i++) {
+        var v = src[i];
+        if (typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v)) {
+          cells[i] = v.toLowerCase();
+        }
+      }
+    }
+    renderGroups();
+  }
+
+  /* ── 绘制 ───────────────────────────────────────────── */
+  function ctxOf(canvas) {
+    var c = canvas.getContext('2d');
+    if (c) { c.imageSmoothingEnabled = false; }
+    return c;
+  }
+
+  function drawAll() {
+    var ctx = ctxOf(board);
+    if (!ctx) { return; }
+    var px = board.width / size;
+    ctx.clearRect(0, 0, board.width, board.height);
+
+    for (var y = 0; y < size; y++) {
+      for (var x = 0; x < size; x++) {
+        var c = cells[y * size + x];
+        if (!c) { continue; }
+        ctx.fillStyle = c;
+        ctx.fillRect(Math.floor(x * px), Math.floor(y * px), Math.ceil(px), Math.ceil(px));
+      }
+    }
+
+    /* 网格线：格子多的时候画淡一点，避免糊成一片 */
+    if (px >= 5) {
+      ctx.strokeStyle = 'rgba(255, 255, 255, ' + (size > 32 ? '0.06' : '0.09') + ')';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (var i = 1; i < size; i++) {
+        var p = Math.round(i * px) + 0.5;
+        ctx.moveTo(p, 0); ctx.lineTo(p, board.height);
+        ctx.moveTo(0, p); ctx.lineTo(board.width, p);
+      }
+      ctx.stroke();
+    }
+  }
+
+  /* ── 撤销栈（最多 12 步） ───────────────────────────── */
+  function pushUndo() {
+    undoStack.push({ size: size, cells: cells.slice() });
+    if (undoStack.length > MAX_UNDO) { undoStack.shift(); }
+  }
+
+  function undo() {
+    var prev = undoStack.pop();
+    if (!prev) {
+      setStatus('没有可撤销的操作了。', 'warn');
+      return;
+    }
+    size = prev.size;
+    cells = prev.cells.slice();
+    renderGroups();
+    drawAll();
+    saveCanvas();
+    setStatus('已撤销一步。', 'ok');
+  }
+
+  /* ── 指针事件：按住拖动连续画 ───────────────────────── */
+  function idxAt(ev) {
+    var rect = board.getBoundingClientRect();
+    if (!rect.width || !rect.height) { return -1; }
+    var x = Math.floor((ev.clientX - rect.left) / rect.width * size);
+    var y = Math.floor((ev.clientY - rect.top) / rect.height * size);
+    if (x < 0 || y < 0 || x >= size || y >= size) { return -1; }
+    return y * size + x;
+  }
+
+  function paintAt(ev) {
+    var idx = idxAt(ev);
+    if (idx < 0 || idx === lastIdx) { return; }
+    lastIdx = idx;
+    var v = erasing ? null : color;
+    if (cells[idx] === v) { return; }
+    /* 只在真的要改格子时才压一次撤销栈，空点击不占位置 */
+    if (!undoPushed) {
+      pushUndo();
+      undoPushed = true;
+    }
+    cells[idx] = v;
+    paintCell(idx);
+  }
+
+  /* 只重绘一个格子，拖动时不整块重画，省电 */
+  function paintCell(idx) {
+    var ctx = ctxOf(board);
+    if (!ctx) { return; }
+    var px = board.width / size;
+    var x = idx % size;
+    var y = Math.floor(idx / size);
+    ctx.clearRect(Math.floor(x * px), Math.floor(y * px), Math.ceil(px), Math.ceil(px));
+    if (cells[idx]) {
+      ctx.fillStyle = cells[idx];
+      ctx.fillRect(Math.floor(x * px), Math.floor(y * px), Math.ceil(px), Math.ceil(px));
+    }
+    /* 补回这个格子四条边上的网格线 */
+    if (px >= 5) {
+      ctx.strokeStyle = 'rgba(255, 255, 255, ' + (size > 32 ? '0.06' : '0.09') + ')';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      var l = Math.round(x * px) + 0.5;
+      var t = Math.round(y * px) + 0.5;
+      var r = Math.round((x + 1) * px) - 0.5;
+      var b = Math.round((y + 1) * px) - 0.5;
+      ctx.moveTo(l, t); ctx.lineTo(l, b);
+      ctx.moveTo(r, t); ctx.lineTo(r, b);
+      ctx.moveTo(l, t); ctx.lineTo(r, t);
+      ctx.moveTo(l, b); ctx.lineTo(r, b);
+      ctx.stroke();
+    }
+  }
+
+  function onDown(ev) {
+    if (ev.button !== undefined && ev.button !== 0 && ev.pointerType === 'mouse') { return; }
+    painting = true;
+    lastIdx = -1;
+    undoPushed = false;
+    try { board.setPointerCapture(ev.pointerId); } catch (e) { /* 老浏览器 */ }
+    paintAt(ev);
+    ev.preventDefault();
+  }
+
+  function onMove(ev) {
+    if (!painting) { return; }
+    paintAt(ev);
+    ev.preventDefault();
+  }
+
+  function onUp(ev) {
+    if (!painting) { return; }
+    painting = false;
+    lastIdx = -1;
+    var didPaint = undoPushed;
+    undoPushed = false;
+    try { board.releasePointerCapture(ev.pointerId); } catch (e) { /* ignore */ }
+    /* 空笔画（点到画布外、或点到的格子本来就是这个色）不用存档 */
+    if (didPaint) { saveCanvas(); }
+    ev.preventDefault();
+  }
+
+  if (board) {
+    board.addEventListener('pointerdown', onDown);
+    board.addEventListener('pointermove', onMove);
+    board.addEventListener('pointerup', onUp);
+    board.addEventListener('pointercancel', onUp);
+    board.addEventListener('pointerleave', function (ev) {
+      /* 鼠标移出画布也算一次落笔结束 */
+      if (painting && ev.pointerType === 'mouse') { onUp(ev); }
+    });
+    /* 长按不要弹系统菜单，否则拖动会断 */
+    board.addEventListener('contextmenu', function (ev) { ev.preventDefault(); });
+  }
+
+  /* ── 尺寸切换 ───────────────────────────────────────── */
+  function setSize(next) {
+    if (next === size) { return; }
+    pushUndo();
+    var oldSize = size;
+    var old = cells;
+    var fresh = new Array(next * next).fill(null);
+
+    /* 内容尽量保留在左上角，不直接丢掉 */
+    var copy = Math.min(oldSize, next);
+    for (var y = 0; y < copy; y++) {
+      for (var x = 0; x < copy; x++) {
+        fresh[y * next + x] = old[y * oldSize + x];
+      }
+    }
+    size = next;
+    cells = fresh;
+    renderGroups();
+    drawAll();
+    saveCanvas();
+    setStatus(next > oldSize ? '放大了，原来的内容留在左上角。' : '缩小了，超出范围的部分没了（可撤销）。', next > oldSize ? '' : 'warn');
+  }
+
+  function renderGroups() {
+    var chips = document.querySelectorAll('[data-size]');
+    for (var i = 0; i < chips.length; i++) {
+      var on = parseInt(chips[i].getAttribute('data-size'), 10) === size;
+      chips[i].setAttribute('aria-pressed', on ? 'true' : 'false');
+    }
+  }
+
+  var sizeChips = document.querySelectorAll('[data-size]');
+  for (var si = 0; si < sizeChips.length; si++) {
+    (function (btn) {
+      btn.addEventListener('click', function () {
+        setSize(parseInt(btn.getAttribute('data-size'), 10));
+      });
+    })(sizeChips[si]);
+  }
+
+  /* ── 调色板 ─────────────────────────────────────────── */
+  function renderPalette() {
+    var box = $('palette');
+    if (!box) { return; }
+    box.textContent = '';
+
+    for (var i = 0; i < PALETTE.length; i++) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'swatch';
+      b.style.setProperty('--c', PALETTE[i]);
+      b.setAttribute('aria-label', '颜色 ' + PALETTE[i]);
+      b.setAttribute('aria-pressed', (!erasing && color === PALETTE[i]) ? 'true' : 'false');
+      var fill = document.createElement('span');
+      fill.className = 'fill';
+      b.appendChild(fill);
+      b.addEventListener('click', (function (hex) {
+        return function () {
+          color = hex;
+          erasing = false;
+          syncCurrent();
+        };
+      })(PALETTE[i]));
+      box.appendChild(b);
+    }
+
+    var er = document.createElement('button');
+    er.type = 'button';
+    er.className = 'swatch eraser';
+    er.setAttribute('aria-label', '橡皮');
+    er.setAttribute('aria-pressed', erasing ? 'true' : 'false');
+    var erFill = document.createElement('span');
+    erFill.className = 'fill';
+    er.appendChild(erFill);
+    er.addEventListener('click', function () {
+      erasing = true;
+      syncCurrent();
+    });
+    box.appendChild(er);
+  }
+
+  function syncCurrent() {
+    var swatches = document.querySelectorAll('.swatch');
+    for (var i = 0; i < swatches.length; i++) {
+      var isEraser = swatches[i].classList.contains('eraser');
+      var on = isEraser ? erasing : (!erasing && swatches[i].getAttribute('aria-label') === '颜色 ' + color);
+      swatches[i].setAttribute('aria-pressed', on ? 'true' : 'false');
+    }
+    if (curColorEl) {
+      curColorEl.style.setProperty('--c', erasing ? 'transparent' : color);
+      curColorEl.style.background = erasing ? 'var(--panel)' : color;
+    }
+    if (curLabelEl) {
+      curLabelEl.textContent = erasing ? '橡皮（擦成透明）' : '当前颜色 ' + color.toUpperCase();
+    }
+  }
+
+  /* ── 清空 / 撤销 / 导出 ─────────────────────────────── */
+  var clearBtn = $('clearBtn');
+  if (clearBtn) {
+    clearBtn.addEventListener('click', function () {
+      pushUndo();
+      cells = new Array(size * size).fill(null);
+      drawAll();
+      saveCanvas();
+      setStatus('清空了。点撤销可以找回。', 'ok');
+    });
+  }
+
+  var undoBtn = $('undoBtn');
+  if (undoBtn) { undoBtn.addEventListener('click', undo); }
+
+  var exportBtn = $('exportBtn');
+  if (exportBtn) {
+    exportBtn.addEventListener('click', function () {
+      try {
+        var out = document.createElement('canvas');
+        out.width = size * EXPORT_SCALE;
+        out.height = size * EXPORT_SCALE;
+        var octx = out.getContext('2d');
+        if (!octx) { throw new Error('no 2d'); }
+        octx.imageSmoothingEnabled = false;
+        octx.clearRect(0, 0, out.width, out.height);
+        for (var y = 0; y < size; y++) {
+          for (var x = 0; x < size; x++) {
+            var c = cells[y * size + x];
+            if (!c) { continue; }
+            octx.fillStyle = c;
+            octx.fillRect(x * EXPORT_SCALE, y * EXPORT_SCALE, EXPORT_SCALE, EXPORT_SCALE);
+          }
+        }
+
+        if (!out.toBlob) { throw new Error('no toBlob'); }
+        out.toBlob(function (blob) {
+          if (!blob) {
+            setStatus('导出失败，换个浏览器试试。', 'warn');
+            return;
+          }
+          var url = URL.createObjectURL(blob);
+          var a = document.createElement('a');
+          a.href = url;
+          a.download = 'pixel-' + size + 'x' + size + '.png';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          window.setTimeout(function () {
+            try { URL.revokeObjectURL(url); } catch (e) { /* ignore */ }
+          }, 4000);
+          setStatus('已导出 pixel-' + size + 'x' + size + '.png（' + out.width + '×' + out.height + '）', 'ok');
+        }, 'image/png');
+      } catch (e) {
+        setStatus('这个浏览器导出不了 PNG。', 'warn');
+      }
+    });
+  }
+
+  /* ── 页面隐藏：没有动画要停，但别在后台做任何事 ─────── */
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) {
+      if (painting) {
+        /* 手指还在屏上时被切走：收笔并落一次存档 */
+        painting = false;
+        lastIdx = -1;
+        saveCanvas();
+      }
+    } else {
+      /* 回来时重画一次，防止画布被系统丢弃后变空白 */
+      drawAll();
+    }
+  });
+
+  /* ── 尺寸变化：canvas 的 CSS 尺寸跟随容器，重新画一遍保证清晰 ── */
+  var resizeTimer = null;
+  function resizeBoard() {
+    if (document.hidden) { return; }
+    if (!wrap) { return; }
+    var rect = wrap.getBoundingClientRect();
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var want = Math.max(64, Math.round(Math.min(rect.width, rect.height) * dpr));
+    if (board && want > 0 && Math.abs(board.width - want) > 8) {
+      board.width = want;
+      board.height = want;
+      drawAll();
+    }
+  }
+  window.addEventListener('resize', function () {
+    window.clearTimeout(resizeTimer);
+    resizeTimer = window.setTimeout(resizeBoard, 150);
+  });
+
+  /* ── 启动 ───────────────────────────────────────────── */
+  loadCanvas();
+  renderPalette();
+  syncCurrent();
+  renderGroups();
+  board.width = 512;
+  board.height = 512;
+  drawAll();
+  resizeBoard();
+  setStatus('按住拖动就能连续画。画完可以导出 PNG。', '');
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,965 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0b0d10">
+<title>选择困难 · 休闲角</title>
+<link rel="stylesheet" href="shared.css">
+<style>
+  .seg {
+    display: flex;
+    gap: 4px;
+    padding: 4px;
+    margin-bottom: 14px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--panel-2);
+  }
+  .seg button {
+    flex: 1;
+    min-height: var(--tap);
+    padding: 0 8px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--muted);
+    font: inherit;
+    font-size: 14px;
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .seg button[aria-selected="true"] {
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  .panel {
+    padding: 16px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: linear-gradient(160deg, var(--panel), var(--panel-2));
+  }
+  .panel h2 { margin: 0 0 4px; font-size: 15px; font-weight: 600; }
+  .panel .lead { margin: 0 0 14px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+
+  /* ── 选项列表 ─────────────────────────────── */
+  .opt-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 0 0 12px;
+    max-height: 190px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .opt-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 4px 4px 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel-2);
+  }
+  .opt-row .dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    flex: none;
+  }
+  .opt-row .txt {
+    flex: 1;
+    min-width: 0;
+    font-size: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .opt-row .del {
+    flex: none;
+    width: var(--tap);
+    height: var(--tap);
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--muted);
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .opt-row .del:hover { color: var(--bad); }
+
+  .add-row { display: flex; gap: 8px; margin: 0 0 14px; }
+  .add-row input {
+    flex: 1;
+    min-width: 0;
+    min-height: var(--tap);
+    padding: 0 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel-2);
+    color: var(--text);
+    font: inherit;
+    font-size: 14px;
+  }
+  .add-row input:focus { outline: none; border-color: var(--accent); }
+  .add-row .btn { flex: none; }
+
+  .bulk { margin: 0 0 14px; }
+  .bulk textarea {
+    display: block;
+    width: 100%;
+    min-height: 96px;
+    padding: 10px 12px;
+    margin: 0 0 8px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel-2);
+    color: var(--text);
+    font: inherit;
+    font-size: 14px;
+    line-height: 1.6;
+    resize: vertical;
+  }
+  .bulk textarea:focus { outline: none; border-color: var(--accent); }
+
+  /* ── 转盘 ─────────────────────────────────── */
+  .wheel-stage {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 8px;
+    width: min(84vw, 320px);
+    height: min(84vw, 320px);
+  }
+  .wheel-stage svg { width: 100%; height: 100%; display: block; transform: rotate(0deg); }
+
+  .pointer {
+    position: absolute;
+    top: -2px;
+    left: 50%;
+    width: 0; height: 0;
+    transform: translateX(-50%);
+    border-left: 10px solid transparent;
+    border-right: 10px solid transparent;
+    border-top: 18px solid var(--accent);
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, .6));
+    pointer-events: none;
+    z-index: 2;
+  }
+  .wheel-hub {
+    position: absolute;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 56px; height: 56px;
+    border: 1px solid var(--line);
+    border-radius: 50%;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 600;
+    pointer-events: none;
+  }
+
+  .result {
+    margin: 12px 0 0;
+    padding: 14px;
+    min-height: 54px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--panel-2);
+    text-align: center;
+    font-size: 20px;
+    font-weight: 600;
+    line-height: 1.3;
+    word-break: break-word;
+    color: var(--muted);
+  }
+  .result.won {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+
+  /* ── 骰子 ─────────────────────────────────── */
+  .dice-count {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0 0 14px;
+  }
+  .dice-count > span { flex: none; font-size: 13px; color: var(--muted); }
+  .dice-count .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip {
+    min-width: var(--tap);
+    min-height: var(--tap);
+    padding: 0 12px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--panel-2);
+    color: var(--muted);
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .chip[aria-pressed="true"] {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+
+  .dice-stage {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    min-height: 120px;
+    padding: 12px;
+    margin: 0 0 6px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--panel-2);
+  }
+  .die {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    grid-template-rows: repeat(3, 1fr);
+    gap: 3px;
+    width: 58px; height: 58px;
+    padding: 8px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--bg);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .02);
+  }
+  .die i {
+    display: block;
+    border-radius: 50%;
+    background: transparent;
+  }
+  .die i.on { background: var(--text); }
+  .die.rolling {
+    animation: tumble .5s linear infinite;
+    border-color: var(--accent);
+  }
+  @keyframes tumble {
+    0%   { transform: rotate(0deg)   translateY(0)    scale(1); }
+    25%  { transform: rotate(90deg)  translateY(-6px) scale(1.04); }
+    50%  { transform: rotate(180deg) translateY(0)    scale(.97); }
+    75%  { transform: rotate(270deg) translateY(-4px) scale(1.03); }
+    100% { transform: rotate(360deg) translateY(0)    scale(1); }
+  }
+
+  .dice-total {
+    margin: 10px 0 14px;
+    text-align: center;
+    font-size: 13px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .dice-total strong {
+    color: var(--text);
+    font-size: 22px;
+    margin-left: 6px;
+  }
+
+  /* ── 抽签 ─────────────────────────────────── */
+  .draw-slot {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 96px;
+    margin: 0 0 10px;
+    padding: 14px;
+    border: 1px dashed var(--line);
+    border-radius: var(--radius);
+    background: var(--panel-2);
+    text-align: center;
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--muted);
+    word-break: break-word;
+  }
+  .draw-slot.picked {
+    border-style: solid;
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+  .draw-slot.pop { animation: pop .32s ease-out; }
+  @keyframes pop {
+    from { transform: scale(.94); opacity: .4; }
+    to   { transform: scale(1);   opacity: 1; }
+  }
+
+  .draw-stats {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    margin: 0 0 14px;
+    font-size: 12px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+  .actions .btn { flex: 1; min-width: 130px; }
+
+  .status { margin: 12px 0 0; min-height: 16px; font-size: 12px; color: var(--muted); line-height: 1.5; }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <a class="back" href="index.html" aria-label="返回首页">←</a>
+  <h1>选择困难</h1>
+</header>
+
+<main class="wrap">
+  <div class="seg" role="tablist" aria-label="决定方式">
+    <button type="button" role="tab" id="tab-btn-wheel" aria-selected="true" aria-controls="tab-wheel" data-tab="wheel">转盘</button>
+    <button type="button" role="tab" id="tab-btn-dice" aria-selected="false" aria-controls="tab-dice" data-tab="dice">骰子</button>
+    <button type="button" role="tab" id="tab-btn-draw" aria-selected="false" aria-controls="tab-draw" data-tab="draw">抽签</button>
+  </div>
+
+  <!-- 三块共用同一组选项 -->
+  <section class="panel">
+    <h2>选项</h2>
+    <p class="lead">三个模式共用这份列表。每行一个，最多 12 个；会存在这台设备上。</p>
+    <div class="opt-list" id="optList" aria-live="polite"></div>
+    <div class="add-row">
+      <input id="optInput" type="text" maxlength="24" placeholder="加一个选项…" enterkeyhint="done" autocomplete="off">
+      <button class="btn" type="button" id="optAdd">添加</button>
+    </div>
+
+    <details class="bulk">
+      <summary class="muted small" style="min-height:var(--tap);display:flex;align-items:center;cursor:pointer;">批量：每行一个</summary>
+      <div style="padding-top:8px;">
+        <textarea id="optBulk" placeholder="火锅&#10;寿司&#10;面" autocomplete="off" spellcheck="false"></textarea>
+        <div class="row">
+          <button class="btn" type="button" id="bulkApply">替换列表</button>
+          <button class="btn ghost" type="button" id="bulkDefaults">重置默认</button>
+        </div>
+      </div>
+    </details>
+  </section>
+
+  <!-- ── 转盘 ─────────────────────────────────────────── -->
+  <section class="panel hidden" id="tab-wheel" role="tabpanel" aria-labelledby="tab-btn-wheel">
+    <h2>转盘</h2>
+    <p class="lead">点转盘或按钮转一次，指针停在哪就是哪个。</p>
+
+    <div class="wheel-stage" id="wheelStage">
+      <div class="pointer" aria-hidden="true"></div>
+      <svg id="wheel" viewBox="0 0 200 200" role="img" aria-label="选项转盘"></svg>
+      <div class="wheel-hub">转</div>
+    </div>
+
+    <div class="actions">
+      <button class="btn primary" type="button" id="spinBtn">转一转</button>
+    </div>
+    <div class="result" id="wheelResult" aria-live="polite">还没转</div>
+  </section>
+
+  <!-- ── 骰子 ─────────────────────────────────────────── -->
+  <section class="panel hidden" id="tab-dice" role="tabpanel" aria-labelledby="tab-btn-dice">
+    <h2>骰子</h2>
+    <p class="lead">选好个数，一把掷出去。动画只是视觉上的滚动，结果在停下时定。</p>
+
+    <div class="dice-count">
+      <span>个数</span>
+      <div class="chips" role="group" aria-label="骰子个数">
+        <button class="chip" type="button" data-count="1" aria-pressed="true">1</button>
+        <button class="chip" type="button" data-count="2" aria-pressed="false">2</button>
+        <button class="chip" type="button" data-count="3" aria-pressed="false">3</button>
+        <button class="chip" type="button" data-count="4" aria-pressed="false">4</button>
+        <button class="chip" type="button" data-count="5" aria-pressed="false">5</button>
+        <button class="chip" type="button" data-count="6" aria-pressed="false">6</button>
+      </div>
+    </div>
+
+    <div class="dice-stage" id="diceStage"></div>
+    <div class="dice-total" id="diceTotal">总点数<strong>—</strong></div>
+
+    <div class="actions">
+      <button class="btn primary" type="button" id="rollBtn">掷骰子</button>
+    </div>
+    <p class="status" id="diceStatus"></p>
+  </section>
+
+  <!-- ── 抽签 ─────────────────────────────────────────── -->
+  <section class="panel hidden" id="tab-draw" role="tabpanel" aria-labelledby="tab-btn-draw">
+    <h2>抽签</h2>
+    <p class="lead">不放回地抽，抽过的不会再出现。抽完可以重置。</p>
+
+    <div class="draw-slot" id="drawSlot" aria-live="polite">点下面开始抽</div>
+
+    <div class="draw-stats">
+      <span id="drawLeft">还剩 — 个</span>
+      <span id="drawPicked">已抽 0</span>
+    </div>
+
+    <div class="actions">
+      <button class="btn primary" type="button" id="drawBtn">抽一个</button>
+      <button class="btn ghost" type="button" id="drawReset">重置</button>
+    </div>
+    <p class="status" id="drawStatus"></p>
+  </section>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  var KEY = 'arcade.decide.options';
+  var MAX_OPTIONS = 12;
+  var COLORS = ['#6fb6ff', '#7ee0a8', '#f2b23e', '#ff8fa3', '#b79cff', '#4fd1c5',
+                '#f0a07c', '#a8d8ff', '#8ee07e', '#e0d07e', '#7ecbe0', '#d78ee0'];
+
+  var DEFAULT_OPTIONS = ['火锅', '寿司', '面', '咖喱'];
+
+  var options = [];
+  var $ = function (id) { return document.getElementById(id); };
+
+  function cleanName(v) {
+    return String(v == null ? '' : v).replace(/\s+/g, ' ').trim().slice(0, 24);
+  }
+
+  /* ── 存档：读写都包 try ─────────────────────────────── */
+  function loadOptions() {
+    var list = null;
+    try {
+      var raw = localStorage.getItem(KEY);
+      if (raw) {
+        var parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) { list = parsed; }
+      }
+    } catch (e) {
+      list = null;
+    }
+    if (!list) { list = DEFAULT_OPTIONS.slice(); }
+    var out = [];
+    for (var i = 0; i < list.length && out.length < MAX_OPTIONS; i++) {
+      var name = cleanName(list[i]);
+      if (name && out.indexOf(name) < 0) { out.push(name); }
+    }
+    options = out.length ? out : DEFAULT_OPTIONS.slice();
+  }
+
+  function saveOptions() {
+    try {
+      localStorage.setItem(KEY, JSON.stringify(options));
+    } catch (e) {
+      /* 存不了就算了，本次照样能用 */
+    }
+  }
+
+  function colorAt(i) {
+    return COLORS[i % COLORS.length];
+  }
+
+  /* ── 选项列表渲染 ───────────────────────────────────── */
+  function renderOptions() {
+    var box = $('optList');
+    if (!box) { return; }
+    box.textContent = '';
+    for (var i = 0; i < options.length; i++) {
+      var row = document.createElement('div');
+      row.className = 'opt-row';
+
+      var dot = document.createElement('span');
+      dot.className = 'dot';
+      dot.style.background = colorAt(i);
+
+      var txt = document.createElement('span');
+      txt.className = 'txt';
+      txt.textContent = options[i];
+
+      var del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'del';
+      del.setAttribute('aria-label', '删除 ' + options[i]);
+      del.textContent = '✕';
+      del.addEventListener('click', (function (idx) {
+        return function () {
+          options.splice(idx, 1);
+          saveOptions();
+          afterOptionsChanged();
+        };
+      })(i));
+
+      row.appendChild(dot);
+      row.appendChild(txt);
+      row.appendChild(del);
+      box.appendChild(row);
+    }
+    if (!options.length) {
+      var empty = document.createElement('p');
+      empty.className = 'muted small';
+      empty.style.margin = '0';
+      empty.textContent = '还没有选项。下面加几个，或者点"重置默认"。';
+      box.appendChild(empty);
+    }
+  }
+
+  function afterOptionsChanged() {
+    renderOptions();
+    drawReset(true);
+    renderWheel();
+    setStatus('drawStatus', '', false);
+  }
+
+  function addOption() {
+    var input = $('optInput');
+    if (!input) { return; }
+    var name = cleanName(input.value);
+    if (!name) { return; }
+    if (options.length >= MAX_OPTIONS) {
+      setStatus('drawStatus', '最多 ' + MAX_OPTIONS + ' 个，先删一个。', false);
+      return;
+    }
+    if (options.indexOf(name) >= 0) {
+      setStatus('drawStatus', '"' + name + '" 已经在列表里了。', false);
+      input.value = '';
+      return;
+    }
+    options.push(name);
+    input.value = '';
+    saveOptions();
+    afterOptionsChanged();
+    setStatus('drawStatus', '加好了：' + name, true);
+  }
+
+  var optAdd = $('optAdd');
+  if (optAdd) { optAdd.addEventListener('click', addOption); }
+  var optInput = $('optInput');
+  if (optInput) {
+    optInput.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter') { ev.preventDefault(); addOption(); }
+    });
+  }
+
+  /* 批量：每行一个，一次性替换整份列表 */
+  function applyBulk(text) {
+    var lines = String(text || '').split(/\r?\n/);
+    var next = [];
+    for (var i = 0; i < lines.length; i++) {
+      var name = cleanName(lines[i]);
+      if (!name) { continue; }
+      if (next.indexOf(name) >= 0) { continue; }
+      next.push(name);
+      if (next.length >= MAX_OPTIONS) { break; }
+    }
+    if (!next.length) {
+      setStatus('drawStatus', '没读到有效选项，每行写一个。', false);
+      return;
+    }
+    options = next;
+    saveOptions();
+    afterOptionsChanged();
+    syncBulkText();
+    setStatus('drawStatus', '已换成 ' + options.length + ' 个选项。', true);
+  }
+
+  function syncBulkText() {
+    var ta = $('optBulk');
+    if (ta && document.activeElement !== ta) { ta.value = options.join('\n'); }
+  }
+
+  var bulkApply = $('bulkApply');
+  if (bulkApply) {
+    bulkApply.addEventListener('click', function () {
+      var ta = $('optBulk');
+      applyBulk(ta ? ta.value : '');
+    });
+  }
+  var bulkDefaults = $('bulkDefaults');
+  if (bulkDefaults) {
+    bulkDefaults.addEventListener('click', function () {
+      options = DEFAULT_OPTIONS.slice();
+      saveOptions();
+      afterOptionsChanged();
+      syncBulkText();
+      setStatus('drawStatus', '已恢复默认选项。', true);
+    });
+  }
+
+  function setStatus(id, text, good) {
+    var el = $(id);
+    if (!el) { return; }
+    el.textContent = text || '';
+    el.style.color = good ? 'var(--ok)' : 'var(--muted)';
+  }
+
+  /* ── 标签页 ─────────────────────────────────────────── */
+  var TABS = ['wheel', 'dice', 'draw'];
+  var TAB_TITLES = { wheel: '转盘 · 选择困难', dice: '骰子 · 选择困难', draw: '抽签 · 选择困难' };
+
+  function setTab(name) {
+    if (TABS.indexOf(name) < 0) { name = 'wheel'; }
+    for (var i = 0; i < TABS.length; i++) {
+      var btn = $('tab-btn-' + TABS[i]);
+      var panel = $('tab-' + TABS[i]);
+      var on = TABS[i] === name;
+      if (btn) { btn.setAttribute('aria-selected', on ? 'true' : 'false'); }
+      if (panel) { panel.classList.toggle('hidden', !on); }
+    }
+    document.title = TAB_TITLES[name];
+    if (name === 'wheel') { renderWheel(); }
+  }
+
+  var tabButtons = document.querySelectorAll('[data-tab]');
+  for (var ti = 0; ti < tabButtons.length; ti++) {
+    (function (btn) {
+      btn.addEventListener('click', function () { setTab(btn.getAttribute('data-tab')); });
+    })(tabButtons[ti]);
+  }
+
+  /* ── 转盘 ───────────────────────────────────────────── */
+  var wheelSvg = $('wheel');
+  var spinBtn = $('spinBtn');
+  var wheelResult = $('wheelResult');
+  var spinning = false;
+  var wheelAngle = 0;      /* 当前累计角度（度，顺时针） */
+
+  function polar(cx, cy, r, deg) {
+    var rad = (deg - 90) * Math.PI / 180;
+    return [cx + r * Math.cos(rad), cy + r * Math.sin(rad)];
+  }
+
+  function arcPath(cx, cy, r, from, to) {
+    var a = polar(cx, cy, r, from);
+    var b = polar(cx, cy, r, to);
+    var large = (to - from) > 180 ? 1 : 0;
+    return 'M' + cx + ' ' + cy +
+           ' L' + a[0].toFixed(2) + ' ' + a[1].toFixed(2) +
+           ' A' + r + ' ' + r + ' 0 ' + large + ' 1 ' + b[0].toFixed(2) + ' ' + b[1].toFixed(2) +
+           ' Z';
+  }
+
+  /* 拼 SVG 字符串而不是 createElementNS：不用写命名空间 URL，
+     页面里也就不会出现任何 http(s) 字样。文本一律先转义。 */
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (ch) {
+      if (ch === '&') { return '&amp;'; }
+      if (ch === '<') { return '&lt;'; }
+      if (ch === '>') { return '&gt;'; }
+      if (ch === '"') { return '&quot;'; }
+      return '&#39;';
+    });
+  }
+
+  function renderWheel() {
+    if (!wheelSvg) { return; }
+    var n = options.length;
+    var parts = ['<circle cx="100" cy="100" r="96" fill="#14171c" stroke="#262b33" stroke-width="1"/>'];
+    if (!n) {
+      wheelSvg.innerHTML = parts.join('');
+      return;
+    }
+
+    var slice = 360 / n;
+    for (var i = 0; i < n; i++) {
+      var from = i * slice;
+      var to = from + slice;
+      parts.push('<path d="' + arcPath(100, 100, 92, from, to) +
+        '" fill="' + colorAt(i) + '" fill-opacity="' + (n > 1 ? '0.68' : '0.5') +
+        '" stroke="#0b0d10" stroke-width="1"/>');
+
+      /* 标签：沿中角放在半径 58 处，超过 5 个字截断 */
+      var mid = from + slice / 2;
+      var p = polar(100, 100, 58, mid);
+      var label = options[i];
+      if (label.length > 5) { label = label.slice(0, 5) + '…'; }
+      parts.push('<text x="' + p[0].toFixed(2) + '" y="' + p[1].toFixed(2) +
+        '" text-anchor="middle" dominant-baseline="middle" font-size="' + (n > 8 ? 9 : 11) +
+        '" font-weight="600" fill="#0b0d10">' + esc(label) + '</text>');
+    }
+    parts.push('<circle cx="100" cy="100" r="20" fill="#0b0d10"/>');
+    wheelSvg.innerHTML = parts.join('');
+    wheelSvg.style.transform = 'rotate(' + wheelAngle + 'deg)';
+  }
+
+  function spinWheel() {
+    if (spinning) { return; }
+    if (!options.length) {
+      wheelResult.textContent = '先加选项';
+      wheelResult.classList.remove('won');
+      return;
+    }
+    spinning = true;
+    if (spinBtn) { spinBtn.disabled = true; }
+    wheelResult.textContent = '转…';
+    wheelResult.classList.remove('won');
+
+    /* 顺时针随机多转几圈，最后停在哪由最终角度决定 */
+    var turns = 4 + Math.floor(Math.random() * 4);
+    var extra = Math.random() * 360;
+    var start = wheelAngle % 360;
+    var target = start + turns * 360 + extra;
+
+    if (wheelSvg) {
+      /* 强制回流，保证下一帧的 transition 真正生效 */
+      void wheelSvg.getBoundingClientRect();
+      wheelSvg.style.transition = 'transform 4.2s cubic-bezier(.16,.72,.16,1)';
+      wheelSvg.style.transform = 'rotate(' + target + 'deg)';
+    }
+    wheelAngle = target;
+
+    window.clearTimeout(spinTimer);
+    spinTimer = window.setTimeout(function () {
+      spinning = false;
+      if (spinBtn) { spinBtn.disabled = false; }
+      revealWheel(target);
+    }, 4300);
+  }
+  var spinTimer = null;
+
+  /* 指针在正上方（12 点方向）；扇形按 0° 从 12 点顺时针排布，
+     所以落点索引 = 360 - (角度 mod 360) 落在的扇区 */
+  function revealWheel(angle) {
+    var n = options.length;
+    if (!n) { return; }
+    var norm = ((angle % 360) + 360) % 360;
+    var pointer = (360 - norm) % 360;
+    var slice = 360 / n;
+    var idx = Math.floor(pointer / slice) % n;
+    var pick = options[idx];
+    if (wheelResult) {
+      wheelResult.textContent = pick;
+      wheelResult.classList.add('won');
+    }
+    if (wheelSvg) {
+      /* 停稳后把累计角度归一化，免得数字越堆越大 */
+      wheelSvg.style.transition = 'none';
+      wheelSvg.style.transform = 'rotate(' + norm + 'deg)';
+    }
+    wheelAngle = norm;
+    return pick;
+  }
+
+  var stageEl = $('wheelStage');
+  if (stageEl) { stageEl.addEventListener('click', spinWheel); }
+  if (spinBtn) { spinBtn.addEventListener('click', spinWheel); }
+
+  /* ── 骰子 ───────────────────────────────────────────── */
+  var diceStage = $('diceStage');
+  var diceTotal = $('diceTotal');
+  var rollBtn = $('rollBtn');
+  var diceCount = 1;
+  var diceValues = [];
+  var rolling = false;
+  var rollTimer = null;
+
+  /* 每个点数在 3×3 九宫格里点亮哪些格子 */
+  var PIPS = {
+    1: [4],
+    2: [0, 8],
+    3: [0, 4, 8],
+    4: [0, 2, 6, 8],
+    5: [0, 2, 4, 6, 8],
+    6: [0, 2, 3, 5, 6, 8]
+  };
+
+  function renderDice() {
+    if (!diceStage) { return; }
+    diceStage.textContent = '';
+    for (var i = 0; i < diceCount; i++) {
+      var die = document.createElement('div');
+      die.className = 'die';
+      if (rolling) { die.classList.add('rolling'); }
+      var v = diceValues[i] || 1;
+      var on = PIPS[v] || PIPS[1];
+      for (var c = 0; c < 9; c++) {
+        var cell = document.createElement('i');
+        if (on.indexOf(c) >= 0) { cell.className = 'on'; }
+        die.appendChild(cell);
+      }
+      diceStage.appendChild(die);
+    }
+    if (diceTotal) {
+      if (diceValues.length && !rolling) {
+        var sum = 0;
+        for (var k = 0; k < diceValues.length; k++) { sum += diceValues[k]; }
+        diceTotal.innerHTML = '总点数<strong>' + sum + '</strong>';
+      } else if (rolling) {
+        diceTotal.innerHTML = '总点数<strong>…</strong>';
+      } else {
+        diceTotal.innerHTML = '总点数<strong>—</strong>';
+      }
+    }
+  }
+
+  function rollDice() {
+    if (rolling) { return; }
+    rolling = true;
+    if (rollBtn) { rollBtn.disabled = true; }
+    setStatus('diceStatus', '掷出去了…', false);
+    diceValues = [];
+    for (var i = 0; i < diceCount; i++) {
+      diceValues.push(1 + Math.floor(Math.random() * 6));
+    }
+    renderDice();
+    window.clearInterval(rollTimer);
+    var ticks = 0;
+    rollTimer = window.setInterval(function () {
+      ticks += 1;
+      if (!diceStage) { return; }
+      var dice = diceStage.querySelectorAll('.die');
+      for (var d = 0; d < dice.length; d++) {
+        var v = 1 + Math.floor(Math.random() * 6);
+        var on = PIPS[v] || PIPS[1];
+        var cells = dice[d].querySelectorAll('i');
+        for (var c = 0; c < cells.length; c++) {
+          cells[c].className = on.indexOf(c) >= 0 ? 'on' : '';
+        }
+      }
+      if (ticks >= 9) { settleDice(); }
+    }, 70);
+  }
+
+  function settleDice() {
+    window.clearInterval(rollTimer);
+    rollTimer = null;
+    rolling = false;
+    if (rollBtn) { rollBtn.disabled = false; }
+    renderDice();
+    var sum = 0;
+    for (var i = 0; i < diceValues.length; i++) { sum += diceValues[i]; }
+    setStatus('diceStatus', diceValues.join(' + ') + ' = ' + sum, true);
+  }
+
+  if (rollBtn) { rollBtn.addEventListener('click', rollDice); }
+
+  var countButtons = document.querySelectorAll('[data-count]');
+  function renderCountChips() {
+    for (var i = 0; i < countButtons.length; i++) {
+      var on = parseInt(countButtons[i].getAttribute('data-count'), 10) === diceCount;
+      countButtons[i].setAttribute('aria-pressed', on ? 'true' : 'false');
+    }
+  }
+  for (var ci = 0; ci < countButtons.length; ci++) {
+    (function (btn) {
+      btn.addEventListener('click', function () {
+        if (rolling) { return; }
+        var n = parseInt(btn.getAttribute('data-count'), 10);
+        diceCount = Math.max(1, Math.min(6, isNaN(n) ? 1 : n));
+        diceValues = [];
+        renderCountChips();
+        renderDice();
+        setStatus('diceStatus', '', false);
+      });
+    })(countButtons[ci]);
+  }
+
+  /* ── 抽签 ───────────────────────────────────────────── */
+  var drawSlot = $('drawSlot');
+  var drawLeftEl = $('drawLeft');
+  var drawPickedEl = $('drawPicked');
+  var drawBtn = $('drawBtn');
+  var drawResetBtn = $('drawReset');
+  var pool = [];
+  var picked = [];
+  var drawing = false;
+
+  function drawReset(silent) {
+    pool = options.slice();
+    picked = [];
+    drawing = false;
+    if (drawSlot) {
+      drawSlot.textContent = options.length ? '点下面开始抽' : '先加选项';
+      drawSlot.classList.remove('picked', 'pop');
+    }
+    renderDrawStats();
+    if (drawBtn) { drawBtn.disabled = false; }
+    if (!silent) { setStatus('drawStatus', '已重置，' + pool.length + ' 个都回来了。', false); }
+  }
+
+  function renderDrawStats() {
+    if (drawLeftEl) { drawLeftEl.textContent = '还剩 ' + pool.length + ' 个'; }
+    if (drawPickedEl) { drawPickedEl.textContent = '已抽 ' + picked.length; }
+  }
+
+  function drawOne() {
+    if (drawing) { return; }
+    if (!options.length) {
+      if (drawSlot) { drawSlot.textContent = '先加选项'; }
+      return;
+    }
+    if (!pool.length) {
+      if (drawSlot) { drawSlot.textContent = '抽完了，点重置'; }
+      setStatus('drawStatus', '全抽过一遍了，重置再来。', false);
+      return;
+    }
+    drawing = true;
+    var idx = Math.floor(Math.random() * pool.length);
+    var pick = pool.splice(idx, 1)[0];
+    picked.push(pick);
+
+    if (drawSlot) {
+      drawSlot.textContent = pick;
+      drawSlot.classList.remove('pop');
+      drawSlot.classList.add('picked');
+      /* 触发一次落定动画 */
+      void drawSlot.offsetWidth;
+      drawSlot.classList.add('pop');
+    }
+    renderDrawStats();
+    setStatus('drawStatus', pool.length ? '抽到：' + pick : '抽到：' + pick + '（这是最后一个）', true);
+    drawing = false;
+
+    if (drawBtn) { drawBtn.disabled = !pool.length; }
+  }
+
+  if (drawBtn) { drawBtn.addEventListener('click', drawOne); }
+  if (drawResetBtn) { drawResetBtn.addEventListener('click', function () { drawReset(false); }); }
+
+  /* ── 页面隐藏：停掉计时器，别在后台转 ───────────────── */
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) { return; }
+    var cancelledSpin = null;
+    if (spinning) {
+      spinning = false;
+      cancelledSpin = wheelAngle;
+      if (spinBtn) { spinBtn.disabled = false; }
+      if (wheelSvg) { wheelSvg.style.transition = 'none'; }
+    }
+    window.clearTimeout(spinTimer);
+    spinTimer = null;
+    window.clearInterval(rollTimer);
+    rollTimer = null;
+    if (rolling) {
+      rolling = false;
+      if (rollBtn) { rollBtn.disabled = false; }
+      settleDice();
+    }
+    /* 转盘被切走打断时，直接把落点算出来，别让用户回来看到"转…"卡住 */
+    if (cancelledSpin !== null) { revealWheel(cancelledSpin); }
+  });
+
+  /* ── 启动 ───────────────────────────────────────────── */
+  loadOptions();
+  renderOptions();
+  renderWheel();
+  renderDice();
+  renderCountChips();
+  drawReset(true);
+  syncBulkText();
+  setTab('wheel');
+})();
+</script>
+</body>
+</html>

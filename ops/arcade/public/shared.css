@@ -1,0 +1,130 @@
+/* DSH Arcade 共用样式
+ *
+ * 设计取向：暗色、低饱和、方角、细边框 —— 与 dsh-console 视觉同源，
+ * 但**不用**它的强调色（那边琥珀色代表"需要注意"，娱乐页用它会误导）。
+ *
+ * 手机优先：所有可点元素最小 44×44（Apple HIG），单列布局，单指可玩。
+ * 无外部字体/图标/CDN：全部系统字体 + 内联 SVG，断网也能开。
+ */
+
+:root {
+  --bg: #0b0d10;
+  --panel: #14171c;
+  --panel-2: #101318;
+  --line: #262b33;
+  --text: #e8edf4;
+  --muted: #939fac;
+  --accent: #6fb6ff;
+  --accent-soft: rgba(111, 182, 255, .12);
+  --ok: #7ee0a8;
+  --warn: #f2b23e;
+  --bad: #ff6b6b;
+  --radius: 10px;
+  --tap: 44px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", "Noto Sans SC", sans-serif;
+  -webkit-text-size-adjust: 100%;
+  /* 手机上玩手势游戏时不要整页跟着滚 */
+  overscroll-behavior: none;
+}
+
+body {
+  min-height: 100dvh;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+a { color: var(--accent); }
+
+/* ── 顶栏：返回 + 标题 + 可选状态 ───────────────────────────────── */
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  backdrop-filter: blur(8px);
+  z-index: 10;
+}
+
+.topbar h1 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0;
+  letter-spacing: .02em;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--tap);
+  min-height: var(--tap);
+  margin: -8px 0 -8px -10px;
+  border-radius: var(--radius);
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.back:hover, .back:focus-visible { color: var(--text); background: var(--panel); }
+
+/* ── 通用按钮 ───────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: var(--tap);
+  padding: 0 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  /* 手机上别出现 300ms 点击延迟与高亮块 */
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.btn:hover { border-color: var(--accent); }
+.btn:active { transform: translateY(1px); }
+.btn.primary { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.btn.ghost { background: transparent; }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+
+.wrap { padding: 16px; max-width: 720px; margin: 0 auto; }
+
+.row { display: flex; gap: 10px; flex-wrap: wrap; }
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+.center { text-align: center; }
+.hidden { display: none !important; }
+
+/* 尊重系统的"减少动效"：所有动画/过渡关掉，但功能照常 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+  }
+}

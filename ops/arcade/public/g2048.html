@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0b0d10">
+<title>2048 · 休闲角</title>
+<link rel="stylesheet" href="shared.css">
+<style>
+  .hud {
+    display: flex;
+    gap: 10px;
+    width: min(88vw, 420px);
+    max-width: 100%;
+    margin: 0 auto 14px;
+  }
+  .stat {
+    flex: 1 1 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 8px 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--panel-2);
+  }
+  .stat strong { font-size: 18px; line-height: 1.2; font-variant-numeric: tabular-nums; }
+
+  .board-wrap {
+    position: relative;
+    width: min(88vw, 420px);
+    max-width: 100%;
+    margin: 0 auto;
+  }
+
+  .board {
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    grid-template-rows: repeat(4, 1fr);
+    gap: 8px;
+    padding: 8px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--panel-2);
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .cell {
+    position: relative;
+    border-radius: 8px;
+    background: var(--panel);
+  }
+
+  .tile {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #1b2027;
+    color: #cfd8e2;
+    font-weight: 700;
+    font-size: min(7vw, 30px);
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+  .tile[data-len="3"] { font-size: min(5.6vw, 25px); }
+  .tile[data-len="4"] { font-size: min(4.6vw, 21px); }
+  .tile[data-len="5"] { font-size: min(3.8vw, 17px); }
+
+  .tile.v2    { background: #1b2027; color: #cfd8e2; }
+  .tile.v4    { background: #20262f; color: #d9e2ec; }
+  .tile.v8    { background: #23303f; color: #c6e2ff; }
+  .tile.v16   { background: #273a52; color: #d4e8ff; }
+  .tile.v32   { background: #2c4465; color: #e2f0ff; }
+  .tile.v64   { background: #325079; color: #eaf4ff; }
+  .tile.v128  { background: #3a5f92; color: #f2f8ff; border-color: #4a6f9f; }
+  .tile.v256  { background: #4270aa; color: #f6faff; border-color: #5a86be; }
+  .tile.v512  { background: #4b80c2; color: #f8fbff; border-color: #6a97d0; }
+  .tile.v1024 { background: #5a93d8; color: #06121f; border-color: #7fb0e8; }
+  .tile.v2048 { background: var(--accent); color: #06121f; border-color: #a8d4ff; }
+  .tile.vbig  { background: #9acbff; color: #06121f; border-color: #c8e3ff; }
+
+  @keyframes tile-pop {
+    from { transform: scale(.35); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+  }
+  @keyframes tile-merge {
+    0% { transform: scale(1); }
+    45% { transform: scale(1.16); }
+    100% { transform: scale(1); }
+  }
+  .tile.is-new { animation: tile-pop .14s ease-out; }
+  .tile.is-merged { animation: tile-merge .18s ease-out; }
+
+  .overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    text-align: center;
+    border-radius: var(--radius);
+    background: color-mix(in srgb, var(--bg) 82%, transparent);
+    backdrop-filter: blur(3px);
+  }
+  .overlay p { margin: 0; }
+  .ov-title { font-size: 17px; font-weight: 600; }
+  .ov-sub { margin-top: 4px; }
+  .overlay .btn { margin-top: 14px; min-width: 140px; }
+
+  .actions {
+    width: min(88vw, 420px);
+    max-width: 100%;
+    margin: 14px auto 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .actions .btn { flex: none; }
+  .actions .hint { flex: 1 1 auto; text-align: right; line-height: 1.4; }
+
+  .toast {
+    width: min(88vw, 420px);
+    max-width: 100%;
+    margin: 16px auto 0;
+    padding: 10px 14px;
+    border: 1px solid var(--accent);
+    border-radius: var(--radius);
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: 13px;
+    line-height: 1.5;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <a class="back" href="index.html" aria-label="返回首页">←</a>
+  <h1>2048</h1>
+</header>
+
+<main class="wrap">
+
+  <div class="hud">
+    <div class="stat"><span class="small muted">分数</span><strong id="score">0</strong></div>
+    <div class="stat"><span class="small muted">最高分</span><strong id="best">0</strong></div>
+  </div>
+
+  <div class="board-wrap">
+    <div class="board" id="board" role="application" aria-label="2048 棋盘，方向键或滑动操作"></div>
+    <div class="overlay hidden" id="overlay">
+      <div id="overlayText"></div>
+      <button class="btn primary" id="overlayBtn" type="button">再来一局</button>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button class="btn" id="restart" type="button">重新开始</button>
+    <span class="hint muted small">方向键 / WASD，或在棋盘上滑动</span>
+  </div>
+
+  <div class="toast hidden" id="toast" role="status" aria-live="polite">🎉 恭喜达成 2048！可以继续玩，挑战更高分。</div>
+
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  var BEST_KEY = 'arcade.g2048.best';
+  var N = 4;
+  var CELLS = N * N;
+
+  var boardEl = document.getElementById('board');
+  var scoreEl = document.getElementById('score');
+  var bestEl = document.getElementById('best');
+  var overlayEl = document.getElementById('overlay');
+  var overlayTextEl = document.getElementById('overlayText');
+  var overlayBtn = document.getElementById('overlayBtn');
+  var restartBtn = document.getElementById('restart');
+  var toastEl = document.getElementById('toast');
+
+  var cells = [];
+  var grid = new Array(CELLS);
+  var score = 0;
+  var best = 0;
+  var over = false;
+  var celebrated = false;
+  var newIdx = [];
+  var mergeIdx = [];
+  var toastTimer = 0;
+
+  for (var g = 0; g < CELLS; g++) grid[g] = 0;
+
+  /* ── 最高分：隐私模式 / 禁用存储时 getItem、setItem 都可能抛 ── */
+  function readBest() {
+    try {
+      var raw = window.localStorage.getItem(BEST_KEY);
+      var n = parseInt(raw, 10);
+      return isFinite(n) && n > 0 ? n : 0;
+    } catch (err) {
+      return 0;
+    }
+  }
+
+  function writeBest(value) {
+    try {
+      window.localStorage.setItem(BEST_KEY, String(value));
+    } catch (err) {
+      /* 存不了就只影响最高分，游戏照常 */
+    }
+  }
+
+  function buildCells() {
+    for (var i = 0; i < CELLS; i++) {
+      var c = document.createElement('div');
+      c.className = 'cell';
+      boardEl.appendChild(c);
+      cells.push(c);
+    }
+  }
+
+  function render() {
+    for (var i = 0; i < CELLS; i++) {
+      var cell = cells[i];
+      while (cell.firstChild) cell.removeChild(cell.firstChild);
+      var v = grid[i];
+      if (!v) continue;
+      var t = document.createElement('div');
+      t.className = 'tile v' + (v > 2048 ? 'big' : v);
+      t.setAttribute('data-len', String(v).length);
+      t.textContent = String(v);
+      if (newIdx.indexOf(i) !== -1) t.classList.add('is-new');
+      if (mergeIdx.indexOf(i) !== -1) t.classList.add('is-merged');
+      cell.appendChild(t);
+    }
+    scoreEl.textContent = String(score);
+    bestEl.textContent = String(best);
+  }
+
+  function emptyCells() {
+    var out = [];
+    for (var i = 0; i < CELLS; i++) if (!grid[i]) out.push(i);
+    return out;
+  }
+
+  function spawnTile() {
+    var empty = emptyCells();
+    if (!empty.length) return;
+    var idx = empty[Math.floor(Math.random() * empty.length)];
+    grid[idx] = Math.random() < 0.9 ? 2 : 4;
+    newIdx.push(idx);
+  }
+
+  /* 行/列下标组：rows[r] 从左到右，cols[c] 从上到下 */
+  var LINES = (function () {
+    var rows = [], cols = [];
+    for (var i = 0; i < N; i++) {
+      var row = [], col = [];
+      for (var j = 0; j < N; j++) {
+        row.push(i * N + j);
+        col.push(j * N + i);
+      }
+      rows.push(row);
+      cols.push(col);
+    }
+    return { rows: rows, cols: cols };
+  })();
+
+  /* 一条线上的标准 2048 合并：每个方块每步最多合并一次 */
+  function slideLine(idxs, reverse) {
+    var order = reverse ? idxs.slice().reverse() : idxs;
+    var vals = [];
+    var k;
+    for (k = 0; k < N; k++) if (grid[order[k]]) vals.push(grid[order[k]]);
+
+    var out = [];
+    var merges = [];
+    for (k = 0; k < vals.length; k++) {
+      if (k + 1 < vals.length && vals[k] === vals[k + 1]) {
+        out.push(vals[k] * 2);
+        merges.push(out.length - 1);
+        k++;
+      } else {
+        out.push(vals[k]);
+      }
+    }
+    while (out.length < N) out.push(0);
+    return { vals: out, merges: merges };
+  }
+
+  function hasMoves() {
+    for (var i = 0; i < CELLS; i++) {
+      if (!grid[i]) return true;
+      var r = Math.floor(i / N), c = i % N;
+      if (c + 1 < N && grid[i] === grid[i + 1]) return true;
+      if (r + 1 < N && grid[i] === grid[i + N]) return true;
+    }
+    return false;
+  }
+
+  function move(dir) {
+    if (over) return;
+    /* 0 左 1 右 2 上 3 下 */
+    var lines = (dir === 0 || dir === 1) ? LINES.rows : LINES.cols;
+    var reverse = (dir === 1 || dir === 3);
+    var moved = false;
+    var gained = 0;
+    var mergedNow = [];
+
+    for (var i = 0; i < lines.length; i++) {
+      var order = reverse ? lines[i].slice().reverse() : lines[i];
+      var res = slideLine(lines[i], reverse);
+      for (var k = 0; k < N; k++) {
+        if (grid[order[k]] !== res.vals[k]) moved = true;
+        grid[order[k]] = res.vals[k];
+      }
+      for (var m = 0; m < res.merges.length; m++) {
+        mergedNow.push(order[res.merges[m]]);
+        gained += res.vals[res.merges[m]];
+      }
+    }
+
+    if (!moved) return;
+
+    score += gained;
+    if (score > best) {
+      best = score;
+      writeBest(best);
+    }
+    mergeIdx = mergedNow;
+    newIdx = [];
+    spawnTile();
+    render();
+    checkWin();
+
+    if (!hasMoves()) {
+      over = true;
+      showOverlay('没有可移动的方块了', '最终得分 ' + score + ' · 最高分 ' + best);
+    }
+  }
+
+  function checkWin() {
+    if (celebrated) return;
+    for (var i = 0; i < CELLS; i++) {
+      if (grid[i] >= 2048) {
+        celebrated = true;
+        showToast();
+        return;
+      }
+    }
+  }
+
+  function showOverlay(title, sub) {
+    overlayTextEl.textContent = '';
+    var p1 = document.createElement('p');
+    p1.className = 'ov-title';
+    p1.textContent = title;
+    var p2 = document.createElement('p');
+    p2.className = 'ov-sub small muted';
+    p2.textContent = sub;
+    overlayTextEl.appendChild(p1);
+    overlayTextEl.appendChild(p2);
+    overlayEl.classList.remove('hidden');
+  }
+
+  function showToast() {
+    toastEl.classList.remove('hidden');
+    if (toastTimer) window.clearTimeout(toastTimer);
+    toastTimer = window.setTimeout(function () {
+      toastEl.classList.add('hidden');
+      toastTimer = 0;
+    }, 5000);
+  }
+
+  function resetGame() {
+    for (var i = 0; i < CELLS; i++) grid[i] = 0;
+    score = 0;
+    over = false;
+    celebrated = false;
+    newIdx = [];
+    mergeIdx = [];
+    overlayEl.classList.add('hidden');
+    spawnTile();
+    spawnTile();
+    render();
+  }
+
+  /* ── 操作：键盘方向键 / WASD ─────────────────────────────── */
+  document.addEventListener('keydown', function (e) {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    var key = e.key;
+    var dir = null;
+    if (key === 'ArrowLeft' || key === 'a' || key === 'A') dir = 0;
+    else if (key === 'ArrowRight' || key === 'd' || key === 'D') dir = 1;
+    else if (key === 'ArrowUp' || key === 'w' || key === 'W') dir = 2;
+    else if (key === 'ArrowDown' || key === 's' || key === 'S') dir = 3;
+    if (dir === null) return;
+    e.preventDefault();
+    move(dir);
+  }, { passive: false });
+
+  /* ── 操作：棋盘上滑动（阈值约 24px，滑动时阻挡页面滚动）──── */
+  var startX = 0, startY = 0, tracking = false;
+
+  boardEl.addEventListener('touchstart', function (e) {
+    if (e.touches.length !== 1) return;
+    tracking = true;
+    startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY;
+  }, { passive: true });
+
+  boardEl.addEventListener('touchmove', function (e) {
+    if (!tracking) return;
+    if (e.cancelable) e.preventDefault();
+  }, { passive: false });
+
+  boardEl.addEventListener('touchend', function (e) {
+    if (!tracking) return;
+    tracking = false;
+    if (!e.changedTouches.length) return;
+    var t = e.changedTouches[0];
+    var dx = t.clientX - startX;
+    var dy = t.clientY - startY;
+    if (Math.max(Math.abs(dx), Math.abs(dy)) < 24) return;
+    if (Math.abs(dx) > Math.abs(dy)) move(dx > 0 ? 1 : 0);
+    else move(dy > 0 ? 3 : 2);
+  }, { passive: true });
+
+  boardEl.addEventListener('touchcancel', function () {
+    tracking = false;
+  }, { passive: true });
+
+  restartBtn.addEventListener('click', resetGame);
+  overlayBtn.addEventListener('click', resetGame);
+
+  /* 本页没有游戏循环；隐藏时只把最高分落盘，不消耗后台资源 */
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden && best > 0) writeBest(best);
+  });
+
+  buildCells();
+  best = readBest();
+  resetGame();
+})();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,1176 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0b0d10">
+<title>放松一下 · 休闲角</title>
+<link rel="stylesheet" href="shared.css">
+<style>
+  /* 本页只用内联样式 + shared.css；无字体、图标、图片外链 */
+  .seg {
+    display: flex;
+    gap: 4px;
+    padding: 4px;
+    margin-bottom: 14px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--panel-2);
+  }
+  .seg button {
+    flex: 1;
+    min-height: var(--tap);
+    padding: 0 8px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--muted);
+    font: inherit;
+    font-size: 14px;
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .seg button[aria-selected="true"] {
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  .panel {
+    padding: 16px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: linear-gradient(160deg, var(--panel), var(--panel-2));
+  }
+
+  .panel h2 {
+    margin: 0 0 4px;
+    font-size: 15px;
+    font-weight: 600;
+  }
+  .panel .lead {
+    margin: 0 0 16px;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.6;
+  }
+
+  .noise-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  .noise {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    min-height: 64px;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--panel-2);
+    color: var(--text);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .noise .n-name { font-size: 14px; font-weight: 600; }
+  .noise .n-desc { font-size: 11px; color: var(--muted); }
+  .noise[aria-pressed="true"] {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .noise[aria-pressed="true"] .n-name { color: var(--accent); }
+
+  .volume {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 0 0 14px;
+  }
+  .volume input[type="range"] {
+    flex: 1;
+    min-height: var(--tap);
+    min-width: 0;
+    margin: 0;
+    accent-color: var(--accent);
+    background: transparent;
+  }
+  .volume .vol-val {
+    min-width: 44px;
+    text-align: right;
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+    color: var(--muted);
+  }
+
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+  .actions .btn { flex: 1; min-width: 120px; }
+
+  .status {
+    margin: 12px 0 0;
+    min-height: 18px;
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+  .status.on { color: var(--ok); }
+
+  /* ── 呼吸引导 ─────────────────────────────── */
+  .breath-stage {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 240px;
+    margin: 4px 0 8px;
+  }
+  .breath-dot {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 190px;
+    height: 190px;
+    border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--line));
+    border-radius: 50%;
+    background:
+      radial-gradient(circle at 50% 45%, rgba(111, 182, 255, .28), rgba(111, 182, 255, .05) 70%);
+    transform: scale(.58);
+    transition: transform 4s cubic-bezier(.37, 0, .63, 1);
+    will-change: transform;
+  }
+  .breath-dot span {
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: .08em;
+    color: var(--text);
+  }
+  .breath-meta {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    margin: 0 0 14px;
+    font-size: 12px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .field {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0 0 12px;
+  }
+  .field > label {
+    flex: none;
+    min-width: 62px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .field select,
+  .field input[type="number"] {
+    flex: 1;
+    min-width: 0;
+    min-height: var(--tap);
+    padding: 0 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel-2);
+    color: var(--text);
+    font: inherit;
+    font-size: 14px;
+  }
+  .field input[type="number"] { -moz-appearance: textfield; }
+  .field input[type="number"]::-webkit-outer-spin-button,
+  .field input[type="number"]::-webkit-inner-spin-button { margin: 0; }
+
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 14px; }
+  .chip {
+    min-height: var(--tap);
+    padding: 0 14px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--panel-2);
+    color: var(--muted);
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .chip[aria-pressed="true"] {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+
+  /* ── 番茄钟 ───────────────────────────────── */
+  .clock {
+    margin: 6px 0 2px;
+    text-align: center;
+    font-size: 46px;
+    font-weight: 600;
+    letter-spacing: .02em;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.15;
+  }
+  .clock-mode {
+    margin: 0 0 14px;
+    text-align: center;
+    font-size: 12px;
+    letter-spacing: .1em;
+    color: var(--muted);
+  }
+  .bar {
+    height: 6px;
+    border-radius: 999px;
+    background: var(--panel-2);
+    overflow: hidden;
+    margin: 0 0 16px;
+  }
+  .bar > i {
+    display: block;
+    height: 100%;
+    width: 0;
+    background: var(--accent);
+    transition: width .25s linear;
+  }
+  .bar.break > i { background: var(--ok); }
+
+  .durations {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin: 0 0 14px;
+  }
+  .durations .field { margin: 0; }
+  .durations .field > label { min-width: 0; }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <a class="back" href="index.html" aria-label="返回首页">←</a>
+  <h1>放松一下</h1>
+</header>
+
+<main class="wrap">
+  <div class="seg" role="tablist" aria-label="放松方式">
+    <button type="button" role="tab" id="tab-btn-noise" aria-selected="true" aria-controls="tab-noise" data-tab="noise">白噪音</button>
+    <button type="button" role="tab" id="tab-btn-breath" aria-selected="false" aria-controls="tab-breath" data-tab="breath">呼吸</button>
+    <button type="button" role="tab" id="tab-btn-pomo" aria-selected="false" aria-controls="tab-pomo" data-tab="pomo">番茄钟</button>
+  </div>
+
+  <!-- ── 白噪音 ───────────────────────────────────────────── -->
+  <section class="panel" id="tab-noise" role="tabpanel" aria-labelledby="tab-btn-noise">
+    <h2>白噪音</h2>
+    <p class="lead">全部用 Web Audio 现场合成，不下载任何音频文件。换一种声音、切换标签页或离开页面都会淡出，不会突然断掉。</p>
+
+    <div class="noise-grid" id="noiseGrid">
+      <button class="noise" type="button" data-noise="rain" aria-pressed="true">
+        <span class="n-name">🌧 雨声</span>
+        <span class="n-desc">滤波白噪 + 缓慢起伏</span>
+      </button>
+      <button class="noise" type="button" data-noise="brown" aria-pressed="false">
+        <span class="n-name">🟤 布朗噪音</span>
+        <span class="n-desc">低沉、包住耳朵</span>
+      </button>
+      <button class="noise" type="button" data-noise="waves" aria-pressed="false">
+        <span class="n-name">🌊 海浪</span>
+        <span class="n-desc">潮汐般涨落的涌</span>
+      </button>
+      <button class="noise" type="button" data-noise="fan" aria-pressed="false">
+        <span class="n-name">🌀 风扇</span>
+        <span class="n-desc">棕噪 + 轻微嗡动</span>
+      </button>
+    </div>
+
+    <div class="volume">
+      <label for="vol" class="muted small">音量</label>
+      <input id="vol" type="range" min="0" max="100" step="1" value="60" aria-label="音量">
+      <span class="vol-val" id="volVal">60%</span>
+    </div>
+
+    <div class="actions">
+      <button class="btn primary" type="button" id="noiseToggle">▶ 播放</button>
+    </div>
+    <p class="status" id="noiseStatus"></p>
+  </section>
+
+  <!-- ── 呼吸引导 ─────────────────────────────────────────── -->
+  <section class="panel hidden" id="tab-breath" role="tabpanel" aria-labelledby="tab-btn-breath">
+    <h2>呼吸引导</h2>
+    <p class="lead">跟着圆圈的缩放呼吸。屏息时圆圈停住，呼气时慢慢收回来。</p>
+
+    <div class="breath-stage">
+      <div class="breath-dot" id="breathDot"><span id="breathPhase">准备</span></div>
+    </div>
+    <div class="breath-meta">
+      <span id="breathLeft">还剩 — 轮</span>
+      <span id="breathSec">—</span>
+    </div>
+
+    <div class="field">
+      <label for="pattern">节奏</label>
+      <select id="pattern">
+        <option value="478">4-7-8（吸 4 · 屏 7 · 呼 8）</option>
+        <option value="444">4-4-4-4（吸 4 · 屏 4 · 呼 4 · 停 4）</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <span class="muted small">速度</span>
+    </div>
+    <div class="chips" role="group" aria-label="练习速度">
+      <button class="chip" type="button" data-pace="slow" aria-pressed="false">慢</button>
+      <button class="chip" type="button" data-pace="mid" aria-pressed="true">中</button>
+      <button class="chip" type="button" data-pace="fast" aria-pressed="false">快</button>
+    </div>
+
+    <div class="field">
+      <label for="rounds">轮数</label>
+      <input id="rounds" type="number" min="1" max="20" step="1" value="5" inputmode="numeric">
+    </div>
+
+    <div class="actions">
+      <button class="btn primary" type="button" id="breathToggle">开始</button>
+    </div>
+    <p class="status" id="breathStatus" aria-live="polite"></p>
+  </section>
+
+  <!-- ── 番茄钟 ───────────────────────────────────────────── -->
+  <section class="panel hidden" id="tab-pomo" role="tabpanel" aria-labelledby="tab-btn-pomo">
+    <h2>番茄钟</h2>
+    <p class="lead">专注一段时间，再休息一会儿。结束时用合成提示音提醒，不弹 alert；页面标题会显示剩余时间。</p>
+
+    <div class="clock" id="clock">25:00</div>
+    <p class="clock-mode" id="clockMode">专注</p>
+    <div class="bar" id="pomoBar"><i id="pomoFill"></i></div>
+
+    <div class="durations">
+      <div class="field">
+        <label for="workMin">专注（分）</label>
+        <input id="workMin" type="number" min="1" max="180" step="1" value="25" inputmode="numeric">
+      </div>
+      <div class="field">
+        <label for="breakMin">休息（分）</label>
+        <input id="breakMin" type="number" min="1" max="60" step="1" value="5" inputmode="numeric">
+      </div>
+    </div>
+
+    <div class="chips" role="group" aria-label="常用时长">
+      <button class="chip" type="button" id="preset255">25 / 5</button>
+      <button class="chip" type="button" id="preset5010">50 / 10</button>
+    </div>
+
+    <div class="actions">
+      <button class="btn primary" type="button" id="pomoToggle">开始</button>
+      <button class="btn ghost" type="button" id="pomoReset">重置</button>
+    </div>
+    <p class="status" id="pomoStatus" aria-live="polite"></p>
+  </section>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  var KEY = 'arcade.relax.settings';
+  var settings = {
+    volume: 60,
+    noise: 'rain',
+    pattern: '478',
+    pace: 'mid',
+    rounds: 5,
+    work: 25,
+    break: 5
+  };
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  /* ── 存档：全部包在 try 里（隐私模式会抛） ─────────────── */
+  function loadSettings() {
+    try {
+      var raw = localStorage.getItem(KEY);
+      if (!raw) { return; }
+      var o = JSON.parse(raw);
+      if (!o || typeof o !== 'object') { return; }
+      if (typeof o.volume === 'number') { settings.volume = Math.max(0, Math.min(100, Math.round(o.volume))); }
+      if (o.noise === 'rain' || o.noise === 'brown' || o.noise === 'waves' || o.noise === 'fan') { settings.noise = o.noise; }
+      if (o.pattern === '478' || o.pattern === '444') { settings.pattern = o.pattern; }
+      if (o.pace === 'slow' || o.pace === 'mid' || o.pace === 'fast') { settings.pace = o.pace; }
+      if (typeof o.rounds === 'number') { settings.rounds = Math.max(1, Math.min(20, Math.round(o.rounds))); }
+      if (typeof o.work === 'number') { settings.work = Math.max(1, Math.min(180, Math.round(o.work))); }
+      if (typeof o.break === 'number') { settings.break = Math.max(1, Math.min(60, Math.round(o.break))); }
+    } catch (e) {
+      /* 存档不可用就用默认值，功能照常 */
+    }
+  }
+
+  function saveSettings() {
+    try {
+      localStorage.setItem(KEY, JSON.stringify(settings));
+    } catch (e) {
+      /* 写不进去也不影响本次使用 */
+    }
+  }
+
+  /* ── Web Audio：一个上下文，所有声音共用 ───────────────── */
+  var AudioCtor = window.AudioContext || window.webkitAudioContext;
+  var actx = null;
+  var master = null;
+  var buffers = {};
+  var session = null;
+  var noisePlaying = false;
+
+  function volGain() {
+    return (settings.volume / 100) * 0.9;
+  }
+
+  function ensureAudio() {
+    if (!AudioCtor) { return false; }
+    if (!actx) {
+      try {
+        actx = new AudioCtor();
+        master = actx.createGain();
+        master.gain.value = volGain();
+        master.connect(actx.destination);
+      } catch (e) {
+        actx = null;
+        return false;
+      }
+    }
+    if (actx.state === 'suspended' && actx.resume) {
+      actx.resume().catch(function () {});
+    }
+    return true;
+  }
+
+  function applyVolume() {
+    if (!actx || !master) { return; }
+    var now = actx.currentTime;
+    var target = volGain();
+    try {
+      master.gain.cancelScheduledValues(now);
+      master.gain.setValueAtTime(master.gain.value, now);
+      master.gain.linearRampToValueAtTime(target, now + 0.08);
+    } catch (e) { /* 老浏览器 */ }
+  }
+
+  /* 噪声缓冲：6 秒，循环点做交叉淡入，避免每隔几秒"咔"一声 */
+  function noiseBuffer(kind) {
+    if (buffers[kind]) { return buffers[kind]; }
+    var sr = actx.sampleRate;
+    var len = Math.floor(sr * 6);
+    var fade = Math.floor(sr * 0.3);
+    var buf = actx.createBuffer(1, len, sr);
+    var d = buf.getChannelData(0);
+    var raw = new Float32Array(len + fade);
+    var i, w, p;
+
+    if (kind === 'brown') {
+      var last = 0;
+      for (i = 0; i < raw.length; i++) {
+        w = Math.random() * 2 - 1;
+        last = (last + 0.02 * w) / 1.02;
+        raw[i] = last * 3.5;
+      }
+    } else if (kind === 'pink') {
+      var b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+      for (i = 0; i < raw.length; i++) {
+        w = Math.random() * 2 - 1;
+        b0 = 0.99886 * b0 + w * 0.0555179;
+        b1 = 0.99332 * b1 + w * 0.0750759;
+        b2 = 0.96900 * b2 + w * 0.1538520;
+        b3 = 0.86650 * b3 + w * 0.3104856;
+        b4 = 0.55000 * b4 + w * 0.5329522;
+        b5 = -0.7616 * b5 - w * 0.0168980;
+        p = b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362;
+        b6 = w * 0.115926;
+        raw[i] = p * 0.11;
+      }
+    } else {
+      for (i = 0; i < raw.length; i++) { raw[i] = Math.random() * 2 - 1; }
+    }
+
+    for (i = 0; i < len; i++) { d[i] = raw[i]; }
+    for (i = 0; i < fade; i++) {
+      var t = i / fade;
+      d[i] = raw[i] * t + raw[len + i] * (1 - t);
+    }
+
+    buffers[kind] = buf;
+    return buf;
+  }
+
+  /* 组装四种声音；out 是本次会话的淡入增益 */
+  function buildNoise(kind, out) {
+    var nodes = [];
+
+    function source(bufKind) {
+      var s = actx.createBufferSource();
+      s.buffer = noiseBuffer(bufKind);
+      s.loop = true;
+      nodes.push(s);
+      return s;
+    }
+    function lfo(param, base, amount, hz) {
+      param.setValueAtTime(base, actx.currentTime);
+      var osc = actx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(hz, actx.currentTime);
+      var amp = actx.createGain();
+      amp.gain.setValueAtTime(amount, actx.currentTime);
+      osc.connect(amp);
+      amp.connect(param);
+      /* 不在这里 start：统一由 startNoise 调度，避免重复 start 抛错 */
+      nodes.push(osc);
+      return osc;
+    }
+
+    if (kind === 'rain') {
+      var hp = actx.createBiquadFilter();
+      hp.type = 'highpass';
+      hp.frequency.value = 900;
+      hp.Q.value = 0.4;
+      var lp = actx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = 5200;
+      lp.Q.value = 0.6;
+      var body = actx.createGain();
+      body.gain.value = 0.5;
+      var rainSrc = source('white');
+      rainSrc.connect(hp); hp.connect(lp); lp.connect(body); body.connect(out);
+      lfo(body.gain, 0.5, 0.12, 0.05);
+      lfo(lp.frequency, 5200, 1600, 0.03);
+
+      var rum = source('brown');
+      var rlp = actx.createBiquadFilter();
+      rlp.type = 'lowpass';
+      rlp.frequency.value = 260;
+      var rg = actx.createGain();
+      rg.gain.value = 0.35;
+      rum.connect(rlp); rlp.connect(rg); rg.connect(out);
+
+    } else if (kind === 'brown') {
+      var src = source('brown');
+      var blp = actx.createBiquadFilter();
+      blp.type = 'lowpass';
+      blp.frequency.value = 340;
+      blp.Q.value = 0.8;
+      var bg = actx.createGain();
+      bg.gain.value = 0.75;
+      src.connect(blp); blp.connect(bg); bg.connect(out);
+      lfo(bg.gain, 0.75, 0.06, 0.04);
+
+    } else if (kind === 'waves') {
+      var wsrc = source('pink');
+      var wlp = actx.createBiquadFilter();
+      wlp.type = 'lowpass';
+      wlp.frequency.value = 950;
+      wlp.Q.value = 0.9;
+      var wg = actx.createGain();
+      wg.gain.value = 0.42;
+      wsrc.connect(wlp); wlp.connect(wg); wg.connect(out);
+      lfo(wg.gain, 0.42, 0.30, 0.09);
+      lfo(wlp.frequency, 950, 620, 0.09);
+
+      var deep = source('brown');
+      var dg = actx.createGain();
+      dg.gain.value = 0.18;
+      deep.connect(dg); dg.connect(out);
+      lfo(dg.gain, 0.18, 0.12, 0.05);
+
+    } else {
+      var fsrc = source('white');
+      var peak = actx.createBiquadFilter();
+      peak.type = 'peaking';
+      peak.frequency.value = 180;
+      peak.Q.value = 1.2;
+      peak.gain.value = 4;
+      var flp = actx.createBiquadFilter();
+      flp.type = 'lowpass';
+      flp.frequency.value = 760;
+      flp.Q.value = 0.5;
+      var fg = actx.createGain();
+      fg.gain.value = 0.34;
+      fsrc.connect(peak); peak.connect(flp); flp.connect(fg); fg.connect(out);
+      lfo(fg.gain, 0.34, 0.02, 0.7);
+
+      var lowSrc = source('brown');
+      var llp = actx.createBiquadFilter();
+      llp.type = 'lowpass';
+      llp.frequency.value = 180;
+      var lg = actx.createGain();
+      lg.gain.value = 0.28;
+      lowSrc.connect(llp); llp.connect(lg); lg.connect(out);
+    }
+
+    return nodes;
+  }
+
+  function startNoise(kind) {
+    if (!ensureAudio()) {
+      setStatus('noiseStatus', '这个浏览器不支持 Web Audio，放不了白噪音。', false);
+      return false;
+    }
+    if (session) { stopNoise(0.2); }
+    var now = actx.currentTime;
+    var g = actx.createGain();
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.linearRampToValueAtTime(1, now + 0.7);
+    g.connect(master);
+
+    var nodes = buildNoise(kind, g);
+    var stopped = false;
+
+    var s = {
+      gain: g,
+      nodes: nodes,
+      source: nodes[0],
+      stop: function (fade) {
+        if (stopped) { return; }
+        stopped = true;
+        var t = actx.currentTime;
+        var f = typeof fade === 'number' ? fade : 0.6;
+        try {
+          g.gain.cancelScheduledValues(t);
+          g.gain.setValueAtTime(Math.max(0.0001, g.gain.value), t);
+          g.gain.linearRampToValueAtTime(0.0001, t + f);
+        } catch (e) { /* ignore */ }
+        for (var i = 0; i < nodes.length; i++) {
+          try { nodes[i].stop(t + f + 0.05); } catch (e) { /* 已停止 */ }
+        }
+        try { nodes[0].onended = function () { try { g.disconnect(); } catch (e) {} }; } catch (e) {}
+      }
+    };
+
+    for (var i = 0; i < nodes.length; i++) {
+      if (nodes[i].start) { nodes[i].start(now); }
+    }
+
+    session = s;
+    noisePlaying = true;
+    applyVolume();
+    return true;
+  }
+
+  function stopNoise(fade) {
+    if (session) {
+      try { session.stop(fade); } catch (e) { /* ignore */ }
+    }
+    session = null;
+    noisePlaying = false;
+  }
+
+  /* ── 提示音（番茄钟/呼吸结束），纯合成，不用 alert ─────── */
+  function chime(kind) {
+    /* 页面不可见时不出声（省电，也不吓人） */
+    if (document.hidden) { return; }
+    if (!ensureAudio()) { return; }
+    var notes = kind === 'soft' ? [523.25, 659.25] : [880, 1108.73, 1318.51];
+    var t0 = actx.currentTime + 0.03;
+    var out = actx.createGain();
+    out.gain.value = 0.45;
+    out.connect(master);
+    for (var i = 0; i < notes.length; i++) {
+      var t = t0 + i * 0.24;
+      var osc = actx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(notes[i], t);
+      var env = actx.createGain();
+      env.gain.setValueAtTime(0.0001, t);
+      env.gain.exponentialRampToValueAtTime(0.7, t + 0.02);
+      env.gain.exponentialRampToValueAtTime(0.0001, t + 1.5);
+      osc.connect(env);
+      env.connect(out);
+      osc.start(t);
+      osc.stop(t + 1.6);
+    }
+    window.setTimeout(function () { try { out.disconnect(); } catch (e) {} }, 3000);
+  }
+
+  /* ── 小工具 ───────────────────────────────────────────── */
+  function setStatus(id, text, good) {
+    var el = $(id);
+    if (!el) { return; }
+    el.textContent = text || '';
+    if (good) { el.classList.add('on'); } else { el.classList.remove('on'); }
+  }
+
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+
+  function fmtClock(ms) {
+    var total = Math.max(0, Math.ceil(ms / 1000));
+    var m = Math.floor(total / 60);
+    var s = total % 60;
+    return pad2(m) + ':' + pad2(s);
+  }
+
+  /* ── 标签页切换 ───────────────────────────────────────── */
+  var TABS = ['noise', 'breath', 'pomo'];
+  var TAB_TITLES = { noise: '放松一下', breath: '呼吸引导', pomo: '番茄钟' };
+  var currentTab = 'noise';
+
+  function setTab(name) {
+    if (TABS.indexOf(name) < 0) { name = 'noise'; }
+    currentTab = name;
+    for (var i = 0; i < TABS.length; i++) {
+      var t = TABS[i];
+      var btn = $('tab-btn-' + t);
+      var panel = $('tab-' + t);
+      var on = t === name;
+      if (btn) { btn.setAttribute('aria-selected', on ? 'true' : 'false'); }
+      if (panel) { panel.classList.toggle('hidden', !on); }
+    }
+    /* 离开白噪音就淡出，不要背着用户继续响 */
+    if (name !== 'noise') { stopNoise(0.6); renderNoise(); }
+    if (name !== 'breath') { breathStop(); }
+    if (name === 'pomo') {
+      updateTitle();
+    } else {
+      document.title = TAB_TITLES[name] + ' · 休闲角';
+    }
+  }
+
+  var tabButtons = document.querySelectorAll('[data-tab]');
+  for (var ti = 0; ti < tabButtons.length; ti++) {
+    (function (btn) {
+      btn.addEventListener('click', function () { setTab(btn.getAttribute('data-tab')); });
+    })(tabButtons[ti]);
+  }
+
+  /* ── 白噪音 UI ────────────────────────────────────────── */
+  function renderNoise() {
+    var buttons = document.querySelectorAll('[data-noise]');
+    for (var i = 0; i < buttons.length; i++) {
+      var on = buttons[i].getAttribute('data-noise') === settings.noise;
+      buttons[i].setAttribute('aria-pressed', on ? 'true' : 'false');
+    }
+    var toggle = $('noiseToggle');
+    if (toggle) {
+      if (noisePlaying) {
+        toggle.textContent = '■ 停止';
+      } else {
+        toggle.textContent = '▶ 播放';
+      }
+    }
+  }
+
+  var NOISE_NAMES = { rain: '雨声', brown: '布朗噪音', waves: '海浪', fan: '风扇' };
+
+  var noiseButtons = document.querySelectorAll('[data-noise]');
+  for (var ni = 0; ni < noiseButtons.length; ni++) {
+    (function (btn) {
+      btn.addEventListener('click', function () {
+        var kind = btn.getAttribute('data-noise');
+        var wasPlaying = noisePlaying;
+        settings.noise = kind;
+        saveSettings();
+        renderNoise();
+        if (wasPlaying) {
+          /* 切声音时新声音淡入、旧声音淡出，不要"咔"一下 */
+          if (startNoise(kind)) {
+            setStatus('noiseStatus', '正在播放：' + (NOISE_NAMES[kind] || kind), true);
+          }
+        }
+      });
+    })(noiseButtons[ni]);
+  }
+
+  var vol = $('vol');
+  var volVal = $('volVal');
+  function syncVolume() {
+    if (vol) { vol.value = String(settings.volume); }
+    if (volVal) { volVal.textContent = settings.volume + '%'; }
+    applyVolume();
+  }
+  if (vol) {
+    vol.addEventListener('input', function () {
+      var v = parseInt(vol.value, 10);
+      settings.volume = isNaN(v) ? 60 : Math.max(0, Math.min(100, v));
+      if (volVal) { volVal.textContent = settings.volume + '%'; }
+      applyVolume();
+    });
+    vol.addEventListener('change', saveSettings);
+  }
+
+  var noiseToggle = $('noiseToggle');
+  if (noiseToggle) {
+    noiseToggle.addEventListener('click', function () {
+      if (noisePlaying) {
+        stopNoise(0.6);
+        setStatus('noiseStatus', '已停止。', false);
+      } else if (startNoise(settings.noise)) {
+        setStatus('noiseStatus', '正在播放。切走标签或离开页面会自动淡出。', true);
+      }
+      renderNoise();
+    });
+  }
+
+  /* ── 呼吸引导 ─────────────────────────────────────────── */
+  var PATTERNS = {
+    '478': [
+      { label: '吸气', sec: 4, scale: 1 },
+      { label: '屏息', sec: 7, scale: 1 },
+      { label: '呼气', sec: 8, scale: 0.58 }
+    ],
+    '444': [
+      { label: '吸气', sec: 4, scale: 1 },
+      { label: '屏息', sec: 4, scale: 1 },
+      { label: '呼气', sec: 4, scale: 0.58 },
+      { label: '停留', sec: 4, scale: 0.58 }
+    ]
+  };
+  var PACES = { slow: 1.25, mid: 1, fast: 0.75 };
+
+  var br = { running: false, phase: 0, round: 1, phaseEnd: 0, timer: null, tick: null };
+  var breathDot = $('breathDot');
+  var breathPhaseEl = $('breathPhase');
+  var breathLeftEl = $('breathLeft');
+  var breathSecEl = $('breathSec');
+  var breathToggle = $('breathToggle');
+
+  function breathPattern() {
+    return PATTERNS[settings.pattern] || PATTERNS['478'];
+  }
+  function breathPhaseSec(p) {
+    return Math.max(1, Math.round(p.sec * (PACES[settings.pace] || 1)));
+  }
+  function breathTotalRounds() {
+    return Math.max(1, Math.min(20, settings.rounds || 5));
+  }
+
+  function renderBreathIdle() {
+    if (breathDot) { breathDot.style.transform = 'scale(0.58)'; }
+    if (breathPhaseEl) { breathPhaseEl.textContent = '准备'; }
+    if (breathLeftEl) { breathLeftEl.textContent = '还剩 ' + breathTotalRounds() + ' 轮'; }
+    if (breathSecEl) { breathSecEl.textContent = '—'; }
+    if (breathToggle) { breathToggle.textContent = '开始'; }
+  }
+
+  function runBreathPhase() {
+    var pat = breathPattern();
+    var p = pat[br.phase];
+    var sec = breathPhaseSec(p);
+    br.phaseEnd = Date.now() + sec * 1000;
+
+    if (breathDot) {
+      breathDot.style.transitionDuration = sec + 's';
+      breathDot.style.transform = 'scale(' + p.scale + ')';
+    }
+    if (breathPhaseEl) { breathPhaseEl.textContent = p.label; }
+    if (breathLeftEl) {
+      breathLeftEl.textContent = '还剩 ' + Math.max(1, breathTotalRounds() - br.round + 1) + ' 轮';
+    }
+    if (breathSecEl) { breathSecEl.textContent = p.label + ' · ' + sec + ' 秒'; }
+    if (breathToggle) { breathToggle.textContent = '停止'; }
+
+    window.clearTimeout(br.timer);
+    window.clearInterval(br.tick);
+    br.timer = window.setTimeout(nextBreathPhase, sec * 1000);
+    br.tick = window.setInterval(function () {
+      var left = Math.max(0, Math.ceil((br.phaseEnd - Date.now()) / 1000));
+      if (breathSecEl) { breathSecEl.textContent = p.label + ' · ' + left + ' 秒'; }
+    }, 200);
+  }
+
+  function nextBreathPhase() {
+    window.clearInterval(br.tick);
+    br.tick = null;
+    var pat = breathPattern();
+    br.phase += 1;
+    if (br.phase >= pat.length) {
+      br.phase = 0;
+      br.round += 1;
+    }
+    if (br.round > breathTotalRounds()) {
+      breathFinish();
+      return;
+    }
+    runBreathPhase();
+  }
+
+  function breathStart() {
+    if (br.running) { breathStop(); return; }
+    br.running = true;
+    br.phase = 0;
+    br.round = 1;
+    setStatus('breathStatus', '跟着圆圈：' + breathTotalRounds() + ' 轮。', true);
+    runBreathPhase();
+  }
+
+  function breathStop() {
+    br.running = false;
+    window.clearTimeout(br.timer);
+    window.clearInterval(br.tick);
+    br.timer = null;
+    br.tick = null;
+    renderBreathIdle();
+  }
+
+  function breathFinish() {
+    br.running = false;
+    window.clearTimeout(br.timer);
+    window.clearInterval(br.tick);
+    br.timer = null;
+    br.tick = null;
+    if (breathDot) {
+      breathDot.style.transitionDuration = '1.2s';
+      breathDot.style.transform = 'scale(0.58)';
+    }
+    if (breathPhaseEl) { breathPhaseEl.textContent = '完成'; }
+    if (breathLeftEl) { breathLeftEl.textContent = '做完 ' + breathTotalRounds() + ' 轮'; }
+    if (breathSecEl) { breathSecEl.textContent = '舒服一点了吗'; }
+    if (breathToggle) { breathToggle.textContent = '再来一组'; }
+    chime('soft');
+    setStatus('breathStatus', '一组做完。想继续就再点一次。', true);
+  }
+
+  if (breathToggle) { breathToggle.addEventListener('click', breathStart); }
+
+  var patternSel = $('pattern');
+  if (patternSel) {
+    patternSel.value = settings.pattern;
+    patternSel.addEventListener('change', function () {
+      settings.pattern = patternSel.value === '444' ? '444' : '478';
+      saveSettings();
+      if (br.running) { breathStop(); }
+      renderBreathIdle();
+      setStatus('breathStatus', '节奏已切换，重新开始。', false);
+    });
+  }
+
+  var paceButtons = document.querySelectorAll('[data-pace]');
+  function renderPace() {
+    for (var i = 0; i < paceButtons.length; i++) {
+      var on = paceButtons[i].getAttribute('data-pace') === settings.pace;
+      paceButtons[i].setAttribute('aria-pressed', on ? 'true' : 'false');
+    }
+  }
+  for (var pi = 0; pi < paceButtons.length; pi++) {
+    (function (btn) {
+      btn.addEventListener('click', function () {
+        settings.pace = btn.getAttribute('data-pace');
+        saveSettings();
+        renderPace();
+        if (br.running) { breathStop(); }
+        renderBreathIdle();
+      });
+    })(paceButtons[pi]);
+  }
+
+  var roundsInput = $('rounds');
+  if (roundsInput) {
+    roundsInput.value = String(settings.rounds);
+    roundsInput.addEventListener('change', function () {
+      var v = parseInt(roundsInput.value, 10);
+      settings.rounds = isNaN(v) ? 5 : Math.max(1, Math.min(20, v));
+      roundsInput.value = String(settings.rounds);
+      saveSettings();
+      if (br.running) { breathStop(); }
+      renderBreathIdle();
+    });
+  }
+
+  /* ── 番茄钟 ───────────────────────────────────────────── */
+  var pomo = {
+    running: false,
+    started: false,
+    mode: 'work',
+    total: 25 * 60000,
+    left: 25 * 60000,
+    endAt: 0,
+    timer: null
+  };
+  var clockEl = $('clock');
+  var clockModeEl = $('clockMode');
+  var pomoBar = $('pomoBar');
+  var pomoFill = $('pomoFill');
+  var pomoToggle = $('pomoToggle');
+  var workInput = $('workMin');
+  var breakInput = $('breakMin');
+
+  function modeMs(mode) {
+    var min = mode === 'work' ? (settings.work || 25) : (settings.break || 5);
+    return Math.max(1, min) * 60000;
+  }
+
+  function renderPomo() {
+    if (clockEl) { clockEl.textContent = fmtClock(pomo.left); }
+    if (clockModeEl) {
+      clockModeEl.textContent = pomo.mode === 'work' ? '专注' : '休息';
+    }
+    if (pomoBar) {
+      pomoBar.classList.toggle('break', pomo.mode !== 'work');
+    }
+    if (pomoFill) {
+      var done = pomo.total > 0 ? (pomo.total - pomo.left) / pomo.total : 0;
+      pomoFill.style.width = Math.max(0, Math.min(1, done)) * 100 + '%';
+    }
+    if (pomoToggle) {
+      pomoToggle.textContent = pomo.running ? '暂停' : (pomo.started ? '继续' : '开始');
+    }
+    /* 只在用户没在编辑时回写输入框，别把正在输入的数字冲掉 */
+    var ae = document.activeElement;
+    if (workInput && ae !== workInput) { workInput.value = String(settings.work); }
+    if (breakInput && ae !== breakInput) { breakInput.value = String(settings.break); }
+    updateTitle();
+  }
+
+  /* 标题只在番茄钟 tab 上显示倒计时；别的 tab 别抢标题 */
+  function updateTitle() {
+    if (currentTab !== 'pomo') {
+      document.title = (TAB_TITLES[currentTab] || '放松一下') + ' · 休闲角';
+      return;
+    }
+    if (pomo.started) {
+      document.title = fmtClock(pomo.left) + ' · ' + (pomo.mode === 'work' ? '专注' : '休息') + ' · 放松一下';
+    } else {
+      document.title = '番茄钟 · 休闲角';
+    }
+  }
+
+  function pomoReset(mode) {
+    window.clearInterval(pomo.timer);
+    pomo.timer = null;
+    pomo.running = false;
+    pomo.started = false;
+    pomo.mode = mode || 'work';
+    pomo.total = modeMs(pomo.mode);
+    pomo.left = pomo.total;
+    pomo.endAt = 0;
+    setStatus('pomoStatus', '', false);
+    renderPomo();
+  }
+
+  function pomoPause() {
+    if (!pomo.running) { return; }
+    pomo.left = Math.max(0, pomo.endAt - Date.now());
+    if (pomo.left <= 0) { pomoFinish(); return; }
+    pomo.running = false;
+    window.clearInterval(pomo.timer);
+    pomo.timer = null;
+    renderPomo();
+  }
+
+  function pomoStart() {
+    if (pomo.running) { pomoPause(); return; }
+    if (pomo.left <= 0) { pomo.left = pomo.total; }
+    if (!pomo.started) {
+      pomo.total = modeMs(pomo.mode);
+      pomo.left = pomo.total;
+    }
+    pomo.started = true;
+    pomo.running = true;
+    pomo.endAt = Date.now() + pomo.left;
+    window.clearInterval(pomo.timer);
+    pomo.timer = window.setInterval(pomoTick, 200);
+    setStatus('pomoStatus', pomo.mode === 'work' ? '专注中，先把别的事放一边。' : '休息一下，别盯屏幕。', true);
+    renderPomo();
+  }
+
+  function pomoTick() {
+    if (!pomo.running) { return; }
+    pomo.left = Math.max(0, pomo.endAt - Date.now());
+    if (pomo.left <= 0) {
+      pomoFinish();
+      return;
+    }
+    renderPomo();
+  }
+
+  function pomoFinish() {
+    window.clearInterval(pomo.timer);
+    pomo.timer = null;
+    pomo.running = false;
+    pomo.started = false;
+    var wasWork = pomo.mode === 'work';
+    chime(wasWork ? 'work' : 'break');
+    pomo.mode = wasWork ? 'break' : 'work';
+    pomo.total = modeMs(pomo.mode);
+    pomo.left = pomo.total;
+    pomo.endAt = 0;
+    if (document.hidden) {
+      /* 后台结束时不要把提示音继续排下去 */
+      setStatus('pomoStatus', wasWork ? '专注结束，该休息了。' : '休息结束，可以继续了。', true);
+    } else {
+      setStatus('pomoStatus', wasWork ? '专注结束，该休息了。休息计时已就位，点开始。' : '休息结束，可以开始下一轮。', true);
+    }
+    renderPomo();
+  }
+
+  if (pomoToggle) { pomoToggle.addEventListener('click', pomoStart); }
+  var pomoResetBtn = $('pomoReset');
+  if (pomoResetBtn) { pomoResetBtn.addEventListener('click', function () { pomoReset(pomo.mode); setStatus('pomoStatus', '已重置。', false); }); }
+
+  function bindDuration(input, key, max) {
+    if (!input) { return; }
+    input.addEventListener('change', function () {
+      var v = parseInt(input.value, 10);
+      if (isNaN(v)) { v = key === 'work' ? 25 : 5; }
+      settings[key] = Math.max(1, Math.min(max, v));
+      input.value = String(settings[key]);
+      saveSettings();
+      if (!pomo.running && !pomo.started) {
+        pomo.total = modeMs(pomo.mode);
+        pomo.left = pomo.total;
+        renderPomo();
+      } else {
+        setStatus('pomoStatus', '时长已保存，重置后生效。', false);
+      }
+    });
+  }
+  bindDuration(workInput, 'work', 180);
+  bindDuration(breakInput, 'break', 60);
+
+  function presetApply(w, b) {
+    settings.work = w;
+    settings.break = b;
+    saveSettings();
+    pomoReset('work');
+    setStatus('pomoStatus', '已设为 ' + w + ' / ' + b + '。', false);
+  }
+  var p255 = $('preset255');
+  if (p255) { p255.addEventListener('click', function () { presetApply(25, 5); }); }
+  var p5010 = $('preset5010');
+  if (p5010) { p5010.addEventListener('click', function () { presetApply(50, 10); }); }
+
+  /* ── 页面隐藏：全部停掉（省电，也不在后台出声） ───────── */
+  function onHidden() {
+    stopNoise(0.35);
+    renderNoise();
+    setStatus('noiseStatus', '', false);
+    breathStop();
+    if (pomo.running) { pomoPause(); }
+  }
+
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) { onHidden(); }
+  });
+  window.addEventListener('pagehide', function () {
+    stopNoise(0.2);
+    breathStop();
+    if (pomo.running) { pomoPause(); }
+  });
+
+  /* ── 启动 ─────────────────────────────────────────────── */
+  loadSettings();
+  syncVolume();
+  renderNoise();
+  renderPace();
+  renderBreathIdle();
+  renderPomo();
+  pomo.total = modeMs('work');
+  pomo.left = pomo.total;
+  renderPomo();
+  setTab('noise');
+})();
+</script>
+</body>
+</html>

@@ -129,12 +129,16 @@ ssh -F /dev/null root@100.109.125.37 '
 
 1. **入口卡**：两台**对等**的机器 —— `公司 · ThinkPad T14p`（`:22022/go`）、
    `家里 · GE75（2080 Super）`（`:22023/go`，未监听自动置灰并标注）、
-   监控面板（`:3001`）、推送服务（`:8080`，附 ntfy App/topic 提示）、文件中转（`:8081`）。
-   其中 miniserve 已改为**令牌路径**入口（根路径 `/` 返回 404），页面不硬编码前缀：
-   服务端每次采集状态时读取 `/etc/miniserve/env` 的 `PREFIX`，生成 `…:8081/<PREFIX>/`
-   完整链接；读不到或格式异常时卡片显示「未配置」并不可点击。PREFIX 不写日志、不显示文本。
+   监控面板（`:3001`）、推送服务（`:8080`，附 ntfy App/topic 提示）、文件中转（`:8081`）、
+   休闲角（`:8091`）。
+   其中 miniserve 与休闲角都是**令牌路径**入口（根路径 `/` 返回 404），页面不硬编码令牌：
+   服务端每次采集状态时读 `/etc/miniserve/env` 的 `PREFIX` 与 `/etc/dsh-arcade/token`，
+   生成 `…:8081/<PREFIX>/`、`…:8091/<token>/` 完整链接；读不到或格式异常时卡片显示
+   「未配置」并**移除 href**（留一个必 404 的链接比置灰更糟）。令牌不写日志、不显示文本。
+   两张卡共用 `updateTokenEntry()`，并把服务端返回的 `100.109.125.37` 换成**当前访问
+   host 与对应端口** —— 否则经 `localhost` 转发打开控制台时，点进去会跳到打不开的 `100.x`。
 2. **状态区**（15s 自动刷新，失败保留旧数据并安静提示）：
-   - 6 个 systemd 服务：tailscaled / ssh / rest-server / uptime-kuma / ntfy / miniserve
+   - 7 个 systemd 服务：tailscaled / ssh / rest-server / uptime-kuma / ntfy / miniserve / dsh-arcade
    - 磁盘使用率、内存可用量、load 1/5/15、主机 uptime
    - 隧道探测：`100.109.125.37:22022|22023` 的 `/go`，3 秒超时，显示 HTTP 状态码或「未监听 / 超时」
      （sshd 的 `GatewayPorts clientspecified` 只绑 tailnet 地址，`127.0.0.1` 不通）

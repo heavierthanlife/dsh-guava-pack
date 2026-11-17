@@ -59,9 +59,14 @@ const entries = PORTED.map((p) => {
 });
 const mini = makeEl();
 mini.setAttribute('id', 'miniserve-link');
+// 令牌路径类入口卡（2026-11-17 加的休闲角）：href 由 /api/status 里各服务的
+// url 动态给，且要把 100.x 换成"当前访问 host"——和文件中转卡同一个坑。
+const arcade = makeEl();
+arcade.setAttribute('id', 'arcade-link');
 
 const byId = new Map();
 byId.set('miniserve-link', mini);
+byId.set('arcade-link', arcade);
 byId.set('theme', Object.assign(makeEl(), { value: 'graphite' }));
 
 // $ 是页面里的便捷函数：sel 以 # 开头时走 getElementById，否则 querySelector。
@@ -77,12 +82,17 @@ const document = {
   querySelectorAll: (sel) => (sel === '[data-port]' ? entries : []),
   createElement: () => makeEl(),
   createDocumentFragment: () => makeEl(),
+  // 页面里有 `valueNode instanceof Node` 与 createTextNode：
+  // 不给这两个，renderRestic 会抛 "Node is not defined"，
+  // 而它被 refreshStatus 的 .catch 吞掉 —— 表现为 href 永远 null。
+  createTextNode: (text) => ({ nodeType: 3, textContent: String(text) }),
   addEventListener() {},
   body: makeEl(),
 };
 
 const ctx = {
   document,
+  Node: class Node {},
   location: { protocol: 'http:', hostname: 'localhost' },
   localStorage: { getItem: () => null, setItem() {} },
   sessionStorage: { getItem: () => null, setItem() {} },
@@ -109,5 +119,83 @@ for (const a of entries) {
   if (!ok) bad += 1;
   console.log(`${ok ? 'ok  ' : 'FAIL'} :${port} -> ${got}`);
 }
+// ── 令牌路径入口卡（文件中转 :8081 / 休闲角 :8091）─────────────────────────
+// 这两张卡的 href 不来自 HTML，而是 /api/status 返回的绝对 URL（服务端只知道
+// tailnet 地址）。所以它们有两个独立的失败方式，都必须覆盖：
+//   1. 忘了把 100.x 换成当前 host → 经 localhost 打开控制台时点了打不开；
+//   2. 端口替换错了（8091 的链接被套上 8081）→ 跳到另一个服务上。
+// 页面脚本启动时会真的去 fetch('/api/status')，但那份响应是空的（桩），
+// 所以这里直接调用页面暴露不了的内部函数行不通 —— 改为给 fetch 桩喂真实
+// 形状的 /api/status 响应，让整条链路跑一遍。
+async function checkTokenEntries() {
+  const entriesCtx = {
+    ...ctx,
+    fetch: async (url) => {
+      if (String(url).includes('/api/status')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            ok: true,
+            version: '1.0.0',
+            host: 'vps',
+            ts: new Date().toISOString(),
+            // 必须给真实形状：renderTunnels 读 data.items，传 {} 会抛，
+            // 而那个异常被 refreshStatus 的 .catch 吞掉 —— 表现为"卡片 href 一直是 null"，
+            // 看起来像我们的链接逻辑坏了，实际是桩数据不合法。
+            services: { items: [] },
+            tunnels: { items: [] },
+            restic: { snapshots: 0 },
+            gitmirror: {},
+            security: {},
+            disk: {}, memory: {}, load: { one: 0, five: 0, fifteen: 0 },
+            // 服务端只知道 tailnet 地址，这正是被替换的输入
+            miniserve: { ok: true, url: 'http://100.109.125.37:8081/x970d26da939494d24507/' },
+            arcade: { ok: true, url: 'http://100.109.125.37:8091/abcdef0123456789abcdef0123456789/' },
+          }),
+        };
+      }
+      return { ok: true, status: 200, json: async () => ({}) };
+    },
+  };
+  entriesCtx.window = entriesCtx;
+  entriesCtx.globalThis = entriesCtx;
+  entriesCtx.confirm = () => false;
+  entriesCtx.alert = () => {};
+  vm.createContext(entriesCtx);
+
+  const miniEl = Object.assign(makeEl(), {});
+  miniEl.setAttribute('id', 'miniserve-link');
+  const arcadeEl = Object.assign(makeEl(), {});
+  arcadeEl.setAttribute('id', 'arcade-link');
+  const ids = new Map([['miniserve-link', miniEl], ['arcade-link', arcadeEl],
+    ['theme', Object.assign(makeEl(), { value: 'graphite' })]]);
+  const doc = {
+    ...document,
+    getElementById: (id) => ids.get(id) || makeEl(),
+  };
+  entriesCtx.document = doc;
+
+  vm.createContext(entriesCtx);
+  vm.runInContext(main, entriesCtx, { timeout: 5000 });
+  // 等首轮 refreshStatus 落地
+  for (let i = 0; i < 20; i++) await new Promise((resolve) => setImmediate(resolve));
+
+  let bad = 0;
+  const cases = [
+    [miniEl, 'http://localhost:8081/x970d26da939494d24507/', '文件中转 :8081'],
+    [arcadeEl, 'http://localhost:8091/abcdef0123456789abcdef0123456789/', '休闲角 :8091'],
+  ];
+  for (const [el, want, label] of cases) {
+    const got = el.getAttribute('href');
+    const ok = got === want;
+    if (!ok) bad += 1;
+    console.log(`${ok ? 'ok  ' : 'FAIL'} ${label} -> ${got}`);
+  }
+  return bad;
+}
+
+bad += await checkTokenEntries();
+
 console.log(bad === 0 ? '\nPASS 入口链接已按当前 host 生成' : `\nFAIL ${bad} 条未赋值`);
 process.exit(bad === 0 ? 0 : 1);
