@@ -3,12 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="color-scheme" content="dark">
+<meta name="color-scheme" content="dark light">
 <meta name="theme-color" content="#0b0d10">
 <title>休闲角 · DSH</title>
 <link rel="stylesheet" href="shared.css">
+<!-- 必须在首帧前跑：主题要落到 <html> 上，否则会先闪一下默认色 -->
+<script src="arcade.js"></script>
+<script>Arcade.initTheme({ themes: true });</script>
 <style>
-  .hero { padding: 22px 16px 6px; max-width: 720px; margin: 0 auto; }
+  .hero { padding: 20px 16px 4px; max-width: 720px; margin: 0 auto; }
   .hero h1 { margin: 0 0 6px; font-size: 22px; letter-spacing: .01em; }
   .hero p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
 
@@ -16,17 +19,16 @@
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(min(100%, 156px), 1fr));
     gap: 12px;
-    padding: 18px 16px 28px;
+    padding: 16px;
     max-width: 720px;
     margin: 0 auto;
   }
 
-  .card {
+  .entry {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    /* 整张卡可点：手机上别让用户对准小字 */
-    min-height: 104px;
+    min-height: 108px;
     padding: 14px;
     border: 1px solid var(--line);
     border-radius: var(--radius);
@@ -35,32 +37,58 @@
     text-decoration: none;
     touch-action: manipulation;
     -webkit-tap-highlight-color: transparent;
-    transition: border-color .14s ease, transform .14s ease;
+    transition: border-color .14s ease, transform .14s ease, box-shadow .14s ease;
   }
 
-  .card:hover, .card:focus-visible { border-color: var(--accent); transform: translateY(-2px); }
-  .card:active { transform: translateY(0); }
+  .entry:hover, .entry:focus-visible {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow);
+  }
+  .entry:active { transform: translateY(0); }
 
-  .card .icon {
+  /* 每张卡用自己的强调色，首页整体才"彩色"而不是一片灰 */
+  .entry[data-accent="gold"]   { --card-accent: #f2b23e; }
+  .entry[data-accent="mint"]   { --card-accent: #4fd8a4; }
+  .entry[data-accent="rose"]   { --card-accent: #ff8fb0; }
+  .entry[data-accent="violet"] { --card-accent: #b79cff; }
+  .entry[data-accent="sky"]    { --card-accent: #6fb6ff; }
+  .entry[data-accent="sunset"] { --card-accent: #ff9d5c; }
+  .entry[data-accent="cyan"]   { --card-accent: #5ce0e6; }
+
+  html[data-mode="light"] .entry[data-accent="gold"]   { --card-accent: #9a5f00; }
+  html[data-mode="light"] .entry[data-accent="mint"]   { --card-accent: #0b7a52; }
+  html[data-mode="light"] .entry[data-accent="rose"]   { --card-accent: #b3204a; }
+  html[data-mode="light"] .entry[data-accent="violet"] { --card-accent: #5b32c4; }
+  html[data-mode="light"] .entry[data-accent="sky"]    { --card-accent: #1258a8; }
+  html[data-mode="light"] .entry[data-accent="sunset"] { --card-accent: #a8480a; }
+  html[data-mode="light"] .entry[data-accent="cyan"]   { --card-accent: #0a7378; }
+
+  .entry .icon {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 30px; height: 30px;
-    border: 1px solid var(--line);
+    width: 32px; height: 32px;
+    border: 1px solid color-mix(in srgb, var(--card-accent) 40%, var(--line));
     border-radius: 8px;
-    background: var(--bg);
+    background: color-mix(in srgb, var(--card-accent) 12%, var(--bg));
     flex: none;
   }
-  .card .icon svg { width: 16px; height: 16px; stroke: var(--accent); fill: none;
-    stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+  .entry .icon svg {
+    width: 17px; height: 17px;
+    stroke: var(--card-accent); fill: none;
+    stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round;
+  }
 
-  .card .name { font-size: 14px; font-weight: 600; }
-  .card .desc { font-size: 12px; color: var(--muted); line-height: 1.5; margin-top: auto; }
+  .entry .name { font-size: 14px; font-weight: 600; }
+  .entry .desc { font-size: 12px; color: var(--muted); line-height: 1.5; margin-top: auto; }
+  /* 有记录就在卡片上带一句，省得进去才知道 */
+  .entry .best { font-size: 11px; color: var(--card-accent); font-weight: 600; }
 
   .section-title {
     max-width: 720px;
     margin: 0 auto;
-    padding: 6px 16px 0;
+    padding: 8px 16px 0;
     font-size: 12px;
     font-weight: 600;
     letter-spacing: .08em;
@@ -71,24 +99,57 @@
   footer {
     max-width: 720px;
     margin: 0 auto;
-    padding: 0 16px 32px;
+    padding: 24px 16px 40px;
     color: var(--muted);
     font-size: 12px;
     line-height: 1.7;
   }
-  footer code {
-    background: var(--panel);
+
+  /* ── 顶栏右侧：主题选择 + 明暗 ───────────────────────────────── */
+  .theme-pick {
+    min-height: 36px;
+    padding: 0 8px;
     border: 1px solid var(--line);
-    border-radius: 4px;
-    padding: 1px 5px;
-    font-size: 11px;
+    border-radius: var(--radius);
+    background: var(--panel);
+    color: var(--text);
+    font-size: 13px;
+    font-family: inherit;
+    cursor: pointer;
+    touch-action: manipulation;
   }
+  .theme-pick:hover { border-color: var(--accent); }
+
+  /* ── 记录管理 ─────────────────────────────────────────────────── */
+  .rec-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--line-soft);
+    border-radius: calc(var(--radius) - 2px);
+    background: var(--panel-2);
+  }
+  .rec-row + .rec-row { margin-top: 8px; }
+  .rec-row .rec-main { flex: 1; min-width: 0; }
+  .rec-row .rec-name { font-size: 13px; font-weight: 600; }
+  .rec-row .rec-val { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .rec-row .rec-val.has { color: var(--accent); font-weight: 600; }
+  .rec-row .btn { min-height: 40px; padding: 0 12px; font-size: 13px; }
 </style>
 </head>
 <body>
 
 <header class="topbar">
   <h1>休闲角</h1>
+  <select class="theme-pick" id="theme" aria-label="主题" title="切换主题">
+    <option value="graphite">石墨金</option>
+    <option value="cyber">赛博柠檬</option>
+    <option value="navy">深海蓝</option>
+    <option value="ember">熔岩橙</option>
+    <option value="ice">冷银蓝</option>
+  </select>
+  <button class="icon-btn" id="mode" type="button" aria-label="切换明暗">☀</button>
 </header>
 
 <div class="hero">
@@ -98,31 +159,35 @@
 
 <div class="section-title">游戏</div>
 <div class="grid">
-  <a class="card" href="g2048.html">
+  <a class="entry" data-accent="gold" href="g2048.html" target="_blank" rel="noopener" data-game="g2048">
     <span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><rect x="13" y="13" width="8" height="8" rx="1.5"/></svg></span>
     <span class="name">2048</span>
-    <span class="desc">合并数字到 2048，五秒一局的开胃菜</span>
+    <span class="desc">合并数字到 2048</span>
+    <span class="best" data-best="g2048"></span>
   </a>
-  <a class="card" href="snake.html">
+  <a class="entry" data-accent="mint" href="snake.html" target="_blank" rel="noopener" data-game="snake">
     <span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 6h6a4 4 0 0 1 0 8H8a3 3 0 0 0 0 6h9"/><circle cx="18" cy="6" r="1.5"/></svg></span>
     <span class="name">贪吃蛇</span>
     <span class="desc">方向键或滑动，越吃越长</span>
+    <span class="best" data-best="snake"></span>
   </a>
-  <a class="card" href="mines.html">
+  <a class="entry" data-accent="rose" href="mines.html" target="_blank" rel="noopener" data-game="mines">
     <span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="6"/><path d="M12 7V3M9 4.5 7 2M15 4.5 17 2M5 9 2 8M19 9l3-1"/></svg></span>
     <span class="name">扫雷</span>
     <span class="desc">三档难度，长按插旗</span>
+    <span class="best" data-best="mines"></span>
   </a>
-  <a class="card" href="tetris.html">
+  <a class="entry" data-accent="violet" href="tetris.html" target="_blank" rel="noopener" data-game="tetris">
     <span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 4h6v6H4zM14 4h6v6h-6zM9 14h6v6H9z"/></svg></span>
     <span class="name">俄罗斯方块</span>
     <span class="desc">七种方块，消行加速</span>
+    <span class="best" data-best="tetris"></span>
   </a>
 </div>
 
 <div class="section-title">解压</div>
 <div class="grid">
-  <a class="card" href="relax.html">
+  <a class="entry" data-accent="sky" href="relax.html" target="_blank" rel="noopener">
     <span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 12c3-4 6-4 9 0s6 4 9 0"/><path d="M3 17c3-4 6-4 9 0s6 4 9 0"/></svg></span>
     <span class="name">放松一下</span>
     <span class="desc">白噪音 · 呼吸引导 · 番茄钟</span>
@@ -131,22 +196,158 @@
 
 <div class="section-title">小工具</div>
 <div class="grid">
-  <a class="card" href="decide.html">
+  <a class="entry" data-accent="sunset" href="decide.html" target="_blank" rel="noopener">
     <span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 12 12 3M12 12l7.8 4.5"/></svg></span>
     <span class="name">选择困难</span>
-    <span class="desc">转盘 / 骰子 / 抽签，选项可存</span>
+    <span class="desc">转盘 / 骰子 / 抽签</span>
   </a>
-  <a class="card" href="pixel.html">
+  <a class="entry" data-accent="cyan" href="pixel.html" target="_blank" rel="noopener">
     <span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 20 8 4l12 4-4 12z"/><path d="M10 12h.01M14 10h.01"/></svg></span>
     <span class="name">像素画板</span>
     <span class="desc">随手画，能导出 PNG</span>
   </a>
 </div>
 
+<div class="section-title">记录</div>
+<div class="wrap" style="padding-top:12px">
+  <div id="rec-list"></div>
+  <div class="row" style="margin-top:12px">
+    <button class="btn danger" id="clear-all" type="button">清空全部记录</button>
+  </div>
+  <p class="small muted" style="margin:8px 0 0">
+    只清最高分，不动存档进度、画板和设置。删除不可恢复。
+  </p>
+</div>
+
 <footer>
-  <p>只在你自己的浏览器里存档（最高分、设置、画板）。换设备不同步。</p>
-  <p>这些页面全部离线可用；没有统计、没有外链、不会联网。</p>
+  <p>只在你自己的浏览器里存档（最高分、进度、设置、画板）。换设备不同步。</p>
+  <p>全部离线可用；没有统计、没有外链、不会联网。</p>
 </footer>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ── 主题与明暗 ─────────────────────────────────────────────── */
+  var themePick = document.getElementById('theme');
+  var modeBtn = document.getElementById('mode');
+
+  themePick.value = Arcade.getTheme();
+  themePick.addEventListener('change', function () {
+    Arcade.setTheme(themePick.value);
+  });
+
+  function paintMode() {
+    var mode = Arcade.getMode('index');
+    modeBtn.textContent = mode === 'dark' ? '☀' : '☾';
+    var label = mode === 'dark' ? '切换到明亮主题' : '切换到暗色主题';
+    modeBtn.setAttribute('aria-label', label);
+    modeBtn.setAttribute('title', label);
+    // theme-color 也跟着变，手机状态栏才不会突兀
+    var meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', mode === 'dark' ? '#0b0d10' : '#f4f6fa');
+  }
+  paintMode();
+  modeBtn.addEventListener('click', function () {
+    Arcade.toggleMode('index');
+    paintMode();
+  });
+
+  /* ── 记录管理 ───────────────────────────────────────────────── */
+  var listBox = document.getElementById('rec-list');
+
+  /** 把一条记录值格式化成人类可读；扫雷是对象（三档用时）。 */
+  function formatScore(gameId, value) {
+    if (value === null) return '暂无记录';
+    if (gameId === 'mines') {
+      if (typeof value !== 'object') return '暂无记录';
+      var order = [['easy', '初级'], ['medium', '中级'], ['hard', '高级']];
+      var parts = [];
+      for (var i = 0; i < order.length; i++) {
+        var v = value[order[i][0]];
+        if (typeof v === 'number' && isFinite(v) && v > 0) {
+          parts.push(order[i][1] + ' ' + Math.round(v) + 's');
+        }
+      }
+      return parts.length === 0 ? '暂无记录' : parts.join(' · ');
+    }
+    if (typeof value === 'number' && isFinite(value)) return value + ' 分';
+    return '暂无记录';
+  }
+
+  function renderRecords() {
+    listBox.textContent = '';
+    var snapshot = Arcade.scoreSnapshot();
+    for (var i = 0; i < snapshot.length; i++) {
+      (function (entry) {
+        var row = document.createElement('div');
+        row.className = 'rec-row';
+
+        var main = document.createElement('div');
+        main.className = 'rec-main';
+        var name = document.createElement('div');
+        name.className = 'rec-name';
+        name.textContent = entry.name;
+        var val = document.createElement('div');
+        val.className = 'rec-val' + (entry.has ? ' has' : '');
+        val.textContent = formatScore(entry.id, entry.value);
+        main.appendChild(name);
+        main.appendChild(val);
+        row.appendChild(main);
+
+        var del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'btn danger';
+        del.textContent = '删除';
+        del.disabled = !entry.has;
+        Arcade.confirmAction(del, {
+          text: '删除',
+          confirmText: '确认删除？',
+          onConfirm: function () {
+            Arcade.delScore(entry.id);
+            renderRecords();
+            paintCardBests();
+          }
+        });
+        row.appendChild(del);
+
+        listBox.appendChild(row);
+      })(snapshot[i]);
+    }
+  }
+
+  /** 首页卡片上那一行"最高分"，让人不用进去就知道有没有记录。 */
+  function paintCardBests() {
+    var cards = document.querySelectorAll('[data-best]');
+    for (var i = 0; i < cards.length; i++) {
+      var gameId = cards[i].getAttribute('data-best');
+      var value = Arcade.getScore(gameId);
+      var text = formatScore(gameId, value);
+      cards[i].textContent = value === null ? '' : text;
+    }
+  }
+
+  var clearAll = document.getElementById('clear-all');
+  Arcade.confirmAction(clearAll, {
+    text: '清空全部记录',
+    confirmText: '确认清空全部？',
+    onConfirm: function () {
+      Arcade.clearScores();
+      renderRecords();
+      paintCardBests();
+    }
+  });
+
+  renderRecords();
+  paintCardBests();
+
+  /* 从别的标签页改完记录回来时同步（子页面删了记录，首页要跟着变） */
+  window.addEventListener('focus', function () {
+    renderRecords();
+    paintCardBests();
+  });
+})();
+</script>
 
 </body>
 </html>

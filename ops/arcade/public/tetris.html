@@ -3,12 +3,67 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="color-scheme" content="dark">
+<meta name="color-scheme" content="dark light">
 <meta name="theme-color" content="#0b0d10">
 <title>俄罗斯方块 · 休闲角</title>
 <link rel="stylesheet" href="shared.css">
+<!-- 共用运行时：主题/明暗/分数/存档都从这里来；必须在首帧前落到 <html> 上 -->
+<script src="arcade.js"></script>
+<script>Arcade.initTheme({ page: 'tetris', accent: 'violet' });</script>
 <style>
   .wrap { padding: 12px 16px 24px; }
+
+  /* 棋盘底与网格线跟着明暗走；canvas 里用 getComputedStyle 读这两个变量，
+     所以切明暗后要重绘一次（见 refreshPaint）。 */
+  :root {
+    --board-bg: #0a0c0f;
+    --board-grid: rgba(255, 255, 255, .055);
+  }
+  html[data-mode="light"] {
+    --board-bg: #eef2f8;
+    --board-grid: rgba(22, 32, 46, .10);
+  }
+
+  /* 顶部"上次没玩完"提示：有存档才出现，一条横条，不弹窗 */
+  .resume {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+    padding: 8px 12px;
+    border: 1px solid var(--accent);
+    border-radius: var(--radius);
+    background: var(--accent-soft);
+    font-size: 13px;
+  }
+  .resume[hidden] { display: none; }
+  .resume .resume-msg { flex: 1 1 150px; min-width: 0; line-height: 1.5; }
+  .resume .btn { padding: 0 12px; font-size: 13px; }
+
+  /* mountScoreRow 生成 .rec-row；shared.css 只给了 .slot，这里补记录行 */
+  #score-row { margin-top: 10px; }
+  .rec-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border: 1px solid var(--line-soft);
+    border-radius: calc(var(--radius) - 2px);
+    background: var(--panel);
+  }
+  .rec-row + .rec-row { margin-top: 8px; }
+  .rec-row .rec-main { flex: 1; min-width: 0; }
+  .rec-row .rec-name { font-size: 11px; letter-spacing: .04em; color: var(--muted); }
+  .rec-row .rec-val {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
+    margin-top: 2px;
+    line-height: 1.45;
+  }
+  .rec-row .rec-val.has { color: var(--accent); }
+  .rec-row .btn { padding: 0 12px; font-size: 13px; }
 
   .hud {
     display: grid;
@@ -56,7 +111,7 @@
     display: block;
     border: 1px solid var(--line);
     border-radius: var(--radius);
-    background: #0a0c0f;
+    background: var(--board-bg);
   }
 
   .overlay {
@@ -69,7 +124,7 @@
     gap: 10px;
     padding: 16px;
     border-radius: var(--radius);
-    background: rgba(8, 10, 13, .82);
+    background: color-mix(in srgb, var(--bg) 82%, transparent);
     backdrop-filter: blur(2px);
     text-align: center;
   }
@@ -104,9 +159,14 @@
 <header class="topbar">
   <a class="back" href="index.html" aria-label="返回首页">←</a>
   <h1>俄罗斯方块</h1>
+  <!-- mountSlots 会把存档按钮插在这个 #mode 前面，所以 id 必须是 mode -->
+  <button class="icon-btn" id="mode" type="button" aria-label="切换明暗">☀</button>
 </header>
 
 <div class="wrap">
+
+  <!-- 有存档才显示（见 paintResumeHint）；没有存档时保持安静，不弹窗 -->
+  <div class="resume" id="resumeHint" hidden></div>
 
   <div class="hud">
     <div class="stat"><span class="k">分数</span><span class="v" id="score">0</span></div>
@@ -157,13 +217,15 @@
 
   <p class="tip small muted center">键盘 ← → 移动 · ↑ 旋转 · ↓ 软降 · 空格 硬降 · P 暂停</p>
 
+  <!-- 最高分 + 就地删除（mountScoreRow 渲染）；放在棋盘下面，不抢棋盘高度 -->
+  <div id="score-row"></div>
+
 </div>
 
 <script>
 (function () {
   'use strict';
 
-  var BEST_KEY = 'arcade.tetris.best';
   var COLS = 10;
   var ROWS = 20;
 
@@ -192,6 +254,9 @@
   var elControls = document.getElementById('controls');
   var elCtl2 = document.getElementById('ctl2');
   var elPause = document.getElementById('btnPause');
+  var elMode = document.getElementById('mode');
+  var elScoreRow = document.getElementById('score-row');
+  var elResume = document.getElementById('resumeHint');
 
   var ctx = elBoard.getContext('2d');
   var nctx = elNext.getContext('2d');
@@ -209,31 +274,40 @@
   var running = false;
 
   var best = 0;
+  var scoreRow = null;
   var raf = null;
   var lastTs = 0;
   var dropAcc = 0;
 
   var rotations = {};
 
-  /* ── 存档 ─────────────────────────────────────────────── */
-  function loadBest() {
+  /* 棋盘底/网格线（canvas 用）：默认暗色，layout 与切明暗时从 CSS 变量读一次 */
+  var boardPaint = { bg: '#0a0c0f', grid: 'rgba(255, 255, 255, .055)' };
+
+  function readBoardPaint() {
     try {
-      var raw = localStorage.getItem(BEST_KEY);
-      if (!raw) return 0;
-      var v = parseInt(raw, 10);
-      if (isFinite(v) && v > 0) return v;
+      var cs = window.getComputedStyle(document.documentElement);
+      var bg = cs.getPropertyValue('--board-bg').trim();
+      var line = cs.getPropertyValue('--board-grid').trim();
+      if (bg) boardPaint.bg = bg;
+      if (line) boardPaint.grid = line;
     } catch (err) {
-      /* 隐私模式等：当作没有记录 */
+      /* 读不到就沿用默认暗色，至少不是白屏 */
     }
-    return 0;
+  }
+
+  /* ── 最高分 ───────────────────────────────────────────────
+   * 走 Arcade（键 arcade.tetris.best），本页不再直接碰 localStorage。
+   * 每次用之前都从存储读：页内删掉记录后，"最佳"不会还挂着旧值。
+   */
+  function currentBest() {
+    var v = Arcade.getScore('tetris');
+    var n = typeof v === 'number' ? v : Number(v);
+    return isFinite(n) && n > 0 ? n : 0;
   }
 
   function saveBest(v) {
-    try {
-      localStorage.setItem(BEST_KEY, String(v));
-    } catch (err) {
-      /* 存不进去也不影响这一局 */
-    }
+    Arcade.writeJSON('tetris.best', v);
   }
 
   /* ── 形状旋转表 ───────────────────────────────────────── */
@@ -283,7 +357,8 @@
     return g;
   }
 
-  function collide(m, px, py) {
+  /** 在任意棋盘上判碰撞（restore 校验存档时用，不碰当前 grid）。 */
+  function collidesIn(g, m, px, py) {
     var n = m.length;
     for (var y = 0; y < n; y++) {
       for (var x = 0; x < n; x++) {
@@ -291,10 +366,14 @@
         var bx = px + x;
         var by = py + y;
         if (bx < 0 || bx >= COLS || by >= ROWS) return true;
-        if (by >= 0 && grid[by][bx]) return true;
+        if (by >= 0 && g[by][bx]) return true;
       }
     }
     return false;
+  }
+
+  function collide(m, px, py) {
+    return collidesIn(grid, m, px, py);
   }
 
   function spawn() {
@@ -493,10 +572,10 @@
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, view.w, view.h);
 
-    ctx.fillStyle = '#0a0c0f';
+    ctx.fillStyle = boardPaint.bg;
     ctx.fillRect(0, 0, view.w, view.h);
 
-    ctx.strokeStyle = 'rgba(255,255,255,.055)';
+    ctx.strokeStyle = boardPaint.grid;
     ctx.lineWidth = 1;
     for (var gx = 1; gx < COLS; gx++) {
       var px = gx * cell + 0.5;
@@ -589,6 +668,7 @@
 
   /* ── 尺寸 ─────────────────────────────────────────────── */
   function layout() {
+    readBoardPaint();
     var availW = elStage.clientWidth || 240;
     var top = elStage.getBoundingClientRect().top || 0;
     var uiH = (elControls.offsetHeight || 96) + (elCtl2.offsetHeight || 44) + 110;
@@ -737,10 +817,14 @@
     cur = null;
     render();
 
-    var record = score > best && score > 0;
-    if (record) {
+    var record = false;
+    /* 页内可能刚删过记录：比较前先读存储里的现状 */
+    best = currentBest();
+    if (score > best && score > 0) {
       best = score;
       saveBest(best);
+      record = true;
+      if (scoreRow) scoreRow.refresh();
     }
 
     setOverlay(
@@ -776,6 +860,210 @@
     render();
     running = true;
     startLoop();
+  }
+
+  /* ── 存档槽：capture / restore / onPause ─────────────────
+   * 面板、自动存档、5 槽淘汰都由 Arcade.mountSlots 负责；
+   * 本页只回答三件事：局面是什么、怎么放回去、离开时怎么停。
+   */
+
+  function gridIsEmpty() {
+    for (var y = 0; y < ROWS; y++) {
+      for (var x = 0; x < COLS; x++) {
+        if (grid[y] && grid[y][x]) return false;
+      }
+    }
+    return true;
+  }
+
+  function toInt(value, fallback) {
+    var n = Number(value);
+    if (!isFinite(n) || n !== Math.floor(n)) return fallback;
+    return n;
+  }
+
+  /** 当前局面 → 可 JSON 序列化的快照；null = 现在没东西可存。 */
+  function capture() {
+    /* 已经结束的局没有"继续"的意义 */
+    if (over || !cur) return null;
+
+    /* 刚开一局、一手没动（分数/消行都是 0、方块还在出生位置、盘面干净）：
+     * 存了也等于重开，别占存档位，更别下次打开就弹"继续上次"。 */
+    if (score === 0 && linesCleared === 0 && gridIsEmpty() &&
+        cur.rot === 0 && cur.y === 0) {
+      return null;
+    }
+
+    var rowsOut = [];
+    for (var y = 0; y < ROWS; y++) {
+      var row = '';
+      for (var x = 0; x < COLS; x++) row += grid[y][x] || '.';
+      rowsOut.push(row);
+    }
+
+    return {
+      /* 淘汰依据是"分数最低"。俄罗斯方块分数越高越好，所以直接传分数：
+       * 槽位满了会先扔掉分最低的那局，留下的都是值得继续的。 */
+      score: score,
+      label: '等级 ' + level + ' · ' + fmt(score) + ' 分',
+      state: {
+        v: 1,
+        grid: rowsOut,                                    // 20 行 × 10 字符，'.' = 空
+        cur: { type: cur.type, rot: cur.rot, x: cur.x, y: cur.y },
+        queue: queue.slice(),                             // 7-bag 队列（含"下一个"往后的顺序）
+        score: score,
+        lines: linesCleared,
+        level: level,
+        dropMs: Math.round(gravityMs()),                  // 当前下落间隔（毫秒）
+        dropAcc: Math.round(dropAcc)                      // 距下一次下落的累计毫秒
+      }
+    };
+  }
+
+  /**
+   * 把 state 应用回游戏。恢复后处于**暂停**态（rAF 停、计时不走），
+   * 覆盖层给出"继续"按钮，点了才恢复循环。
+   * 先整体校验再落地：坏档返回 false，不动当前局面。
+   */
+  function restore(state) {
+    if (!state || typeof state !== 'object') return false;
+
+    var rowsData = state.grid;
+    if (!Array.isArray(rowsData) || rowsData.length !== ROWS) return false;
+
+    var nextGrid = emptyGrid();
+    for (var y = 0; y < ROWS; y++) {
+      var rowStr = rowsData[y];
+      if (typeof rowStr !== 'string' || rowStr.length !== COLS) return false;
+      for (var x = 0; x < COLS; x++) {
+        var ch = rowStr.charAt(x);
+        if (ch === '.') continue;
+        if (!SHAPES[ch]) return false;      // 不认识的方块类型 = 坏档
+        nextGrid[y][x] = ch;
+      }
+    }
+
+    var c = state.cur;
+    if (!c || typeof c !== 'object' || typeof c.type !== 'string' || !SHAPES[c.type]) return false;
+    var rot = toInt(c.rot, -1);
+    if (rot < 0 || rot > 3) return false;
+    var px = toInt(c.x, 1000);
+    var py = toInt(c.y, 1000);
+    if (px < -4 || px > COLS - 1 || py < -4 || py > ROWS - 1) return false;
+
+    buildRotations();   // 幂等：确保旋转表已就绪
+    if (!rotations[c.type] || !rotations[c.type][rot]) return false;
+    var matrix = rotations[c.type][rot];
+    /* 存档里当前方块不能和已落定的方块重叠，否则恢复出来是个死局 */
+    if (collidesIn(nextGrid, matrix, px, py)) return false;
+
+    var q = [];
+    if (Array.isArray(state.queue)) {
+      for (var i = 0; i < state.queue.length; i++) {
+        var t = state.queue[i];
+        if (typeof t === 'string' && SHAPES[t]) q.push(t);
+      }
+    }
+
+    /* 校验通过，开始落地 */
+    stopLoop();
+    grid = nextGrid;
+    queue = q;
+    ensureQueue();
+    cur = { type: c.type, rot: rot, m: matrix, x: px, y: py };
+    score = Math.max(0, toInt(state.score, 0));
+    linesCleared = Math.max(0, toInt(state.lines, 0));
+    level = toInt(state.level, 0);
+    if (level <= 0) {
+      /* 没带等级：用车速反推，再退回按消行数算 */
+      var step = Number(state.dropMs);
+      level = isFinite(step) && step > 0
+        ? Math.max(1, Math.round(1 + Math.log(step / 900) / Math.log(0.82)))
+        : Math.floor(linesCleared / 10) + 1;
+    }
+    var acc = Number(state.dropAcc);
+    dropAcc = isFinite(acc) && acc > 0 ? acc : 0;
+    over = false;
+    paused = true;
+    running = false;
+
+    paintHud();
+    paintPauseButton();
+    /* 提示条会改变 stage 的纵向位置：先藏再量尺寸，棋盘才不会被挤出去 */
+    hideResumeHint();
+    layout();
+    drawNext();
+    render();
+    setOverlay('已载入存档', '分数 ' + fmt(score) + ' · 等级 ' + level + ' · 计时已停', [
+      { label: '继续', primary: true, onClick: function () { togglePause(false); } },
+      { label: '重开', onClick: function () { newGame(); } }
+    ]);
+    return true;
+  }
+
+  /**
+   * 页面隐藏 / 卸载时由 Arcade.mountSlots 调用（本页自己的 visibilitychange
+   * 也走同一条路）：停 rAF 并置 paused，后台不空转。
+   */
+  function onPause() {
+    stopLoop();
+    if (!over && !paused) togglePause(true);
+  }
+
+  /* ── 顶部"继续上次"提示 ──────────────────────────────────
+   * 有存档才出现，一条横条、不弹窗、不挡操作；"忽略"只藏这一次。
+   * 没有存档就完全安静。
+   */
+  function latestSlot() {
+    var list = Arcade.listSlots('tetris');
+    if (!list.length) return null;
+    var pick = list[0];
+    for (var i = 1; i < list.length; i++) {
+      if ((list[i].at || 0) > (pick.at || 0)) pick = list[i];
+    }
+    return pick;
+  }
+
+  function hideResumeHint() {
+    if (elResume) elResume.hidden = true;
+  }
+
+  function paintResumeHint() {
+    if (!elResume) return;
+    elResume.textContent = '';
+    var entry = latestSlot();
+    if (!entry) {
+      elResume.hidden = true;
+      return;
+    }
+
+    var when = Arcade.timeAgo(entry.at);
+    var msg = document.createElement('span');
+    msg.className = 'resume-msg';
+    msg.textContent = '还有一局没玩完：' + (entry.label || '存档') + (when ? ' · ' + when : '');
+
+    var go = document.createElement('button');
+    go.type = 'button';
+    go.className = 'btn primary';
+    go.textContent = '继续';
+    go.addEventListener('click', function () {
+      if (restore(entry.state)) return;      // restore 会藏提示并进入暂停态
+      hideResumeHint();
+      setOverlay('存档读不出来', '这条存档已跳过，接着玩这一局就行', [
+        { label: '知道了', primary: true, onClick: hideOverlay }
+      ]);
+    });
+
+    var skip = document.createElement('button');
+    skip.type = 'button';
+    skip.className = 'btn ghost';
+    skip.textContent = '忽略';
+    skip.addEventListener('click', hideResumeHint);
+
+    elResume.appendChild(msg);
+    elResume.appendChild(go);
+    elResume.appendChild(skip);
+    elResume.hidden = false;
   }
 
   /* ── 键盘 ─────────────────────────────────────────────── */
@@ -888,9 +1176,44 @@
   });
   window.addEventListener('orientationchange', function () { layout(); });
 
+  /* 手机状态栏的颜色跟着明暗走 */
+  function paintMeta() {
+    var meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', Arcade.getMode('tetris') === 'light' ? '#f4f6fa' : '#0b0d10');
+  }
+
+  /* 切明暗后 canvas 不会自己重画（它读的是 CSS 变量），补一次重绘 */
+  function refreshPaint() {
+    readBoardPaint();
+    render();
+    drawNext();
+  }
+
   /* ── 启动 ─────────────────────────────────────────────── */
-  best = loadBest();
+  /* 提示条先建：newGame() 里的 layout() 要按"提示条在不在"量 stage 的位置 */
+  paintResumeHint();
   newGame();
+
+  /* 共用运行时装配：座位（#mode / #score-row / .topbar）必须先存在 */
+  Arcade.mountModeToggle(elMode, 'tetris');
+  paintMeta();
+  if (elMode) {
+    elMode.addEventListener('click', function () {
+      /* mountModeToggle 的监听先跑，这里读到的已经是新值 */
+      paintMeta();
+      refreshPaint();
+    });
+  }
+
+  scoreRow = Arcade.mountScoreRow(elScoreRow, 'tetris');
+
+  Arcade.mountSlots({
+    gameId: 'tetris',
+    unit: '分',
+    capture: capture,
+    restore: restore,
+    onPause: onPause
+  });
 })();
 </script>
 

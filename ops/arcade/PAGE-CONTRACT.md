@@ -8,7 +8,8 @@
 | 文件 | 路由 | 内容 |
 |---|---|---|
 | `public/index.html` | `/<令牌>/` | 统一首页（入口卡） |
-| `public/shared.css` | 共用 | 顶栏/按钮/变量（**只由首页作者改**） |
+| `public/shared.css` | 共用 | 明暗底色 / 5 套主题 / 每页强调色 / 顶栏按钮 / 面板样式 |
+| `public/arcade.js` | 共用 | **主题、明暗、分数增删、存档槽、二次确认**（不要改） |
 | `public/g2048.html` | `g2048` | 2048 |
 | `public/snake.html` | `snake` | 贪吃蛇 |
 | `public/mines.html` | `mines` | 扫雷 |
@@ -17,8 +18,51 @@
 | `public/decide.html` | `decide` | 转盘 / 骰子 / 抽签 |
 | `public/pixel.html` | `pixel` | 像素画板（导出 PNG） |
 
-**每个页面都是独立单文件 HTML**（内联 CSS + 内联 JS），不拆分、不打包、无依赖。
-可以用 `<link rel="stylesheet" href="shared.css">`（相对路径，不带前导 `/`）。
+**每个页面仍然是一个 HTML 文件**（页面自己的 CSS/JS 内联），不打包、无外部依赖。
+允许并应当引用两个共用文件（相对路径，不带前导 `/`）：
+
+```html
+<link rel="stylesheet" href="shared.css">
+<script src="arcade.js"></script>
+<script>Arcade.initTheme({ page: 'g2048', accent: 'gold' });</script>
+```
+
+> **为什么允许共用 JS**（2026-11-17 修订）：
+> 主题切换、分数删除、存档槽、二次确认这四件事原本要抄进 8 个页面。
+> 抄 8 份的后果不是代码多，而是**行为漂移** —— 改一处忘三处，
+> 用户会觉得"时好时坏"。抽成 `arcade.js` 之后，页面只负责"游戏本身"。
+>
+> 主题脚本必须放在 `<head>` 里**同步**执行：晚了会先闪一下默认配色。
+
+### 每个子页面必须做的三件事
+
+```js
+// 1. 主题（<head> 里，早于首帧）
+Arcade.initTheme({ page: 'g2048', accent: 'gold' });
+
+// 2. 顶栏明暗切换按钮：<button class="icon-btn" id="mode">☀</button>
+Arcade.mountModeToggle(document.getElementById('mode'), 'g2048');
+
+// 3. 游戏页：存档槽 + 最高分删除
+Arcade.mountSlots({
+  gameId: 'g2048',
+  unit: '分',
+  capture: function () { return { score: 分数, state: 可JSON化的局面 } || null; },
+  restore: function (state) { /* 从 state 还原局面，并停在暂停态 */ },
+  onPause: function () { /* 真的把游戏停下 */ }
+});
+Arcade.mountScoreRow(document.getElementById('score-row'), 'g2048');
+```
+
+**存档语义**（用户明确要求）：
+- 中途退出（切标签页 / 锁屏 / 关页面）**自动暂停 + 自动存档**；
+- 每个游戏**最多 5 个**存档；
+- 超出时**淘汰分数最低的那个**（不是最旧的 —— 刚开始就退出的那局最该让位）；
+- 自动存档固定覆盖 `auto` 槽，反复切标签页不会把槽位堆满；
+- 手动"保存当前进度"才新建槽位。
+
+**强调色对照**（`accent` 取值）：2048 `gold`、贪吃蛇 `mint`、扫雷 `rose`、
+俄罗斯方块 `violet`、放松 `sky`、选择 `sunset`、画板 `cyan`。
 
 ## 必须遵守
 
@@ -54,7 +98,7 @@
 
 ## 禁止
 
-- 不许写 `public/index.html`、`shared.css`、`server.mjs`、`install.sh`（他人作用域）。
+- 不许写 `public/index.html`、`shared.css`、`arcade.js`、`server.mjs`、`install.sh`（他人作用域）。
 - 不许改 `ops/console/`、`ops/vps/`、其他插件目录。
 - 不许引入 `eval` / `new Function`（门禁会查）。
 - 不许用 `document.write`。

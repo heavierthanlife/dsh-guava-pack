@@ -7,6 +7,8 @@
 <meta name="theme-color" content="#0b0d10">
 <title>2048 · 休闲角</title>
 <link rel="stylesheet" href="shared.css">
+<script src="arcade.js"></script>
+<script>Arcade.initTheme({ page: 'g2048', accent: 'gold' });</script>
 <style>
   .hud {
     display: flex;
@@ -26,7 +28,51 @@
     border-radius: var(--radius);
     background: var(--panel-2);
   }
-  .stat strong { font-size: 18px; line-height: 1.2; font-variant-numeric: tabular-nums; }
+  .stat strong {
+    font-size: 18px;
+    line-height: 1.2;
+    font-variant-numeric: tabular-nums;
+    color: var(--accent);
+  }
+
+  /* ── 页内最高分行 / "有存档"提示条 / 存档面板里的行 ─────────────
+   * rec-row 与首页记录管理同形（shared.css 没导出这个类，所以本页自带一份）。
+   */
+  #score-row,
+  .resume {
+    width: min(88vw, 420px);
+    max-width: 100%;
+    margin: 0 auto 12px;
+  }
+
+  .resume {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px 8px 12px;
+    border: 1px solid var(--accent);
+    border-radius: var(--radius);
+    background: var(--accent-soft);
+  }
+  .resume .small { flex: 1 1 auto; min-width: 0; line-height: 1.4; color: var(--text); }
+  .resume .btn { flex: none; min-height: 38px; padding: 0 12px; font-size: 13px; }
+  .resume .icon-btn { margin: 0; min-width: 38px; min-height: 38px; }
+
+  .rec-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--line-soft);
+    border-radius: calc(var(--radius) - 2px);
+    background: var(--panel-2);
+  }
+  .rec-row + .rec-row { margin-top: 8px; }
+  .rec-row .rec-main { flex: 1; min-width: 0; }
+  .rec-row .rec-name { font-size: 13px; font-weight: 600; }
+  .rec-row .rec-val { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .rec-row .rec-val.has { color: var(--accent); font-weight: 600; }
+  .rec-row .btn { min-height: 40px; padding: 0 12px; font-size: 13px; }
 
   .board-wrap {
     position: relative;
@@ -87,7 +133,7 @@
   .tile.v256  { background: #4270aa; color: #f6faff; border-color: #5a86be; }
   .tile.v512  { background: #4b80c2; color: #f8fbff; border-color: #6a97d0; }
   .tile.v1024 { background: #5a93d8; color: #06121f; border-color: #7fb0e8; }
-  .tile.v2048 { background: var(--accent); color: #06121f; border-color: #a8d4ff; }
+  .tile.v2048 { background: var(--accent); color: var(--bg); border-color: var(--accent); }
   .tile.vbig  { background: #9acbff; color: #06121f; border-color: #c8e3ff; }
 
   @keyframes tile-pop {
@@ -151,14 +197,22 @@
 <header class="topbar">
   <a class="back" href="index.html" aria-label="返回首页">←</a>
   <h1>2048</h1>
+  <button class="icon-btn" id="mode" type="button" aria-label="切换明暗">☀</button>
 </header>
 
 <main class="wrap">
 
+  <div class="resume hidden" id="resume">
+    <span class="small" id="resumeText"></span>
+    <button class="btn primary" id="resumeBtn" type="button">继续</button>
+    <button class="icon-btn" id="resumeClose" type="button" aria-label="忽略存档提示">✕</button>
+  </div>
+
   <div class="hud">
     <div class="stat"><span class="small muted">分数</span><strong id="score">0</strong></div>
-    <div class="stat"><span class="small muted">最高分</span><strong id="best">0</strong></div>
   </div>
+
+  <div id="score-row"></div>
 
   <div class="board-wrap">
     <div class="board" id="board" role="application" aria-label="2048 棋盘，方向键或滑动操作"></div>
@@ -181,13 +235,16 @@
 (function () {
   'use strict';
 
+  /* 最高分键：arcade.g2048.best（门禁约定，不能改）。
+   * 读走共用运行时 Arcade.getScore —— 页内"删除记录"之后这里立刻读到空；
+   * 写仍落在同一把键上（运行时内部也是这个前缀）。
+   */
   var BEST_KEY = 'arcade.g2048.best';
   var N = 4;
   var CELLS = N * N;
 
   var boardEl = document.getElementById('board');
   var scoreEl = document.getElementById('score');
-  var bestEl = document.getElementById('best');
   var overlayEl = document.getElementById('overlay');
   var overlayTextEl = document.getElementById('overlayText');
   var overlayBtn = document.getElementById('overlayBtn');
@@ -198,23 +255,23 @@
   var grid = new Array(CELLS);
   var score = 0;
   var best = 0;
+  var moves = 0;
   var over = false;
+  var paused = false;
   var celebrated = false;
   var newIdx = [];
   var mergeIdx = [];
   var toastTimer = 0;
+  /* 遮罩上的按钮点下去做什么：继续 / 再来一局（由当前状态决定） */
+  var overlayAction = function () {};
 
   for (var g = 0; g < CELLS; g++) grid[g] = 0;
 
-  /* ── 最高分：隐私模式 / 禁用存储时 getItem、setItem 都可能抛 ── */
+  /* ── 最高分：读取全部交给共用运行时（它已包了 try/catch）── */
   function readBest() {
-    try {
-      var raw = window.localStorage.getItem(BEST_KEY);
-      var n = parseInt(raw, 10);
-      return isFinite(n) && n > 0 ? n : 0;
-    } catch (err) {
-      return 0;
-    }
+    var value = Arcade.getScore('g2048');
+    var n = typeof value === 'number' ? value : parseInt(value, 10);
+    return isFinite(n) && n > 0 ? n : 0;
   }
 
   function writeBest(value) {
@@ -249,7 +306,6 @@
       cell.appendChild(t);
     }
     scoreEl.textContent = String(score);
-    bestEl.textContent = String(best);
   }
 
   function emptyCells() {
@@ -315,6 +371,8 @@
 
   function move(dir) {
     if (over) return;
+    /* 暂停中用户还按方向键 / 滑动 = 他想继续，先恢复再走这一步 */
+    if (paused) resumeGame();
     /* 0 左 1 右 2 上 3 下 */
     var lines = (dir === 0 || dir === 1) ? LINES.rows : LINES.cols;
     var reverse = (dir === 1 || dir === 3);
@@ -337,6 +395,7 @@
 
     if (!moved) return;
 
+    moves += 1;
     score += gained;
     if (score > best) {
       best = score;
@@ -350,7 +409,13 @@
 
     if (!hasMoves()) {
       over = true;
-      showOverlay('没有可移动的方块了', '最终得分 ' + score + ' · 最高分 ' + best);
+      /* 记录可能刚被人在页内删掉：以存储里的现状为准 */
+      best = readBest();
+      if (score > best) {
+        best = score;
+        writeBest(best);
+      }
+      showOverlay('没有可移动的方块了', '最终得分 ' + score + ' · 最高分 ' + best, '再来一局');
     }
   }
 
@@ -365,7 +430,7 @@
     }
   }
 
-  function showOverlay(title, sub) {
+  function showOverlay(title, sub, btnText) {
     overlayTextEl.textContent = '';
     var p1 = document.createElement('p');
     p1.className = 'ov-title';
@@ -375,6 +440,7 @@
     p2.textContent = sub;
     overlayTextEl.appendChild(p1);
     overlayTextEl.appendChild(p2);
+    if (btnText) overlayBtn.textContent = btnText;
     overlayEl.classList.remove('hidden');
   }
 
@@ -390,10 +456,14 @@
   function resetGame() {
     for (var i = 0; i < CELLS; i++) grid[i] = 0;
     score = 0;
+    moves = 0;
     over = false;
+    paused = false;
     celebrated = false;
     newIdx = [];
     mergeIdx = [];
+    overlayAction = resetGame;
+    overlayBtn.textContent = '再来一局';
     overlayEl.classList.add('hidden');
     spawnTile();
     spawnTile();
@@ -446,16 +516,128 @@
   }, { passive: true });
 
   restartBtn.addEventListener('click', resetGame);
-  overlayBtn.addEventListener('click', resetGame);
-
-  /* 本页没有游戏循环；隐藏时只把最高分落盘，不消耗后台资源 */
-  document.addEventListener('visibilitychange', function () {
-    if (document.hidden && best > 0) writeBest(best);
+  overlayBtn.addEventListener('click', function () {
+    overlayAction();
   });
+
+  /* ── 主题按钮：位置在返回箭头 + 标题之后、最右 ──────────────
+   * 明暗值存在 arcade.g2048.mode，和别的页面互不影响。
+   */
+  Arcade.mountModeToggle(document.getElementById('mode'), 'g2048');
+
+  /* ── 页内最高分行：显示 + 删除（二次确认）───────────────────
+   * 页面不再自己画第二份"最高分"，避免删了记录还显示旧分。
+   */
+  Arcade.mountScoreRow(document.getElementById('score-row'), 'g2048');
+
+  /* ── 暂停 / 继续 ────────────────────────────────────────────
+   * 本页没有游戏循环，"暂停"= 不再接受移动输入，并在棋盘上盖一层提示，
+   * 让从别的标签页切回来的人知道该点继续（而不是以为卡住了）。
+   */
+  function pauseGame() {
+    if (over || paused) return;
+    paused = true;
+    overlayAction = resumeGame;
+    best = readBest();
+    showOverlay('已暂停', '进度已自动保存 · 点继续或按方向键回到游戏', '继续');
+  }
+
+  function resumeGame() {
+    if (!paused) return;
+    paused = false;
+    overlayAction = resetGame;
+    if (over) return;
+    overlayEl.classList.add('hidden');
+  }
+
+  /* ── 从存档恢复：整盘搬回内存，然后停在暂停态等用户点继续 ── */
+  function restoreGame(data) {
+    /* 返回布尔：true = 已应用，false = 坏档被拒绝（当前局面不动）。
+     * mountSlots 不依赖返回值，但显式化之后"坏档不会静默生效"这条才可测。 */
+    if (!data || !Array.isArray(data.grid) || data.grid.length !== CELLS) return false;
+    var i, value;
+    for (i = 0; i < CELLS; i++) {
+      value = parseInt(data.grid[i], 10);
+      grid[i] = isFinite(value) && value > 0 ? value : 0;
+    }
+    score = typeof data.score === 'number' && isFinite(data.score) ? data.score : 0;
+    moves = typeof data.moves === 'number' && isFinite(data.moves) ? data.moves : 0;
+    over = data.over === true;
+    celebrated = data.celebrated === true;
+    best = readBest();
+    newIdx = [];
+    mergeIdx = [];
+    render();
+    hideResumeHint();
+    if (over) {
+      paused = false;
+      overlayAction = resetGame;
+      showOverlay('这局已经结束', '最终得分 ' + score + ' · 最高分 ' + best, '再来一局');
+      return true;
+    }
+    paused = true;
+    overlayAction = resumeGame;
+    showOverlay('已载入存档', '点继续接着玩 · 分数 ' + score + ' · 最高分 ' + best, '继续');
+    return true;
+  }
+
+  /* ── 存档槽（最多 5 个，满 5 个由运行时淘汰分数最低的）──────
+   * capture 的 state 必须可 JSON 序列化：16 格棋盘 + 分数 + 步数
+   * + 结束 / 达成 2048 标志。
+   */
+  var slots = Arcade.mountSlots({
+    gameId: 'g2048',
+    unit: '分',
+    capture: function () {
+      if (over) return null;         /* 已经结束的局继续没有意义 */
+      if (moves === 0) return null;  /* 一步都没走：还没开始 */
+      return {
+        score: score,
+        label: score + ' 分' + (celebrated ? ' · 已达成 2048' : ''),
+        state: {
+          v: 1,
+          grid: grid.slice(),
+          score: score,
+          moves: moves,
+          over: over,
+          celebrated: celebrated,
+          best: best
+        }
+      };
+    },
+    restore: restoreGame,
+    onPause: pauseGame
+  });
+
+  /* ── "有上次进度"提示条：存在 auto 槽才出现，没有就安静 ──── */
+  var resumeEl = document.getElementById('resume');
+  var resumeTextEl = document.getElementById('resumeText');
+  var resumeBtn = document.getElementById('resumeBtn');
+
+  function hideResumeHint() {
+    resumeEl.classList.add('hidden');
+  }
+
+  function showResumeHint() {
+    var entry = Arcade.loadSlot('g2048', 'auto');
+    if (entry === null) return;
+    var when = Arcade.timeAgo(entry.at);
+    resumeTextEl.textContent = '有上次的进度（' + entry.score + ' 分' + (when ? ' · ' + when : '') + '），点继续或右上 ⛁ 也能载入';
+    resumeEl.classList.remove('hidden');
+  }
+
+  resumeBtn.addEventListener('click', function () {
+    var entry = Arcade.loadSlot('g2048', 'auto');
+    if (entry === null) { hideResumeHint(); return; }
+    restoreGame(entry.state);
+  });
+
+  document.getElementById('resumeClose').addEventListener('click', hideResumeHint);
 
   buildCells();
   best = readBest();
   resetGame();
+  showResumeHint();
 })();
 </script>
 

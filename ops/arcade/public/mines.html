@@ -3,12 +3,73 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="color-scheme" content="dark">
+<meta name="color-scheme" content="dark light">
 <meta name="theme-color" content="#0b0d10">
 <title>扫雷 · 休闲角</title>
 <link rel="stylesheet" href="shared.css">
+<!-- 共用运行时：主题/明暗/分数/存档都从这里来；必须在首帧前落到 <html> 上 -->
+<script src="arcade.js"></script>
+<script>Arcade.initTheme({ page: 'mines', accent: 'rose' });</script>
 <style>
   .wrap { padding: 14px 16px 30px; }
+
+  /* 棋盘的"面"和"缝"跟着明暗走：亮色模式下留一块黑棋盘会很刺眼。
+     这里只动中性色；数字 1-8 的彩色是玩法信息，放到后面单独给亮色加深版。 */
+  :root {
+    --cell-line: #2c3440;
+    --cell-face-a: #1e242d;
+    --cell-face-b: #181d25;
+    --cell-press: #29323e;
+    --cell-open-line: #20262e;
+  }
+  html[data-mode="light"] {
+    --cell-line: #b9c4d2;
+    --cell-face-a: #e9eff6;
+    --cell-face-b: #dde5ef;
+    --cell-press: #cfd9e6;
+    --cell-open-line: #c6d0dd;
+  }
+
+  /* 顶部"上次没玩完"提示：存在存档才出现，一条就够，不用弹窗 */
+  .resume {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+    padding: 8px 12px;
+    border: 1px solid var(--accent);
+    border-radius: var(--radius);
+    background: var(--accent-soft);
+    font-size: 13px;
+  }
+  .resume[hidden] { display: none; }
+  .resume .resume-msg { flex: 1 1 150px; min-width: 0; line-height: 1.5; }
+  .resume .btn { padding: 0 12px; font-size: 13px; }
+
+  /* mountScoreRow 生成 .rec-row；shared.css 只给了 .slot，这里补上记录行 */
+  #score-row { margin-bottom: 10px; }
+  .rec-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border: 1px solid var(--line-soft);
+    border-radius: calc(var(--radius) - 2px);
+    background: var(--panel);
+  }
+  .rec-row + .rec-row { margin-top: 8px; }
+  .rec-row .rec-main { flex: 1; min-width: 0; }
+  .rec-row .rec-name { font-size: 11px; letter-spacing: .04em; color: var(--muted); }
+  .rec-row .rec-val {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
+    margin-top: 2px;
+    line-height: 1.45;
+  }
+  .rec-row .rec-val.has { color: var(--accent); }
+  .rec-row .btn { padding: 0 12px; font-size: 13px; }
 
   .seg { display: flex; gap: 8px; margin-bottom: 12px; }
   .seg .btn { flex: 1 1 0; min-width: 0; padding: 0 6px; font-size: 13px; white-space: nowrap;
@@ -68,9 +129,9 @@
     align-items: center;
     justify-content: center;
     padding: 0;
-    border: 1px solid #2c3440;
+    border: 1px solid var(--cell-line);
     border-radius: 4px;
-    background: linear-gradient(180deg, #1e242d, #181d25);
+    background: linear-gradient(180deg, var(--cell-face-a), var(--cell-face-b));
     color: var(--text);
     font: 600 14px/1 system-ui, -apple-system, "Segoe UI", "Noto Sans SC", sans-serif;
     font-size: calc(var(--cell, 32px) * .56);
@@ -83,21 +144,23 @@
     user-select: none;
     transition: background .08s ease, transform .08s ease, border-color .08s ease;
   }
-  .cell:active, .cell.down { background: #29323e; transform: scale(.95); }
+  .cell:active, .cell.down { background: var(--cell-press); transform: scale(.95); }
   .cell:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; position: relative; z-index: 1; }
 
   .cell.open {
     background: var(--panel-2);
-    border-color: #20262e;
+    border-color: var(--cell-open-line);
     transform: none;
     font-weight: 700;
   }
+  /* 亮色下翻开的格子要更"平"一点，和凸起的未翻开格子拉开层次 */
+  html[data-mode="light"] .cell.open { background: #f8fafd; }
   .cell.flag { color: var(--warn); }
   .cell.mine { color: var(--bad); }
   .cell.boom {
-    background: rgba(255, 107, 107, .22);
+    background: color-mix(in srgb, var(--bad) 22%, transparent);
     border-color: var(--bad);
-    color: #ffd0d0;
+    color: var(--text);
   }
   .cell.wrong { color: var(--bad); }
 
@@ -110,10 +173,21 @@
   .cell.n7 { color: #e8edf4; }
   .cell.n8 { color: #9aa6b2; }
 
+  /* 数字 1-8 的彩色是玩法信息（扫一眼就知道几颗雷），所以不接 --accent。
+     亮色模式下只压深明度保住对比度，色相与"数字→颜色"的对应关系不变。 */
+  html[data-mode="light"] .cell.n1 { color: #1258a8; }
+  html[data-mode="light"] .cell.n2 { color: #0b7a52; }
+  html[data-mode="light"] .cell.n3 { color: #c8323f; }
+  html[data-mode="light"] .cell.n4 { color: #5b32c4; }
+  html[data-mode="light"] .cell.n5 { color: #8a5a00; }
+  html[data-mode="light"] .cell.n6 { color: #0a7378; }
+  html[data-mode="light"] .cell.n7 { color: #16202e; }
+  html[data-mode="light"] .cell.n8 { color: #52606f; }
+
   .cell.pulse { animation: cellPulse .34s ease; }
   @keyframes cellPulse {
-    0% { box-shadow: 0 0 0 0 rgba(242, 178, 62, .85); }
-    100% { box-shadow: 0 0 0 10px rgba(242, 178, 62, 0); }
+    0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 80%, transparent); }
+    100% { box-shadow: 0 0 0 10px color-mix(in srgb, var(--accent) 0%, transparent); }
   }
 
   .banner { display: none; }
@@ -130,8 +204,9 @@
     background: var(--panel);
     font-size: 13px;
   }
-  .banner.win { border-color: rgba(126, 224, 168, .55); }
-  .banner.lose { border-color: rgba(255, 107, 107, .55); }
+  .banner.win { border-color: color-mix(in srgb, var(--ok) 55%, transparent); }
+  .banner.lose { border-color: color-mix(in srgb, var(--bad) 55%, transparent); }
+  .banner.paused { border-color: var(--accent); background: var(--accent-soft); }
   .banner .msg { flex: 1 1 160px; line-height: 1.5; }
 
   @media (max-width: 360px) {
@@ -145,9 +220,14 @@
 <header class="topbar">
   <a class="back" href="index.html" aria-label="返回首页">←</a>
   <h1>扫雷</h1>
+  <!-- mountSlots 会把存档按钮插在这个 #mode 前面，所以 id 必须是 mode -->
+  <button class="icon-btn" id="mode" type="button" aria-label="切换明暗">☀</button>
 </header>
 
 <div class="wrap">
+
+  <!-- 有存档才显示（见 paintResumeHint）；没有存档时保持安静，不弹窗 -->
+  <div class="resume" id="resumeHint" hidden></div>
 
   <div class="seg" role="group" aria-label="难度">
     <button type="button" class="btn primary" data-level="easy" aria-pressed="true">初级 9×9</button>
@@ -160,6 +240,9 @@
     <div class="stat"><span class="k">用时（秒）</span><span class="v" id="time">0.0</span></div>
     <div class="stat"><span class="k">最佳（秒）</span><span class="v" id="best">--</span></div>
   </div>
+
+  <!-- 三档最高分 + 就地删除（mountScoreRow 渲染） -->
+  <div id="score-row"></div>
 
   <div class="row actions">
     <button type="button" class="btn" id="restart">重开</button>
@@ -180,7 +263,6 @@
 (function () {
   'use strict';
 
-  var BEST_KEY = 'arcade.mines.best';
   var LONG_PRESS_MS = 400;
   var LEVELS = {
     easy:   { rows: 9,  cols: 9,  mines: 10, label: '初级' },
@@ -198,11 +280,14 @@
   var elBanner = document.getElementById('banner');
   var elRestart = document.getElementById('restart');
   var elFlagMode = document.getElementById('flagMode');
+  var elMode = document.getElementById('mode');
+  var elScoreRow = document.getElementById('score-row');
+  var elResume = document.getElementById('resumeHint');
 
   var S = {
     rows: 9, cols: 9, total: 81, mineCount: 10,
     mines: null, adj: null, state: null,
-    started: false, over: false, won: false,
+    started: false, over: false, won: false, paused: false,
     opened: 0, flags: 0,
     flagMode: false, boom: -1
   };
@@ -211,6 +296,8 @@
   var cells = [];
   var focusIdx = 0;
   var best = {};
+  var scoreRow = null;
+  var slotStore = null;
 
   var press = null;
   var suppressCtxUntil = 0;
@@ -219,37 +306,56 @@
   var tStart = 0;
   var elapsedAcc = 0;
 
-  /* ── 存档 ─────────────────────────────────────────────── */
-  function loadBest() {
+  /* ── 最高分 ───────────────────────────────────────────────
+   * 读写全部走 Arcade（键 arcade.mines.best，结构 {easy,medium,hard}），
+   * localStorage 不再由本页直接访问 —— 少一处非 try 的机会。
+   * 值的历史口径是**毫秒**（本页 fmtMs 除以 1000 显示）；早期版本可能按
+   * "秒"写过，normalizeBest 统一折成毫秒，比较才不会错一个数量级。
+   * 每次显示都重新从存储读：页内删掉记录后 HUD 不会还挂着一份旧值。
+   */
+  var bestMemory = {};   // 存储写不进去时（隐私模式）本会话仍能看到成绩
+
+  function normalizeBest(v) {
+    var n = typeof v === 'number' ? v : Number(v);
+    if (!isFinite(n) || n <= 0) return 0;
+    /* 毫秒记录必然 >= 1000；更小的数只可能来自"秒"口径的旧记录 */
+    return n < 1000 ? n * 1000 : n;
+  }
+
+  function syncBest() {
     var out = {};
-    try {
-      var raw = localStorage.getItem(BEST_KEY);
-      if (!raw) return out;
-      var data = JSON.parse(raw);
-      if (typeof data === 'number') {
-        /* 兼容更早版本存过的单个数值：当作每一档的历史最佳 */
-        if (isFinite(data) && data > 0) {
-          for (var j = 0; j < LEVEL_KEYS.length; j++) out[LEVEL_KEYS[j]] = data;
-        }
-        return out;
+    var data = Arcade.getScore('mines');
+    if (typeof data === 'number') {
+      /* 更早版本存过单个数值：当作每一档的历史最佳 */
+      var all = normalizeBest(data);
+      if (all > 0) {
+        for (var j = 0; j < LEVEL_KEYS.length; j++) out[LEVEL_KEYS[j]] = all;
       }
-      if (!data || typeof data !== 'object') return out;
+    } else if (data && typeof data === 'object') {
       for (var i = 0; i < LEVEL_KEYS.length; i++) {
         var k = LEVEL_KEYS[i];
-        var v = data[k];
-        if (typeof v === 'number' && isFinite(v) && v > 0) out[k] = v;
+        var ms = normalizeBest(data[k]);
+        if (ms > 0) out[k] = ms;
       }
-    } catch (err) {
-      out = {};
     }
+    /* 写失败时的兜底：只补存储里没有的档，不会把已删除的记录"复活" */
+    for (var m = 0; m < LEVEL_KEYS.length; m++) {
+      var key = LEVEL_KEYS[m];
+      if (!out[key] && bestMemory[key]) out[key] = bestMemory[key];
+    }
+    best = out;
     return out;
   }
 
   function saveBest() {
-    try {
-      localStorage.setItem(BEST_KEY, JSON.stringify(best));
-    } catch (err) {
-      /* 隐私模式 / 存储被禁：静默忽略，本次成绩只在内存里 */
+    if (!Arcade.writeJSON('mines.best', best)) {
+      /* 存储不可用：本会话先记在内存里，刷新即丢（与 Arcade 的降级策略一致） */
+      bestMemory = {};
+      for (var i = 0; i < LEVEL_KEYS.length; i++) {
+        if (best[LEVEL_KEYS[i]]) bestMemory[LEVEL_KEYS[i]] = best[LEVEL_KEYS[i]];
+      }
+    } else {
+      bestMemory = {};
     }
   }
 
@@ -268,7 +374,7 @@
   }
 
   function startTimer() {
-    if (timerRunning || S.over || S.won) return;
+    if (timerRunning || S.over || S.won || S.paused) return;
     timerRunning = true;
     tStart = Date.now();
     if (timerId === null) {
@@ -294,7 +400,7 @@
 
   /* ── 存档展示 ─────────────────────────────────────────── */
   function paintBest() {
-    var b = best[level];
+    var b = syncBest()[level];
     elBest.textContent = b ? fmtMs(b) : '--';
   }
 
@@ -332,6 +438,7 @@
     S.started = false;
     S.over = false;
     S.won = false;
+    S.paused = false;
     S.opened = 0;
     S.flags = 0;
     S.boom = -1;
@@ -400,8 +507,16 @@
       S.mines[pool[k]] = 1;
     }
 
+    computeAdj();
+  }
+
+  /** 由雷区重算每格的邻雷数。恢复存档时也走这里，不信存档里的冗余数字。 */
+  function computeAdj() {
     for (var p = 0; p < S.total; p++) {
-      if (S.mines[p]) continue;
+      if (S.mines[p]) {
+        S.adj[p] = 0;
+        continue;
+      }
       var pr = (p / S.cols) | 0;
       var pc = p % S.cols;
       var n = 0;
@@ -441,7 +556,7 @@
   }
 
   function revealCell(i) {
-    if (S.over || S.won) return;
+    if (S.over || S.won || S.paused) return;
     if (S.state[i] !== 0) return;
 
     if (!S.started) {
@@ -465,7 +580,7 @@
   }
 
   function flagCell(i) {
-    if (S.over || S.won) return;
+    if (S.over || S.won || S.paused) return;
     if (S.state[i] === 1) return;
 
     if (S.state[i] === 2) {
@@ -503,6 +618,7 @@
 
     var ms = elapsedMs();
     var record = false;
+    syncBest();   /* 页内可能刚删过记录：比较前先按存储里的现状来 */
     if (!best[level] || ms < best[level]) {
       best[level] = ms;
       saveBest();
@@ -511,6 +627,7 @@
 
     render(true);
     paintHud();
+    if (scoreRow) scoreRow.refresh();
     var msg = '🎉 全部扫清 · 用时 ' + fmtMs(ms) + ' 秒' + (record ? ' · 新纪录！' : '');
     showBanner('win', msg);
   }
@@ -612,26 +729,274 @@
     }
   }
 
-  function showBanner(kind, text) {
+  /**
+   * 底部状态条：胜利 / 踩雷 / 暂停共用同一个壳。
+   *
+   * @param {string} kind win | lose | paused
+   * @param {string} text
+   * @param {Array} [actions] [{label, primary, onClick}]；默认是"再来一局"
+   */
+  function showBanner(kind, text, actions) {
     elBanner.textContent = '';
     elBanner.className = 'banner show ' + kind;
     var msg = document.createElement('span');
     msg.className = 'msg';
     msg.textContent = text;
-    var again = document.createElement('button');
-    again.type = 'button';
-    again.className = 'btn primary';
-    again.textContent = '再来一局';
-    again.addEventListener('click', function () {
-      newGame();
-    });
     elBanner.appendChild(msg);
-    elBanner.appendChild(again);
+
+    var list = actions && actions.length ? actions : [
+      { label: '再来一局', primary: true, onClick: function () { newGame(); } }
+    ];
+    for (var i = 0; i < list.length; i++) {
+      (function (spec) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'btn' + (spec.primary ? ' primary' : '');
+        b.textContent = spec.label;
+        b.addEventListener('click', spec.onClick);
+        elBanner.appendChild(b);
+      })(list[i]);
+    }
   }
 
   function hideBanner() {
     elBanner.className = 'banner';
     elBanner.textContent = '';
+  }
+
+  /* ── 暂停 / 继续 ────────────────────────────────────────
+   * 读档后必须停在这里：计时不走，等用户主动点"继续"。
+   * 这样"打开一个旧档"不会白送几秒，也不会一恢复就被手滑打开格子。
+   */
+  function pauseGame(text) {
+    if (S.over || S.won) return;
+    S.paused = true;
+    cancelPress();
+    stopTimer();
+    paintClock();
+    showBanner(
+      'paused',
+      text || ('已暂停 · 计时停在 ' + fmtMs(elapsedMs()) + ' 秒'),
+      [
+        { label: '继续', primary: true, onClick: resumeGame },
+        { label: '重开', onClick: function () { newGame(); } }
+      ]
+    );
+  }
+
+  function resumeGame() {
+    if (!S.paused) return;
+    S.paused = false;
+    hideBanner();
+    paintClock();
+    if (S.started && !S.over && !S.won) startTimer();
+  }
+
+  /* ── 存档槽：capture / restore / onPause ─────────────────
+   * mountSlots 负责面板、自动存档、淘汰；这里只回答三件事：
+   *   当前局面是什么（capture）、怎么把局面放回去（restore）、离开时怎么停（onPause）。
+   */
+
+  /** 当前局面 → 可 JSON 序列化的快照；null = 现在没东西可存。 */
+  function capture() {
+    /* 还没下第一手，或者已经分出胜负：没有"继续"的意义，别占存档位 */
+    if (!S.started || S.over || S.won) return null;
+
+    var ms = Math.round(elapsedMs());
+    var sec = Math.round(ms / 1000);
+
+    var mineList = [];
+    for (var i = 0; i < S.total; i++) {
+      if (S.mines[i]) mineList.push(i);
+    }
+    var cellsStr = '';
+    for (var k = 0; k < S.total; k++) cellsStr += String(S.state[k]);
+
+    return {
+      /* 淘汰依据是"分数最低"。扫雷用时越短越好，所以 score 传**负的秒数**：
+       * 20 秒的局 = -20，90 秒的局 = -90。这样"分最低"恰好等于"磨得最久"，
+       * 槽位满了会先淘汰那局最没进展的，留下的都是还值得继续的。 */
+      score: -(ms / 1000),
+      label: LEVELS[level].label + ' · ' + sec + 's',
+      state: {
+        v: 1,
+        level: level,
+        rows: S.rows,
+        cols: S.cols,
+        mineCount: S.mineCount,
+        /* 雷只存下标（最多 99 个）；邻雷数恢复时由 computeAdj 重算，不存冗余 */
+        mines: mineList,
+        /* 0 未翻开 / 1 已翻开 / 2 插旗，行优先拼成字符串，省体积也好校验 */
+        cells: cellsStr,
+        opened: S.opened,
+        flags: S.flags,
+        elapsedMs: ms,
+        flagMode: S.flagMode === true
+      }
+    };
+  }
+
+  /**
+   * 把 state 应用回游戏。恢复后处于**暂停**态（计时不走），等用户点"继续"。
+   * 先整体校验再落盘：坏档直接返回 false，不动当前局面。
+   *
+   * @returns {boolean} 是否恢复成功
+   */
+  function restore(state) {
+    if (!state || typeof state !== 'object') return false;
+
+    var lv = state.level;
+    if (typeof lv !== 'string' || !LEVELS[lv]) return false;
+    var cfg = LEVELS[lv];
+    if (state.rows !== cfg.rows || state.cols !== cfg.cols) return false;
+
+    var total = cfg.rows * cfg.cols;
+    var cellsStr = typeof state.cells === 'string' ? state.cells : '';
+    if (cellsStr.length !== total) return false;
+
+    var mineList = state.mines;
+    if (!Array.isArray(mineList) || mineList.length !== cfg.mines) return false;
+
+    var mines = new Uint8Array(total);
+    for (var i = 0; i < mineList.length; i++) {
+      var idx = mineList[i];
+      if (typeof idx !== 'number' || idx !== Math.floor(idx) || idx < 0 || idx >= total) return false;
+      if (mines[idx]) return false;      // 同一个格子两条雷 = 坏档
+      mines[idx] = 1;
+    }
+
+    var stArr = new Uint8Array(total);
+    var opened = 0;
+    var flags = 0;
+    for (var k = 0; k < total; k++) {
+      var ch = cellsStr.charAt(k);
+      if (ch === '1') {
+        /* 踩到雷就结束的局不会入档；已翻开的格子是雷 ⇒ 数据被改坏了 */
+        if (mines[k]) return false;
+        stArr[k] = 1;
+        opened++;
+      } else if (ch === '2') {
+        stArr[k] = 2;
+        flags++;
+      } else if (ch !== '0') {
+        return false;
+      }
+    }
+    if (opened === 0) return false;                         // 没翻过任何格 = 没下过第一手
+    if (opened >= total - cfg.mines) return false;           // 已经赢了的局不该在存档里
+
+    /* 校验通过，开始落地。雷区直接用存档里的位置：
+     * 首点不是雷的规则在当初布雷时已经满足，恢复不能重新布雷，否则局面就变了。 */
+    stopTimer();                     // 先停表，再把时间重置为存档里的值
+    level = lv;
+    S.rows = cfg.rows;
+    S.cols = cfg.cols;
+    S.total = total;
+    S.mineCount = cfg.mines;
+    S.mines = mines;
+    S.adj = new Uint8Array(total);
+    S.state = stArr;
+    computeAdj();
+    S.started = true;
+    S.over = false;
+    S.won = false;
+    S.paused = true;
+    S.opened = opened;
+    S.flags = flags;
+    S.boom = -1;
+    S.flagMode = state.flagMode === true;
+
+    var ms = Number(state.elapsedMs);
+    elapsedAcc = isFinite(ms) && ms > 0 ? ms : 0;
+
+    focusIdx = 0;
+    cancelPress();
+    buildCells();
+    layout();
+    render(true);
+    paintHud();
+    paintLevels();
+    paintHint();
+    elFlagMode.setAttribute('aria-pressed', S.flagMode ? 'true' : 'false');
+    if (S.flagMode) elFlagMode.classList.add('primary');
+    else elFlagMode.classList.remove('primary');
+
+    if (elResume) elResume.hidden = true;
+    pauseGame('已载入存档 · 计时停在 ' + fmtMs(elapsedAcc) + ' 秒');
+    return true;
+  }
+
+  /**
+   * 页面隐藏 / 卸载时由 Arcade.mountSlots 调用：真的停表。
+   * 这里不置 S.paused —— 切回标签页沿用原来的"自动接着计时"，不用多点一次。
+   */
+  function onPause() {
+    cancelPress();
+    stopTimer();
+    paintClock();
+  }
+
+  /* ── 顶部"继续上次"提示 ──────────────────────────────────
+   * 只在真的有存档时出现，一条横条、不弹窗、不挡操作；"忽略"只藏这一次。
+   * 没有存档就完全安静（elResume.hidden = true）。
+   */
+  function latestSlot() {
+    var list = Arcade.listSlots('mines');
+    if (!list.length) return null;
+    var pick = list[0];
+    for (var i = 1; i < list.length; i++) {
+      if ((list[i].at || 0) > (pick.at || 0)) pick = list[i];
+    }
+    return pick;
+  }
+
+  function paintResumeHint() {
+    if (!elResume) return;
+    elResume.textContent = '';
+    var entry = latestSlot();
+    if (!entry) {
+      elResume.hidden = true;
+      return;
+    }
+
+    var when = Arcade.timeAgo(entry.at);
+    var msg = document.createElement('span');
+    msg.className = 'resume-msg';
+    msg.textContent = '还有一局没玩完：' + (entry.label || '存档') + (when ? ' · ' + when : '');
+
+    var go = document.createElement('button');
+    go.type = 'button';
+    go.className = 'btn primary';
+    go.textContent = '继续';
+    go.addEventListener('click', function () {
+      if (restore(entry.state)) return;          // restore 会隐藏提示并进入暂停态
+      elResume.hidden = true;
+      showBanner('lose', '这条存档读不出来，已跳过');
+    });
+
+    var skip = document.createElement('button');
+    skip.type = 'button';
+    skip.className = 'btn ghost';
+    skip.textContent = '忽略';
+    skip.addEventListener('click', function () { elResume.hidden = true; });
+
+    elResume.appendChild(msg);
+    elResume.appendChild(go);
+    elResume.appendChild(skip);
+    elResume.hidden = false;
+  }
+
+  /* 页内删掉最高分后 HUD 要立刻跟着变。confirmAction 在按钮上
+   * stopPropagation，所以监听走捕获阶段，并用 setTimeout 把刷新放到
+   * "删除已经写进存储"之后（第二次点击才是真删）。 */
+  function wireScoreRow() {
+    if (!elScoreRow) return;
+    elScoreRow.addEventListener('click', function (e) {
+      var btn = e.target && e.target.closest ? e.target.closest('.btn.danger') : null;
+      if (!btn) return;
+      if (btn.classList.contains('armed')) bestMemory = {};   // 隐私模式下的内存兜底也清掉
+      setTimeout(function () { paintHud(); }, 0);
+    }, true);
   }
 
   /* ── 长按 / 触摸 ──────────────────────────────────────── */
@@ -669,7 +1034,7 @@
   }
 
   elBoard.addEventListener('pointerdown', function (e) {
-    if (S.over) return;
+    if (S.over || S.paused) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     var t = e.target && e.target.closest ? e.target.closest('.cell') : null;
     if (!t || !elBoard.contains(t)) return;
@@ -732,7 +1097,7 @@
     /* 长按路径已经插/拔过旗，避免一次长按被记两次 */
     if (Date.now() < suppressCtxUntil) return;
     var t = e.target && e.target.closest ? e.target.closest('.cell') : null;
-    if (!t || S.over) return;
+    if (!t || S.over || S.paused) return;
     var idx = parseInt(t.getAttribute('data-i'), 10);
     if (!isNaN(idx)) flagCell(idx);
   });
@@ -784,13 +1149,13 @@
     paintHint();
   });
 
-  /* ── 切后台就停表，回来接着算 ─────────────────────────── */
+  /* ── 切后台就停表，回来接着算（读档暂停时保持暂停）───── */
   document.addEventListener('visibilitychange', function () {
     if (document.hidden) {
       cancelPress();
       stopTimer();
       paintClock();
-    } else if (S.started && !S.over && !S.won) {
+    } else if (S.started && !S.over && !S.won && !S.paused) {
       startTimer();
     }
   });
@@ -812,9 +1177,58 @@
     layout();
   });
 
+  /* ── 最高分行的格式 ─────────────────────────────────────
+   * 记录是 {easy,medium,hard} 的用时；syncBest 已统一成毫秒，
+   * 这里按秒取整显示 → "初级 42s · 中级 88s · 高级 260s"。
+   */
+  function formatBestRow(value) {
+    var order = [
+      ['easy', '初级'],
+      ['medium', '中级'],
+      ['hard', '高级']
+    ];
+    if (!value || typeof value !== 'object') return '暂无记录';
+    var parts = [];
+    for (var i = 0; i < order.length; i++) {
+      var ms = normalizeBest(value[order[i][0]]);
+      if (ms > 0) parts.push(order[i][1] + ' ' + Math.round(ms / 1000) + 's');
+    }
+    return parts.length ? parts.join(' · ') : '暂无记录';
+  }
+
+  /* 手机状态栏的颜色跟着明暗走，别在亮色页面顶一条黑边 */
+  function paintMeta() {
+    var meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', Arcade.getMode('mines') === 'light' ? '#f4f6fa' : '#0b0d10');
+  }
+
   /* ── 启动 ─────────────────────────────────────────────── */
-  best = loadBest();
+  syncBest();
   newGame('easy');
+
+  /* 共用运行时装配：座位（#mode / #score-row / .topbar）必须先存在 */
+  Arcade.mountModeToggle(elMode, 'mines');
+  paintMeta();
+  if (elMode) {
+    elMode.addEventListener('click', function () {
+      /* mountModeToggle 的监听先执行，这里读到的已经是新值 */
+      paintMeta();
+    });
+  }
+
+  scoreRow = Arcade.mountScoreRow(elScoreRow, 'mines', { format: formatBestRow });
+  wireScoreRow();
+
+  slotStore = Arcade.mountSlots({
+    gameId: 'mines',
+    unit: 's',
+    capture: capture,
+    restore: restore,
+    onPause: onPause
+  });
+
+  /* 有存档才出现一条提示；没有就安静 */
+  paintResumeHint();
 })();
 </script>
 

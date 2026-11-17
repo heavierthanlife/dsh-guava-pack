@@ -163,5 +163,95 @@ check('触控尺寸变量 ≥44px', /--tap:\s*44px/.test(css), '小于 44 手机
 check('尊重 prefers-reduced-motion', /@media\s*\(prefers-reduced-motion:\s*reduce\)/.test(css));
 check('无外部字体', !/@import|fonts\.googleapis|fonts\.gstatic/.test(css));
 
+// ── 变量定义完整性（2026-11-17 真实踩过）──────────────────────────────────
+// 教训：重构配色时删掉了 --tap / --radius 的定义，但 8 个文件仍在用 var(--tap)。
+// CSS 对未定义的自定义属性**不报错**，只是让 min-height 退化成 auto ——
+// 于是所有按钮塌成一行文字高度，手机上几乎点不中，而所有门禁全绿。
+// 所以这里机械核对：凡是被 var(--x) 引用的属性，必须真的定义过。
+console.log('\nCSS 变量完整性');
+const definedVars = new Set(
+  [...css.matchAll(/(--[a-z0-9-]+)\s*:/gi)].map((m) => m[1]),
+);
+// 运行时才由 arcade.js 写到 <html> 上的属性（不在 CSS 里定义，属正常）
+const runtimeVars = new Set(['--accent', '--accent-soft']);
+const usedVars = new Set(
+  [...css.matchAll(/var\(\s*(--[a-z0-9-]+)/gi)].map((m) => m[1]),
+);
+const missingVars = [...usedVars].filter((name) => !definedVars.has(name) && !runtimeVars.has(name));
+check(`引用的 CSS 变量都有定义（共 ${usedVars.size} 个）`, missingVars.length === 0,
+  `未定义却在用：${missingVars.join(', ')}`);
+check('明暗两套底色都定义了', /html\[data-mode="dark"\]/.test(css) && /html\[data-mode="light"\]/.test(css));
+
+// ── 主题与明暗（2026-11-17 新增需求）─────────────────────────────────────
+console.log('\n主题系统');
+const arcadeJs = readFileSync(join(PUBLIC, 'arcade.js'), 'utf8');
+check('共用运行时存在 arcade.js', arcadeJs.length > 2000);
+check('首页的 5 套主题在 CSS 里都有定义',
+  ['graphite', 'cyber', 'navy', 'ember', 'ice'].every((t) => css.includes(`[data-theme="${t}"]`)),
+  '缺主题选择器');
+check('每个子页面的强调色都定义了（暗/亮各一套）',
+  ['gold', 'mint', 'rose', 'violet', 'sky', 'sunset', 'cyan'].every(
+    (a) => css.includes(`[data-accent="${a}"][data-mode="dark"]`)
+      && css.includes(`[data-accent="${a}"][data-mode="light"]`),
+  ),
+  '缺 data-accent 规则');
+
+for (const [file] of PAGES) {
+  const raw = readFileSync(join(PUBLIC, file), 'utf8');
+  check(`${file}：加载了 arcade.js`, /<script\s+src=["']arcade\.js["']/.test(raw));
+  if (file === 'index.html') {
+    check('index.html：initTheme 用 themes 模式', /initTheme\(\{\s*themes:\s*true\s*\}\)/.test(raw));
+    check('index.html：有主题下拉', /id=["']theme["']/.test(raw));
+  } else {
+    check(`${file}：initTheme 带 page 与 accent`, /initTheme\(\{[^}]*page:\s*'[a-z0-9]+'[^}]*accent:\s*'[a-z]+'/i.test(raw)
+      || /initTheme\(\{[^}]*accent:\s*'[a-z]+'[^}]*page:\s*'[a-z0-9]+'/i.test(raw));
+  }
+  check(`${file}：顶栏有明暗切换按钮`, /id=["']mode["']/.test(raw));
+}
+
+// 每个子页面都要真的把切换按钮接上，否则按钮点了没反应
+console.log('\n明暗切换接线');
+for (const [file] of PAGES) {
+  const raw = readFileSync(join(PUBLIC, file), 'utf8');
+  if (file === 'index.html') {
+    check('index.html：切换按钮有事件处理', /toggleMode\(/.test(raw));
+    continue;
+  }
+  check(`${file}：mountModeToggle 已调用`, /mountModeToggle\s*\(/.test(raw),
+    '按钮存在但没接线 = 点了没反应');
+}
+
+// ── 首页卡片：新标签页打开（2026-11-17 需求）────────────────────────────
+console.log('\n首页卡片行为');
+const indexRaw = readFileSync(join(PUBLIC, 'index.html'), 'utf8');
+const cardAnchors = [...indexRaw.matchAll(/<a\b[^>]*class=["'][^"']*\bentry\b[^"']*["'][^>]*>/g)].map((m) => m[0]);
+check('首页有入口卡', cardAnchors.length >= 7, `找到 ${cardAnchors.length} 张`);
+const notBlank = cardAnchors.filter((tag) => !/target=["']_blank["']/.test(tag));
+check('所有入口卡都用新标签页打开', notBlank.length === 0,
+  `${notBlank.length} 张缺 target="_blank"`);
+const noOpener = cardAnchors.filter((tag) => /target=["']_blank["']/.test(tag) && !/rel=["'][^"']*noopener/.test(tag));
+check('新标签页都带 rel="noopener"', noOpener.length === 0,
+  '缺 noopener 会让被打开的页面能操作本页');
+
+// ── 存档槽与记录管理 ────────────────────────────────────────────────────
+console.log('\n存档与记录');
+check('arcade.js 提供存档槽 API', /mountSlots\s*:/.test(arcadeJs));
+check('arcade.js 提供分数行 API', /mountScoreRow\s*:/.test(arcadeJs));
+check('存档上限是 5', /MAX_SLOTS\s*=\s*5/.test(arcadeJs));
+check('超限时按分数淘汰（不是按时间）',
+  /score/.test(arcadeJs) && /evicted/.test(arcadeJs) && /worst/.test(arcadeJs));
+check('二次确认不用 window.confirm（样式与测试都不可控）', !/window\.confirm\s*\(/.test(arcadeJs));
+check('二次确认有超时自动复原', /disarm/.test(arcadeJs) && /setTimeout/.test(arcadeJs));
+
+// 4 个游戏必须接上存档
+console.log('\n游戏存档接线');
+for (const game of ['g2048.html', 'snake.html', 'mines.html', 'tetris.html']) {
+  const raw = readFileSync(join(PUBLIC, game), 'utf8');
+  check(`${game}：mountSlots 已调用`, /mountSlots\s*\(/.test(raw), '没接存档槽');
+  check(`${game}：提供了 capture 与 restore`, /capture\s*:/.test(raw) && /restore\s*:/.test(raw));
+  check(`${game}：提供了 onPause（退出要暂停）`, /onPause\s*:/.test(raw));
+  check(`${game}：有最高分删除入口`, /mountScoreRow\s*\(/.test(raw) || /delScore\s*\(/.test(raw));
+}
+
 console.log(`\n${failed === 0 ? '✅' : '❌'} arcade-pages: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exitCode = 1;

@@ -176,7 +176,7 @@ async function main() {
 
     console.log('\n正常页面');
     for (const page of ['index.html', 'g2048.html', 'snake.html', 'mines.html', 'tetris.html',
-      'relax.html', 'decide.html', 'pixel.html', 'shared.css']) {
+      'relax.html', 'decide.html', 'pixel.html', 'shared.css', 'arcade.js']) {
       const res = await raw(port, { path: `/${TOKEN}/${page}` });
       check(`${page} → 200`, res.status === 200, `status=${res.status}`);
     }

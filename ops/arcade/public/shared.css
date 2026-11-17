@@ -1,27 +1,111 @@
 /* DSH Arcade 共用样式
  *
- * 设计取向：暗色、低饱和、方角、细边框 —— 与 dsh-console 视觉同源，
- * 但**不用**它的强调色（那边琥珀色代表"需要注意"，娱乐页用它会误导）。
+ * 手机优先：可点元素最小 44×44，单列布局，单指可玩。
+ * 无外部字体/图标/CDN：系统字体 + 内联 SVG，断网也能开。
  *
- * 手机优先：所有可点元素最小 44×44（Apple HIG），单列布局，单指可玩。
- * 无外部字体/图标/CDN：全部系统字体 + 内联 SVG，断网也能开。
+ * ## 着色体系（2026-11-17 扩展）
+ *
+ * 三层，互不打架：
+ *   1. `html[data-mode="dark|light"]` —— 明暗底色与文字色。**每个子页面独立**
+ *      （键 arcade.<page>.mode），所以在 2048 开亮色不影响扫雷。
+ *   2. `html[data-accent="<名字>"]` —— 每个子页面自己的强调色（"更彩色"）。
+ *   3. `html[data-theme="graphite|cyber|navy|ember|ice"]` —— **首页**的 5 套主题，
+ *      与 dsh-console 同名同色，视觉同源。
+ *
+ * 顺序很重要：先定义明暗底（mode），再让 accent/theme 覆盖强调色。
+ * 这样任意主题 × 任意明暗都能组合，不需要 5×2 份手写配色。
  */
 
-:root {
+/* ── 1. 明暗底色 ─────────────────────────────────────────────────── */
+
+:root,
+html[data-mode="dark"] {
   --bg: #0b0d10;
   --panel: #14171c;
   --panel-2: #101318;
   --line: #262b33;
+  --line-soft: #1d222a;
   --text: #e8edf4;
   --muted: #939fac;
-  --accent: #6fb6ff;
-  --accent-soft: rgba(111, 182, 255, .12);
+  --shadow: 0 2px 12px rgba(0, 0, 0, .45);
   --ok: #7ee0a8;
   --warn: #f2b23e;
   --bad: #ff6b6b;
+  /* 尺寸：所有可点元素都引用 --tap（Apple HIG 最小 44×44）。
+     这两个变量漏定义过一次 —— 后果是 min-height 变成 auto、按钮高度塌成
+     一行文字，手机上几乎点不中。别删。 */
   --radius: 10px;
   --tap: 44px;
+  color-scheme: dark;
 }
+
+html[data-mode="light"] {
+  --bg: #f4f6fa;
+  --panel: #ffffff;
+  --panel-2: #eef2f8;
+  --line: #d3dbe6;
+  --line-soft: #e4eaf2;
+  --text: #16202e;
+  --muted: #5b6878;
+  --shadow: 0 2px 10px rgba(22, 32, 46, .12);
+  --ok: #128a4e;
+  --warn: #a86300;
+  --bad: #c8323f;
+  color-scheme: light;
+}
+
+/* ── 2. 首页 5 套主题（与 dsh-console 一致）────────────────────── */
+
+html[data-theme="graphite"] { --accent: #f2b23e; --accent-soft: rgba(242, 178, 62, .14); }
+html[data-theme="cyber"]    { --accent: #c8d400; --accent-soft: rgba(200, 212, 0, .14); }
+html[data-theme="navy"]     { --accent: #47c2ff; --accent-soft: rgba(71, 194, 255, .14); }
+html[data-theme="ember"]    { --accent: #ff8a3d; --accent-soft: rgba(255, 138, 61, .14); }
+html[data-theme="ice"]      { --accent: #9fc7f5; --accent-soft: rgba(159, 199, 245, .16); }
+
+/* 首页每套主题的背景也跟着变一点，否则"换主题"只是换了个强调色，不够明显 */
+html[data-theme="graphite"][data-mode="dark"] { --bg: #0b0d10; --panel: #16181a; }
+html[data-theme="cyber"][data-mode="dark"]    { --bg: #08090b; --panel: #14160f; --line: #2b2f18; }
+html[data-theme="navy"][data-mode="dark"]     { --bg: #070d15; --panel: #101a28; --line: #1e2f45; }
+html[data-theme="ember"][data-mode="dark"]    { --bg: #100b08; --panel: #1d130d; --line: #33220f; }
+html[data-theme="ice"][data-mode="dark"]      { --bg: #0a0f16; --panel: #131c27; --line: #24344a; }
+
+html[data-theme="graphite"][data-mode="light"] { --bg: #f7f8fa; }
+html[data-theme="cyber"][data-mode="light"]    { --bg: #f7f8ec; }
+html[data-theme="navy"][data-mode="light"]     { --bg: #eef4fb; }
+html[data-theme="ember"][data-mode="light"]    { --bg: #fdf4ee; }
+html[data-theme="ice"][data-mode="light"]      { --bg: #f1f6fc; }
+
+/* ── 3. 子页面的强调色（"更彩色一些"）────────────────────────────
+ * 每个游戏一个色系，和它的题材对应：
+ *   2048 金 / 贪吃蛇 青绿 / 扫雷 洋红 / 俄罗斯方块 紫 / 放松 蓝 / 决策 橙 / 画板 青
+ * 暗色用亮版本，亮色用深版本，保证对比度够（亮底用浅色会看不清）。
+ */
+
+html[data-accent="gold"][data-mode="dark"]      { --accent: #f2b23e; --accent-soft: rgba(242,178,62,.16); }
+html[data-accent="gold"][data-mode="light"]     { --accent: #9a5f00; --accent-soft: rgba(154,95,0,.12); }
+
+html[data-accent="mint"][data-mode="dark"]      { --accent: #4fd8a4; --accent-soft: rgba(79,216,164,.16); }
+html[data-accent="mint"][data-mode="light"]     { --accent: #0b7a52; --accent-soft: rgba(11,122,82,.12); }
+
+html[data-accent="rose"][data-mode="dark"]      { --accent: #ff8fb0; --accent-soft: rgba(255,143,176,.16); }
+html[data-accent="rose"][data-mode="light"]     { --accent: #b3204a; --accent-soft: rgba(179,32,74,.12); }
+
+html[data-accent="violet"][data-mode="dark"]    { --accent: #b79cff; --accent-soft: rgba(183,156,255,.16); }
+html[data-accent="violet"][data-mode="light"]   { --accent: #5b32c4; --accent-soft: rgba(91,50,196,.12); }
+
+html[data-accent="sky"][data-mode="dark"]       { --accent: #6fb6ff; --accent-soft: rgba(111,182,255,.16); }
+html[data-accent="sky"][data-mode="light"]      { --accent: #1258a8; --accent-soft: rgba(18,88,168,.12); }
+
+html[data-accent="sunset"][data-mode="dark"]    { --accent: #ff9d5c; --accent-soft: rgba(255,157,92,.16); }
+html[data-accent="sunset"][data-mode="light"]   { --accent: #a8480a; --accent-soft: rgba(168,72,10,.12); }
+
+html[data-accent="cyan"][data-mode="dark"]      { --accent: #5ce0e6; --accent-soft: rgba(92,224,230,.16); }
+html[data-accent="cyan"][data-mode="light"]     { --accent: #0a7378; --accent-soft: rgba(10,115,120,.12); }
+
+/* 兜底：没设 accent 的页面用中性蓝 */
+:root { --accent: #6fb6ff; --accent-soft: rgba(111, 182, 255, .14); }
+
+/* ── 基础 ─────────────────────────────────────────────────────────── */
 
 * { box-sizing: border-box; }
 
@@ -32,8 +116,9 @@ html, body {
   color: var(--text);
   font-family: system-ui, -apple-system, "Segoe UI", "Noto Sans SC", sans-serif;
   -webkit-text-size-adjust: 100%;
-  /* 手机上玩手势游戏时不要整页跟着滚 */
   overscroll-behavior: none;
+  /* 主题切换要顺滑，但不能拖慢操作 */
+  transition: background-color .18s ease, color .18s ease;
 }
 
 body {
@@ -43,7 +128,8 @@ body {
 
 a { color: var(--accent); }
 
-/* ── 顶栏：返回 + 标题 + 可选状态 ───────────────────────────────── */
+/* ── 顶栏 ─────────────────────────────────────────────────────────── */
+
 .topbar {
   display: flex;
   align-items: center;
@@ -69,6 +155,30 @@ a { color: var(--accent); }
   white-space: nowrap;
 }
 
+/* 顶栏里的小动作按钮（明暗切换、存档） */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--tap);
+  min-height: var(--tap);
+  margin: -8px -6px -8px 0;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1;
+  font-family: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.icon-btn:hover { border-color: var(--accent); color: var(--accent); }
+.icon-btn:active { transform: translateY(1px); }
+
 .back {
   display: inline-flex;
   align-items: center;
@@ -85,7 +195,8 @@ a { color: var(--accent); }
 
 .back:hover, .back:focus-visible { color: var(--text); background: var(--panel); }
 
-/* ── 通用按钮 ───────────────────────────────────────────────────── */
+/* ── 按钮 ─────────────────────────────────────────────────────────── */
+
 .btn {
   display: inline-flex;
   align-items: center;
@@ -101,9 +212,9 @@ a { color: var(--accent); }
   font-weight: 500;
   font-family: inherit;
   cursor: pointer;
-  /* 手机上别出现 300ms 点击延迟与高亮块 */
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
+  transition: border-color .14s ease, background-color .14s ease, transform .1s ease;
 }
 
 .btn:hover { border-color: var(--accent); }
@@ -112,15 +223,110 @@ a { color: var(--accent); }
 .btn.ghost { background: transparent; }
 .btn:disabled { opacity: .45; cursor: not-allowed; }
 
-.wrap { padding: 16px; max-width: 720px; margin: 0 auto; }
+/* 危险动作（删记录）在"已武装"状态下要一眼看出会出人命 */
+.btn.danger { border-color: var(--bad); color: var(--bad); background: transparent; }
+.btn.danger:hover { background: color-mix(in srgb, var(--bad) 12%, transparent); }
+.btn.danger.armed,
+.btn.armed {
+  background: var(--bad);
+  border-color: var(--bad);
+  color: #fff;
+  font-weight: 600;
+}
 
+/* ── 布局工具 ─────────────────────────────────────────────────────── */
+
+.wrap { padding: 16px; max-width: 720px; margin: 0 auto; }
 .row { display: flex; gap: 10px; flex-wrap: wrap; }
 .muted { color: var(--muted); }
 .small { font-size: 12px; }
 .center { text-align: center; }
 .hidden { display: none !important; }
 
-/* 尊重系统的"减少动效"：所有动画/过渡关掉，但功能照常 */
+/* ── 卡片（首页与"存档/记录"面板共用）────────────────────────────── */
+
+.card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 12px;
+}
+
+.card + .card { margin-top: 10px; }
+
+/* 存档槽 / 记录行 */
+.slot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: calc(var(--radius) - 2px);
+  background: var(--panel-2);
+}
+
+.slot + .slot { margin-top: 8px; }
+
+.slot .slot-main { flex: 1; min-width: 0; }
+
+.slot .slot-title {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.slot .slot-sub {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+/* ── 全屏对话框（存档列表 / 记录管理）────────────────────────────── */
+
+.sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(0, 0, 0, .5);
+  padding: 0;
+}
+
+.sheet[hidden] { display: none; }
+
+.sheet-panel {
+  width: 100%;
+  max-width: 560px;
+  max-height: 82dvh;
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-bottom: 0;
+  border-radius: 16px 16px 0 0;
+  box-shadow: var(--shadow);
+  padding: 14px 14px calc(14px + env(safe-area-inset-bottom));
+}
+
+.sheet-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.sheet-head h2 {
+  flex: 1;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* ── 尊重系统的"减少动效" ─────────────────────────────────────────── */
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: .001ms !important;

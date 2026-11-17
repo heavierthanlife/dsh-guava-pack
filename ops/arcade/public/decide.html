@@ -7,6 +7,8 @@
 <meta name="theme-color" content="#0b0d10">
 <title>选择困难 · 休闲角</title>
 <link rel="stylesheet" href="shared.css">
+<script src="arcade.js"></script>
+<script>Arcade.initTheme({ page: 'decide', accent: 'sunset' });</script>
 <style>
   .seg {
     display: flex;
@@ -326,6 +328,7 @@
 <header class="topbar">
   <a class="back" href="index.html" aria-label="返回首页">←</a>
   <h1>选择困难</h1>
+  <button class="icon-btn" id="mode" type="button" aria-label="切换明暗">☀</button>
 </header>
 
 <main class="wrap">
@@ -960,6 +963,10 @@
   syncBulkText();
   setTab('wheel');
 })();
+
+
+  /* 明暗切换（arcade.js 提供，各页面独立记忆） */
+  Arcade.mountModeToggle(document.getElementById('mode'), 'decide');
 </script>
 </body>
 </html>

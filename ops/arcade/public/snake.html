@@ -7,6 +7,8 @@
 <meta name="theme-color" content="#0b0d10">
 <title>贪吃蛇 · 休闲角</title>
 <link rel="stylesheet" href="shared.css">
+<script src="arcade.js"></script>
+<script>Arcade.initTheme({ page: 'snake', accent: 'mint' });</script>
 <style>
   .hud {
     display: flex;
@@ -26,7 +28,51 @@
     border-radius: var(--radius);
     background: var(--panel-2);
   }
-  .stat strong { font-size: 18px; line-height: 1.2; font-variant-numeric: tabular-nums; }
+  .stat strong {
+    font-size: 18px;
+    line-height: 1.2;
+    font-variant-numeric: tabular-nums;
+    color: var(--accent);
+  }
+
+  /* ── 页内最高分行 / "有存档"提示条 / 存档面板里的行 ─────────────
+   * rec-row 与首页记录管理同形（shared.css 没导出这个类，所以本页自带一份）。
+   */
+  #score-row,
+  .resume {
+    width: min(88vw, 420px);
+    max-width: 100%;
+    margin: 0 auto 12px;
+  }
+
+  .resume {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px 8px 12px;
+    border: 1px solid var(--accent);
+    border-radius: var(--radius);
+    background: var(--accent-soft);
+  }
+  .resume .small { flex: 1 1 auto; min-width: 0; line-height: 1.4; color: var(--text); }
+  .resume .btn { flex: none; min-height: 38px; padding: 0 12px; font-size: 13px; }
+  .resume .icon-btn { margin: 0; min-width: 38px; min-height: 38px; }
+
+  .rec-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--line-soft);
+    border-radius: calc(var(--radius) - 2px);
+    background: var(--panel-2);
+  }
+  .rec-row + .rec-row { margin-top: 8px; }
+  .rec-row .rec-main { flex: 1; min-width: 0; }
+  .rec-row .rec-name { font-size: 13px; font-weight: 600; }
+  .rec-row .rec-val { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .rec-row .rec-val.has { color: var(--accent); font-weight: 600; }
+  .rec-row .btn { min-height: 40px; padding: 0 12px; font-size: 13px; }
 
   .stage {
     position: relative;
@@ -117,14 +163,22 @@
 <header class="topbar">
   <a class="back" href="index.html" aria-label="返回首页">←</a>
   <h1>贪吃蛇</h1>
+  <button class="icon-btn" id="mode" type="button" aria-label="切换明暗">☀</button>
 </header>
 
 <main class="wrap">
 
+  <div class="resume hidden" id="resume">
+    <span class="small" id="resumeText"></span>
+    <button class="btn primary" id="resumeBtn" type="button">继续</button>
+    <button class="icon-btn" id="resumeClose" type="button" aria-label="忽略存档提示">✕</button>
+  </div>
+
   <div class="hud">
     <div class="stat"><span class="small muted">分数</span><strong id="score">0</strong></div>
-    <div class="stat"><span class="small muted">最高分</span><strong id="best">0</strong></div>
   </div>
+
+  <div id="score-row"></div>
 
   <div class="stage">
     <canvas id="cv" width="400" height="400" aria-label="贪吃蛇棋盘" role="img"></canvas>
@@ -157,6 +211,10 @@
 (function () {
   'use strict';
 
+  /* 最高分键：arcade.snake.best（门禁约定，不能改）。
+   * 读走共用运行时 Arcade.getScore —— 页内"删除记录"之后这里立刻读到空；
+   * 写仍落在同一把键上（运行时内部也是这个前缀）。
+   */
   var BEST_KEY = 'arcade.snake.best';
   var N = 20;
   var START_MS = 140;
@@ -165,7 +223,6 @@
   var cv = document.getElementById('cv');
   var ctx = cv.getContext('2d');
   var scoreEl = document.getElementById('score');
-  var bestEl = document.getElementById('best');
   var overlayEl = document.getElementById('overlay');
   var overlayTextEl = document.getElementById('overlayText');
   var overlayBtn = document.getElementById('overlayBtn');
@@ -190,14 +247,11 @@
   var size = 380;      /* CSS 像素下的棋盘边长 */
   var dpr = 1;
 
+  /* ── 最高分：读取全部交给共用运行时（它已包了 try/catch）── */
   function readBest() {
-    try {
-      var raw = window.localStorage.getItem(BEST_KEY);
-      var n = parseInt(raw, 10);
-      return isFinite(n) && n > 0 ? n : 0;
-    } catch (err) {
-      return 0;
-    }
+    var value = Arcade.getScore('snake');
+    var n = typeof value === 'number' ? value : parseInt(value, 10);
+    return isFinite(n) && n > 0 ? n : 0;
   }
 
   function writeBest(value) {
@@ -213,8 +267,28 @@
       best = score;
       writeBest(best);
     }
-    bestEl.textContent = String(best);
     scoreEl.textContent = String(score);
+  }
+
+  /* ── 画布配色跟着主题变量走（亮色下不再是一块死黑底）──────────
+   * getComputedStyle 每帧查太贵，所以缓存；切明暗时 refreshColors() 失效重读。
+   */
+  var colors = { bg: '#101318', line: 'rgba(38, 43, 51, .7)', accent: '#4fd8a4' };
+
+  function cssVar(name, fallback) {
+    try {
+      var value = window.getComputedStyle(document.documentElement).getPropertyValue(name);
+      value = value === null ? '' : String(value).trim();
+      return value || fallback;
+    } catch (err) {
+      return fallback;
+    }
+  }
+
+  function refreshColors() {
+    colors.bg = cssVar('--panel-2', '#101318');
+    colors.line = cssVar('--line', 'rgba(38, 43, 51, .7)');
+    colors.accent = cssVar('--accent', '#4fd8a4');
   }
 
   /* ── 画布尺寸：CSS 决定显示大小，这里只同步后备像素 ── */
@@ -227,17 +301,19 @@
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     pad = Math.max(1, Math.round(size * 0.012));
     cell = (size - pad * 2) / N;
+    refreshColors();
     draw();
   }
 
   function draw() {
     ctx.clearRect(0, 0, size, size);
 
-    ctx.fillStyle = '#101318';
+    ctx.fillStyle = colors.bg;
     ctx.fillRect(0, 0, size, size);
 
     /* 网格：很淡，只为看出格子 */
-    ctx.strokeStyle = 'rgba(38, 43, 51, .7)';
+    ctx.globalAlpha = .6;
+    ctx.strokeStyle = colors.line;
     ctx.lineWidth = 1;
     ctx.beginPath();
     for (var i = 1; i < N; i++) {
@@ -248,26 +324,29 @@
       ctx.lineTo(size - pad, p);
     }
     ctx.stroke();
+    ctx.globalAlpha = 1;
 
     /* 食物 */
     var fx = pad + food.x * cell + cell / 2;
     var fy = pad + food.y * cell + cell / 2;
-    ctx.fillStyle = '#6fb6ff';
+    ctx.fillStyle = colors.accent;
     ctx.beginPath();
     ctx.arc(fx, fy, Math.max(2, cell * 0.32), 0, Math.PI * 2);
     ctx.fill();
 
-    /* 蛇 */
+    /* 蛇：头用不透明，身子稍微透一点，形成两段层次 */
     for (var s = 0; s < snake.length; s++) {
       var seg = snake[s];
       var x = pad + seg.x * cell;
       var y = pad + seg.y * cell;
       var inset = Math.max(1, cell * 0.08);
       var r = Math.max(2, cell * 0.22);
-      ctx.fillStyle = s === 0 ? '#9acbff' : '#6fb6ff';
+      ctx.fillStyle = colors.accent;
+      ctx.globalAlpha = s === 0 ? 1 : 0.72;
       roundRect(x + inset, y + inset, cell - inset * 2, cell - inset * 2, r);
       ctx.fill();
     }
+    ctx.globalAlpha = 1;
   }
 
   function roundRect(x, y, w, h, r) {
@@ -332,6 +411,7 @@
     syncBest();
     setPauseButton('idle');
     showOverlay('点开始 / 按方向键开始', '滑动屏幕或按下方方向键也能玩', '开始');
+    hideResumeHint();
     draw();
   }
 
@@ -421,6 +501,8 @@
   function gameOver(reason) {
     state = 'over';
     stopLoop();
+    /* 记录可能刚被人在页内删掉：以存储里的现状为准 */
+    best = readBest();
     syncBest();
     setPauseButton('over');
     showOverlay('游戏结束 · ' + reason, '得分 ' + score + ' · 最高分 ' + best, '再来一局');
@@ -436,6 +518,7 @@
       }
       state = 'running';
       hideOverlay();
+      hideResumeHint();
       setPauseButton('running');
       startLoop();
       return;
@@ -558,27 +641,154 @@
     else start();
   });
 
-  /* ── 页面隐藏：暂停并停掉循环；回来不自动恢复 ───────────── */
-  document.addEventListener('visibilitychange', function () {
-    if (document.hidden) {
+  /* ── 主题按钮 / 页内最高分行 ───────────────────────────────
+   * #mode 必须在 mountSlots 之前就存在：运行时会把自己的存档按钮
+   * 插在它前面，否则顶栏右边会少一个入口。
+   */
+  var modeBtn = document.getElementById('mode');
+  Arcade.mountModeToggle(modeBtn, 'snake');
+  modeBtn.addEventListener('click', function () {
+    /* 明暗刚被切过（运行时的监听先跑），重读主题变量再画一帧 */
+    refreshColors();
+    draw();
+  });
+
+  /* 最高分统一由这一行显示；页面不再自己画一份，避免"删了记录还显示旧分" */
+  Arcade.mountScoreRow(document.getElementById('score-row'), 'snake');
+
+  /* ── 从存档恢复：蛇身 / 方向 / 食物 / 分数 / 速度整体搬回内存，
+   *    然后停在暂停态并显示"继续"按钮。
+   */
+  function restoreGame(data) {
+    /* 返回布尔：true = 已应用，false = 坏档被拒绝（当前局面不动）。 */
+    if (!data || !Array.isArray(data.snake) || data.snake.length === 0) return false;
+    var body = [];
+    var i, seg, sx, sy;
+    for (i = 0; i < data.snake.length; i++) {
+      seg = data.snake[i];
+      if (!seg) continue;
+      sx = parseInt(seg.x, 10);
+      sy = parseInt(seg.y, 10);
+      if (!isFinite(sx) || !isFinite(sy)) continue;
+      if (sx < 0 || sy < 0 || sx >= N || sy >= N) continue;
+      body.push({ x: sx, y: sy });
+    }
+    if (!body.length) return false;
+
+    snake = body;
+    dir = normalDir(data.dir);
+    pending = [];
+    score = typeof data.score === 'number' && isFinite(data.score) ? Math.max(0, Math.floor(data.score)) : 0;
+    eaten = typeof data.eaten === 'number' && isFinite(data.eaten) ? Math.max(0, Math.floor(data.eaten)) : 0;
+    interval = clampInterval(data.interval, eaten);
+
+    var fx = parseInt(data.food && data.food.x, 10);
+    var fy = parseInt(data.food && data.food.y, 10);
+    if (isFinite(fx) && isFinite(fy) && fx >= 0 && fy >= 0 && fx < N && fy < N) {
+      food = { x: fx, y: fy };
+    } else {
+      placeFood();
+    }
+
+    acc = 0;
+    stopLoop();
+    state = 'paused';
+    best = readBest();
+    syncBest();
+    setPauseButton('paused');
+    showOverlay('已载入存档', '点继续接着玩 · 分数 ' + score + ' · 长度 ' + snake.length, '继续');
+    draw();
+    hideResumeHint();
+    return true;
+  }
+
+  /** 存档里的方向只认四个单位向量，坏值回落到向右。 */
+  function normalDir(d) {
+    if (d) {
+      if (d.x === -1 && d.y === 0) return { x: -1, y: 0 };
+      if (d.x === 1 && d.y === 0) return { x: 1, y: 0 };
+      if (d.x === 0 && d.y === -1) return { x: 0, y: -1 };
+      if (d.x === 0 && d.y === 1) return { x: 0, y: 1 };
+    }
+    return { x: 1, y: 0 };
+  }
+
+  /** 间隔必须落在 [MIN_MS, START_MS]，坏值按吃了几个重新算。 */
+  function clampInterval(value, eatenCount) {
+    var n = typeof value === 'number' ? value : parseFloat(value);
+    if (!isFinite(n) || n <= 0) n = START_MS - eatenCount * 4;
+    return Math.max(MIN_MS, Math.min(START_MS, n));
+  }
+
+  /* ── 存档槽（最多 5 个，满 5 个由运行时淘汰分数最低的）──────
+   * state 全部是可 JSON 化的纯数据：蛇身坐标、方向、食物、分数、间隔。
+   */
+  var slots = Arcade.mountSlots({
+    gameId: 'snake',
+    unit: '分',
+    capture: function () {
+      if (state === 'idle' || state === 'over') return null;  /* 还没开始 / 已经结束 */
+      if (!snake.length) return null;
+      var body = [];
+      for (var i = 0; i < snake.length; i++) body.push({ x: snake[i].x, y: snake[i].y });
+      var queued = [];
+      for (var j = 0; j < pending.length; j++) queued.push({ x: pending[j].x, y: pending[j].y });
+      return {
+        score: score,
+        label: score + ' 分 · 长度 ' + snake.length,
+        state: {
+          v: 1,
+          snake: body,
+          dir: { x: dir.x, y: dir.y },
+          pending: queued,
+          food: { x: food.x, y: food.y },
+          score: score,
+          eaten: eaten,
+          interval: interval,
+          best: best
+        }
+      };
+    },
+    restore: restoreGame,
+    onPause: function () {
       if (state === 'running') pause();
+      /* 无论什么状态都别让 rAF 在后台空转 */
       stopLoop();
-      if (score > best) { best = score; writeBest(best); }
     }
   });
 
-  window.addEventListener('pagehide', function () {
-    stopLoop();
-    if (score > best) { best = score; writeBest(best); }
+  /* ── "有上次进度"提示条：存在 auto 槽才出现，没有就安静 ──── */
+  var resumeEl = document.getElementById('resume');
+  var resumeTextEl = document.getElementById('resumeText');
+  var resumeBtn = document.getElementById('resumeBtn');
+
+  function hideResumeHint() {
+    resumeEl.classList.add('hidden');
+  }
+
+  function showResumeHint() {
+    var entry = Arcade.loadSlot('snake', 'auto');
+    if (entry === null) return;
+    var when = Arcade.timeAgo(entry.at);
+    resumeTextEl.textContent = '有上次的进度（' + entry.score + ' 分' + (when ? ' · ' + when : '') + '），点继续或右上 ⛁ 也能载入';
+    resumeEl.classList.remove('hidden');
+  }
+
+  resumeBtn.addEventListener('click', function () {
+    var entry = Arcade.loadSlot('snake', 'auto');
+    if (entry === null) { hideResumeHint(); return; }
+    restoreGame(entry.state);
   });
+
+  document.getElementById('resumeClose').addEventListener('click', hideResumeHint);
 
   window.addEventListener('resize', fit);
   window.addEventListener('orientationchange', fit);
 
   best = readBest();
-  bestEl.textContent = String(best);
   fit();
   reset();
+  showResumeHint();
 })();
 </script>
 
