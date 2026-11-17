@@ -226,6 +226,13 @@
       var raw = localStorage.getItem(BEST_KEY);
       if (!raw) return out;
       var data = JSON.parse(raw);
+      if (typeof data === 'number') {
+        /* 兼容更早版本存过的单个数值：当作每一档的历史最佳 */
+        if (isFinite(data) && data > 0) {
+          for (var j = 0; j < LEVEL_KEYS.length; j++) out[LEVEL_KEYS[j]] = data;
+        }
+        return out;
+      }
       if (!data || typeof data !== 'object') return out;
       for (var i = 0; i < LEVEL_KEYS.length; i++) {
         var k = LEVEL_KEYS[i];

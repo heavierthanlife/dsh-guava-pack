@@ -851,9 +851,14 @@
 
     btn.addEventListener('pointerup', stop);
     btn.addEventListener('pointercancel', stop);
-    btn.addEventListener('pointerleave', stop);
     window.addEventListener('pointerup', stop);
+    window.addEventListener('pointercancel', stop);
     window.addEventListener('blur', stop);
+
+    /* 键盘/辅助技术激活按钮只会派发 click（detail === 0），补上这条路径 */
+    btn.addEventListener('click', function (e) {
+      if (e.detail === 0) fn();
+    });
   }
 
   bindRepeat(document.getElementById('btnLeft'), function () { move(-1); }, 200, 70);
