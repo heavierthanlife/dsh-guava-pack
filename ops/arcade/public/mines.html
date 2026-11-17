@@ -308,7 +308,7 @@
 
   /* ── 最高分 ───────────────────────────────────────────────
    * 读写全部走 Arcade（键 arcade.mines.best，结构 {easy,medium,hard}），
-   * localStorage 不再由本页直接访问 —— 少一处非 try 的机会。
+   * 持久化全部经 Arcade（内部已有 try/catch），本页不再直接碰浏览器存储。
    * 值的历史口径是**毫秒**（本页 fmtMs 除以 1000 显示）；早期版本可能按
    * "秒"写过，normalizeBest 统一折成毫秒，比较才不会错一个数量级。
    * 每次显示都重新从存储读：页内删掉记录后 HUD 不会还挂着一份旧值。
@@ -815,8 +815,9 @@
     return {
       /* 淘汰依据是"分数最低"。扫雷用时越短越好，所以 score 传**负的秒数**：
        * 20 秒的局 = -20，90 秒的局 = -90。这样"分最低"恰好等于"磨得最久"，
-       * 槽位满了会先淘汰那局最没进展的，留下的都是还值得继续的。 */
-      score: -(ms / 1000),
+       * 槽位满了会先淘汰那局最没进展的，留下的都是还值得继续的。
+       * 下限取 1ms 是为了避免开局立刻切走时出现 -0（-0 < 0 为假，排序会退化成 0）。 */
+      score: -(Math.max(1, ms) / 1000),
       label: LEVELS[level].label + ' · ' + sec + 's',
       state: {
         v: 1,
@@ -836,6 +837,12 @@
     };
   }
 
+  /** 坏档：给个安静的提示，不动当前局面。槽位来源（面板 / 顶部提示）都能复用。 */
+  function rejectState() {
+    showBanner('lose', '这条存档读不出来，已跳过');
+    return false;
+  }
+
   /**
    * 把 state 应用回游戏。恢复后处于**暂停**态（计时不走），等用户点"继续"。
    * 先整体校验再落盘：坏档直接返回 false，不动当前局面。
@@ -843,25 +850,25 @@
    * @returns {boolean} 是否恢复成功
    */
   function restore(state) {
-    if (!state || typeof state !== 'object') return false;
+    if (!state || typeof state !== 'object') return rejectState();
 
     var lv = state.level;
-    if (typeof lv !== 'string' || !LEVELS[lv]) return false;
+    if (typeof lv !== 'string' || !LEVELS[lv]) return rejectState();
     var cfg = LEVELS[lv];
-    if (state.rows !== cfg.rows || state.cols !== cfg.cols) return false;
+    if (state.rows !== cfg.rows || state.cols !== cfg.cols) return rejectState();
 
     var total = cfg.rows * cfg.cols;
     var cellsStr = typeof state.cells === 'string' ? state.cells : '';
-    if (cellsStr.length !== total) return false;
+    if (cellsStr.length !== total) return rejectState();
 
     var mineList = state.mines;
-    if (!Array.isArray(mineList) || mineList.length !== cfg.mines) return false;
+    if (!Array.isArray(mineList) || mineList.length !== cfg.mines) return rejectState();
 
     var mines = new Uint8Array(total);
     for (var i = 0; i < mineList.length; i++) {
       var idx = mineList[i];
-      if (typeof idx !== 'number' || idx !== Math.floor(idx) || idx < 0 || idx >= total) return false;
-      if (mines[idx]) return false;      // 同一个格子两条雷 = 坏档
+      if (typeof idx !== 'number' || idx !== Math.floor(idx) || idx < 0 || idx >= total) return rejectState();
+      if (mines[idx]) return rejectState();      // 同一个格子两条雷 = 坏档
       mines[idx] = 1;
     }
 
@@ -872,18 +879,18 @@
       var ch = cellsStr.charAt(k);
       if (ch === '1') {
         /* 踩到雷就结束的局不会入档；已翻开的格子是雷 ⇒ 数据被改坏了 */
-        if (mines[k]) return false;
+        if (mines[k]) return rejectState();
         stArr[k] = 1;
         opened++;
       } else if (ch === '2') {
         stArr[k] = 2;
         flags++;
       } else if (ch !== '0') {
-        return false;
+        return rejectState();
       }
     }
-    if (opened === 0) return false;                         // 没翻过任何格 = 没下过第一手
-    if (opened >= total - cfg.mines) return false;           // 已经赢了的局不该在存档里
+    if (opened === 0) return rejectState();                   // 没翻过任何格 = 没下过第一手
+    if (opened >= total - cfg.mines) return rejectState();    // 已经赢了的局不该在存档里
 
     /* 校验通过，开始落地。雷区直接用存档里的位置：
      * 首点不是雷的规则在当初布雷时已经满足，恢复不能重新布雷，否则局面就变了。 */
@@ -969,9 +976,8 @@
     go.className = 'btn primary';
     go.textContent = '继续';
     go.addEventListener('click', function () {
-      if (restore(entry.state)) return;          // restore 会隐藏提示并进入暂停态
+      if (restore(entry.state)) return;   // restore 会隐藏提示、进入暂停态并负责报错
       elResume.hidden = true;
-      showBanner('lose', '这条存档读不出来，已跳过');
     });
 
     var skip = document.createElement('button');

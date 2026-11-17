@@ -297,7 +297,7 @@
   }
 
   /* ── 最高分 ───────────────────────────────────────────────
-   * 走 Arcade（键 arcade.tetris.best），本页不再直接碰 localStorage。
+   * 走 Arcade（键 arcade.tetris.best），持久化内部已有 try/catch，本页不直接碰存储。
    * 每次用之前都从存储读：页内删掉记录后，"最佳"不会还挂着旧值。
    */
   function currentBest() {
@@ -920,42 +920,55 @@
     };
   }
 
+  /** 坏档：盖一层提示，按钮回到当前这一局（暂停中就顺手恢复）。 */
+  function rejectState() {
+    setOverlay('存档读不出来', '这条存档已跳过，接着玩这一局就行', [
+      {
+        label: '回到游戏', primary: true, onClick: function () {
+          hideOverlay();
+          if (paused) togglePause(false);
+        }
+      }
+    ]);
+    return false;
+  }
+
   /**
    * 把 state 应用回游戏。恢复后处于**暂停**态（rAF 停、计时不走），
    * 覆盖层给出"继续"按钮，点了才恢复循环。
    * 先整体校验再落地：坏档返回 false，不动当前局面。
    */
   function restore(state) {
-    if (!state || typeof state !== 'object') return false;
+    if (!state || typeof state !== 'object') return rejectState();
 
     var rowsData = state.grid;
-    if (!Array.isArray(rowsData) || rowsData.length !== ROWS) return false;
+    if (!Array.isArray(rowsData) || rowsData.length !== ROWS) return rejectState();
 
     var nextGrid = emptyGrid();
     for (var y = 0; y < ROWS; y++) {
       var rowStr = rowsData[y];
-      if (typeof rowStr !== 'string' || rowStr.length !== COLS) return false;
+      if (typeof rowStr !== 'string' || rowStr.length !== COLS) return rejectState();
       for (var x = 0; x < COLS; x++) {
         var ch = rowStr.charAt(x);
         if (ch === '.') continue;
-        if (!SHAPES[ch]) return false;      // 不认识的方块类型 = 坏档
+        if (!SHAPES[ch]) return rejectState();      // 不认识的方块类型 = 坏档
         nextGrid[y][x] = ch;
       }
     }
 
     var c = state.cur;
-    if (!c || typeof c !== 'object' || typeof c.type !== 'string' || !SHAPES[c.type]) return false;
+    if (!c || typeof c !== 'object' || typeof c.type !== 'string' || !SHAPES[c.type]) return rejectState();
     var rot = toInt(c.rot, -1);
-    if (rot < 0 || rot > 3) return false;
+    if (rot < 0 || rot > 3) return rejectState();
     var px = toInt(c.x, 1000);
     var py = toInt(c.y, 1000);
-    if (px < -4 || px > COLS - 1 || py < -4 || py > ROWS - 1) return false;
+    if (px < -4 || px > COLS - 1 || py < -4 || py > ROWS - 1) return rejectState();
 
     buildRotations();   // 幂等：确保旋转表已就绪
-    if (!rotations[c.type] || !rotations[c.type][rot]) return false;
+    if (!rotations[c.type] || !rotations[c.type][rot]) return rejectState();
     var matrix = rotations[c.type][rot];
     /* 存档里当前方块不能和已落定的方块重叠，否则恢复出来是个死局 */
-    if (collidesIn(nextGrid, matrix, px, py)) return false;
+    if (collidesIn(nextGrid, matrix, px, py)) return rejectState();
 
     var q = [];
     if (Array.isArray(state.queue)) {
@@ -1047,18 +1060,18 @@
     go.className = 'btn primary';
     go.textContent = '继续';
     go.addEventListener('click', function () {
-      if (restore(entry.state)) return;      // restore 会藏提示并进入暂停态
+      if (restore(entry.state)) return;   // restore 会藏提示、进入暂停态并负责报错
       hideResumeHint();
-      setOverlay('存档读不出来', '这条存档已跳过，接着玩这一局就行', [
-        { label: '知道了', primary: true, onClick: hideOverlay }
-      ]);
     });
 
     var skip = document.createElement('button');
     skip.type = 'button';
     skip.className = 'btn ghost';
     skip.textContent = '忽略';
-    skip.addEventListener('click', hideResumeHint);
+    skip.addEventListener('click', function () {
+      hideResumeHint();
+      layout();
+    });
 
     elResume.appendChild(msg);
     elResume.appendChild(go);
