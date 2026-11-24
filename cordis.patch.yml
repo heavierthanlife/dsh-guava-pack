@@ -39,3 +39,14 @@
       name: ./plugins/dsh-context-acp/lib/index.js
       config:
         enabled: true
+
+# ── 0.2.2-rc.5 兼容补丁（2026-11-24） ────────────────────────────────────────
+# 升级到 0.2.2-rc.5 后，dsh-web-app bundle 里的 ui-context-menu / ui-file-drag
+# 两行没有实际生效：client manifest 里缺这两个模块 → 浏览器端 contextMenus /
+# fileDrag 服务不存在 → 大量客户端插件 pending，web boot 报
+# "N required entries did not activate"，界面只剩空壳。
+# 在 bundle 层显式重声明一遍即可恢复（与 bundle 里同名同 id，等价于补插）。
+- id: ui-context-menu
+  name: "@deepseek-ai/dsh-client-ui-context-menu"
+- id: ui-file-drag
+  name: "@deepseek-ai/dsh-client-ui-file-drag"

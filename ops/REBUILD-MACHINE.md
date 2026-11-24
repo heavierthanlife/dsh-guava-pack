@@ -184,6 +184,7 @@ bash ~/dsh/playground/themes/dsh-guava-pack/ops/tunnel/check.sh 100.109.125.37
 | 恢复出另一台的文件 | `restore latest` 没带 `--host` |
 | `scp` 返回 0 但文件没传过去 | 这套环境的 scp 有问题；用 `ssh 'cat > 文件' < 本地文件` |
 | 改完代码但行为没变 | 只 `is-active` 不算数，要重启服务并核对 `ActiveEnterTimestamp` |
+| 升级 DSH 后界面只剩空壳、大量插件 pending | client 模块清单缺 `context-menu`/`file-drag`；见 `UPGRADE-DSH.md` §4 |
 | agentrouter 报 `400 tool_use ids ...` | `node_modules` 补丁被 `pnpm install` 覆盖；跑 `node install.mjs --patch` |
 
 ---
