@@ -253,13 +253,6 @@ const PATCHES = [
     markers: ['enforceToolResultAdjacency', 'tool_use always trails'],
     why: '修 400 tool_use ids were found without tool_result blocks',
   },
-  {
-    name: '静态资源缓存头（省每次重载 320KB）',
-    script: 'patches/apply-static-cache-headers.sh',
-    file: join(DSH_HOME, 'node_modules/@deepseek-ai/dsh-host-frontend-static/lib/index.js'),
-    marker: 'guava: static cache headers',
-    why: 'SPA 静态资源没有 cache-control/etag，手机经中继（RTT 250–350ms）每次刷新都可能重拉 bundle',
-  },
 ];
 
 /** 统一取标记：单条用 marker，多条用 markers（全部存在才算已打）。 */
@@ -428,16 +421,17 @@ function check() {
         names.push(value);
       }
     }
+    const pluginRows = names.filter((n) => n.startsWith('./plugins/')).length;
     if (idCount === 0) {
       bad('\u6ca1\u627e\u5230\u300c- id:\u300d\u6761\u76ee');
       failed++;
     } else if (pluginDirs.length === 0) {
       // plugins/ 读不到时前面已经报错，这里不重复报
-    } else if (idCount !== pluginDirs.length) {
-      bad(`cordis.patch.yml \u6709 ${idCount} \u4e2a\u300c- id:\u300d\u6761\u76ee\uff0cplugins/ \u4e0b\u6709 ${pluginDirs.length} \u4e2a\u76ee\u5f55 \u2014\u2014 \u4e24\u8fb9\u5fc5\u987b\u4e00\u4e00\u5bf9\u5e94`);
+    } else if (pluginRows !== pluginDirs.length) {
+      bad(`cordis.patch.yml \u6709 ${pluginRows} \u4e2a\u6307\u5411 ./plugins/ \u7684\u6761\u76ee\uff0cplugins/ \u4e0b\u6709 ${pluginDirs.length} \u4e2a\u76ee\u5f55 \u2014\u2014 \u4e24\u8fb9\u5fc5\u987b\u4e00\u4e00\u5bf9\u5e94`);
       failed++;
     } else {
-      ok(`\u6761\u76ee\u6570 ${idCount} == plugins/ \u76ee\u5f55\u6570 ${pluginDirs.length}`);
+      ok(`\u63d2\u4ef6\u884c ${pluginRows} == plugins/ \u76ee\u5f55\u6570 ${pluginDirs.length}` + (idCount > pluginRows ? `\uff08\u53e6\u6709 ${idCount - pluginRows} \u884c\u662f\u4e0a\u6e38 id \u7684\u517c\u5bb9\u8865\u4e01\uff09` : ''));
     }
     for (const rel of names) {
       if (!rel.startsWith('./')) { info(`name: ${rel}\uff08\u975e\u76f8\u5bf9\u8def\u5f84\uff0c\u8df3\u8fc7\u5b58\u5728\u6027\u68c0\u67e5\uff09`); continue; }

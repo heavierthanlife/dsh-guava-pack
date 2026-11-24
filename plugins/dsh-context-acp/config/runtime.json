@@ -33,7 +33,7 @@
     "refreshOnHigherCompaction": true
   },
   "$generated": {
-    "upstream": "@deepseek-ai/dsh-web-app@0.2.1-rc.5",
-    "upstreamSha256": "d146da01715482c591e20db2b4a09c39b3fe1fcd02731d7aac76400d10f5e60f"
+    "upstream": "@deepseek-ai/dsh-web-app@0.2.2-rc.5",
+    "upstreamSha256": "705b1088377e21d1eb6855c8557e0ca1d75f6e037a0d454d7c14abe4a850b604"
   }
 }

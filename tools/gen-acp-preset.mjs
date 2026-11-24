@@ -208,6 +208,41 @@ function transformPresetConfig(config, backend, presetLabel, fallbackRatio) {
   return { config, replaced: true, droppedKeys };
 }
 
+/** spawn 型子 agent 可选的预设白名单（不含 cordis：子 agent 不应获得创造模式能力）。 */
+const SUBAGENT_ALLOWED_PRESETS = ['standard', 'ptc', 'minimal'];
+/** 漏写 agent_preset 时的兜底预设。 */
+const SUBAGENT_DEFAULT_PRESET = 'standard';
+
+/**
+ * 给 delegation group 里的 spawn 型 `tool-subagent` 行补上子 agent 预设策略。
+ *
+ * `subagent`（spawn）有独立上下文，可以按任务选预设；`subagent_fork`（fork）
+ * 继承父会话历史与预设，架构上不允许独立选择，因此这里不动它。
+ * 没有 delegation group 的 preset（例如 minimal）原样跳过。
+ *
+ * @param {object} config preset 行的 config（已深拷贝）
+ * @param {string} presetLabel 仅用于错误消息
+ * @returns {{ patched: boolean }}
+ */
+function applySubagentPresetPolicy(config, presetLabel) {
+  const plugins = config?.plugins;
+  if (!Array.isArray(plugins)) return { patched: false };
+  const group = plugins.find((row) => row !== null && typeof row === 'object' && row.id === 'delegation' && row.group === true);
+  if (group === undefined || !Array.isArray(group.config)) return { patched: false };
+  const row = group.config.find((item) => item !== null && typeof item === 'object' && item.id === 'tool-subagent');
+  if (row === undefined) return { patched: false };
+  const provider = row.config?.provider;
+  if (provider !== undefined && provider !== 'spawn') {
+    throw new Error(`${presetLabel}: tool-subagent 的 provider 是 ${JSON.stringify(provider)} 而不是 spawn，子 agent 预设选择不适用`);
+  }
+  row.config = {
+    ...(row.config ?? {}),
+    agentPreset: SUBAGENT_DEFAULT_PRESET,
+    allowedAgentPresets: [...SUBAGENT_ALLOWED_PRESETS],
+  };
+  return { patched: true };
+}
+
 /**
  * 计算上游指纹：文件名 + 内容，按固定顺序。上游重排/改一个字符都会变。
  * @param {{name:string,text:string}[]} files
@@ -259,6 +294,7 @@ function generate({ explicitPresetsDir, backendOverride }) {
   const files = expected.map((name) => ({ name, text: readFileSync(join(dir, name), 'utf8') }));
   const upstreamHash = fingerprint(files);
   const replaced = [];
+  const subagentPatched = [];
 
   return (async () => {
     const yaml = await loadYaml();
@@ -279,6 +315,9 @@ function generate({ explicitPresetsDir, backendOverride }) {
       const result = transformPresetConfig(config, backend, label, fallbackRatio);
       if (result.replaced) replaced.push(entry.id);
       if ((result.droppedKeys ?? []).length > 0) info(`${label}: 上游 compaction-basic 行的额外字段被丢弃：${result.droppedKeys.join(', ')}`);
+      // 子 agent 预设策略：spawn 型 tool-subagent 允许按任务选预设（fork 行不动）。
+      const subagent = applySubagentPresetPolicy(config, label);
+      if (subagent.patched) subagentPatched.push(entry.id);
       // 只覆盖 config，不重复 insert（行已由上游 layer 创建；重复 insert 会撞 id）。
       patchList.push({ id: entry.id, config: result.config });
     }
@@ -295,6 +334,10 @@ function generate({ explicitPresetsDir, backendOverride }) {
       '# 而 config.plugins 是整棵数组 —— 上游每加删一行手写副本就静默失配。',
       '# 所以这里保留上游全部行，只把 compaction group 的 compaction-basic 行换成',
       '# dsh-context-acp/engine（backend=acp）；backend=basic 时原样不动 = 内置压缩。',
+      `# 另外给 delegation group 的 spawn 型 tool-subagent 行补上子 agent 预设策略`,
+      `# （agentPreset=${SUBAGENT_DEFAULT_PRESET}，allowedAgentPresets=${SUBAGENT_ALLOWED_PRESETS.join('/')}），`,
+      '# fork 行不动：它继承父会话历史与预设，架构上不允许独立选择。',
+      `# 子 agent 预设策略覆盖: ${subagentPatched.join(', ') || '(无)'}`,
       '',
     ].join('\n');
     const presetText = `${header}${dumpYaml(yaml, schema, patchList)}`;

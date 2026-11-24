@@ -1,7 +1,7 @@
 # ⚠️ 生成文件，不要手改。
 # 生成器: tools/gen-acp-preset.mjs（dsh-context-acp）
-# upstream: @deepseek-ai/dsh-web-app@0.2.1-rc.5
-# upstream-sha256: d146da01715482c591e20db2b4a09c39b3fe1fcd02731d7aac76400d10f5e60f
+# upstream: @deepseek-ai/dsh-web-app@0.2.2-rc.5
+# upstream-sha256: 705b1088377e21d1eb6855c8557e0ca1d75f6e037a0d454d7c14abe4a850b604
 # backend: acp
 # 覆盖: preset-cordis, preset-minimal, preset-ptc, preset-standard
 #
@@ -9,6 +9,10 @@
 # 而 config.plugins 是整棵数组 —— 上游每加删一行手写副本就静默失配。
 # 所以这里保留上游全部行，只把 compaction group 的 compaction-basic 行换成
 # dsh-context-acp/engine（backend=acp）；backend=basic 时原样不动 = 内置压缩。
+# 另外给 delegation group 的 spawn 型 tool-subagent 行补上子 agent 预设策略
+# （agentPreset=standard，allowedAgentPresets=standard/ptc/minimal），
+# fork 行不动：它继承父会话历史与预设，架构上不允许独立选择。
+# 子 agent 预设策略覆盖: preset-cordis, preset-ptc, preset-standard
 - id: preset-cordis
   config:
     id: cordis
@@ -17,7 +21,7 @@
       - id: persona
         name: "@deepseek-ai/dsh-persona"
         config:
-          prefix: You are a coding agent powered by the {{model}} model.
+          prefix: You are a coding agent powered by the {{model}} model. You help the user customize DeepSeek Harness itself.
       - id: agent-instructions
         name: "@deepseek-ai/dsh-agent-instructions"
         config:
@@ -32,6 +36,8 @@
         disabled: !!js process.platform !== 'win32'
       - id: tool-fs
         name: "@deepseek-ai/dsh-tool-fs"
+        config:
+          applyPatch: false
       - id: tool-fs-search
         name: "@deepseek-ai/dsh-tool-fs-search"
         config:
@@ -119,14 +125,20 @@
         config:
           - id: tool-subagent-control
             name: "@deepseek-ai/dsh-tool-subagent-control"
-          - id: tool-subagent-list-agents
-            name: "@deepseek-ai/dsh-tool-subagent-control/list-agents"
+            config:
+              interrupt: false
           - id: tool-subagent
             name: "@deepseek-ai/dsh-tool-subagent"
             config:
               provider: spawn
               toolName: subagent
-              modelSelectionSettings: true
+              modelSelection: true
+              modelDiscovery: true
+              agentPreset: standard
+              allowedAgentPresets:
+                - standard
+                - ptc
+                - minimal
           - id: tool-subagent-fork
             name: "@deepseek-ai/dsh-tool-subagent"
             config:
@@ -283,6 +295,8 @@
         disabled: !!js process.platform !== 'win32'
       - id: tool-fs
         name: "@deepseek-ai/dsh-tool-fs"
+        config:
+          applyPatch: false
       - id: tool-fs-search
         name: "@deepseek-ai/dsh-tool-fs-search"
         config:
@@ -374,14 +388,20 @@
         config:
           - id: tool-subagent-control
             name: "@deepseek-ai/dsh-tool-subagent-control"
-          - id: tool-subagent-list-agents
-            name: "@deepseek-ai/dsh-tool-subagent-control/list-agents"
+            config:
+              interrupt: false
           - id: tool-subagent
             name: "@deepseek-ai/dsh-tool-subagent"
             config:
               provider: spawn
               toolName: subagent
-              modelSelectionSettings: true
+              modelSelection: true
+              modelDiscovery: true
+              agentPreset: standard
+              allowedAgentPresets:
+                - standard
+                - ptc
+                - minimal
           - id: tool-subagent-fork
             name: "@deepseek-ai/dsh-tool-subagent"
             config:
@@ -406,12 +426,12 @@
         config:
           fetch: true
           searchTimeoutMs: 60000
-      - id: tool-presentation
-        name: "@deepseek-ai/dsh-agent-tool-presentation"
-        config:
-          mode: ptc
+      - id: tool-executor-ptc
+        name: "@deepseek-ai/dsh-tool-executor-ptc"
       - id: present
         name: "@deepseek-ai/dsh-tool-present"
+      - id: tool-office
+        name: "@deepseek-ai/dsh-tool-office"
       - id: tool-plugin-manager
         name: "@deepseek-ai/dsh-plugin-manager/tools"
         disabled: true
@@ -441,6 +461,8 @@
         disabled: !!js process.platform !== 'win32'
       - id: tool-fs
         name: "@deepseek-ai/dsh-tool-fs"
+        config:
+          applyPatch: false
       - id: tool-fs-search
         name: "@deepseek-ai/dsh-tool-fs-search"
         config:
@@ -451,6 +473,11 @@
         name: "@deepseek-ai/dsh-tool-schedule"
       - id: skill-filesystem
         name: "@deepseek-ai/dsh-skill-filesystem"
+        config:
+          customSkillDirs:
+            - !!js >-
+              process.getBuiltinModule('node:path').join(process.getBuiltinModule('node:path').dirname(process.getBuiltinModule('node:module').createRequire(baseUrl).resolve('@deepseek-ai/dsh-agent-preset/package.json')),
+              'skills')
       - id: tool-skill
         name: "@deepseek-ai/dsh-tool-skill"
       - id: command-goal
@@ -532,14 +559,20 @@
         config:
           - id: tool-subagent-control
             name: "@deepseek-ai/dsh-tool-subagent-control"
-          - id: tool-subagent-list-agents
-            name: "@deepseek-ai/dsh-tool-subagent-control/list-agents"
+            config:
+              interrupt: false
           - id: tool-subagent
             name: "@deepseek-ai/dsh-tool-subagent"
             config:
               provider: spawn
               toolName: subagent
-              modelSelectionSettings: true
+              modelSelection: true
+              modelDiscovery: true
+              agentPreset: standard
+              allowedAgentPresets:
+                - standard
+                - ptc
+                - minimal
           - id: tool-subagent-fork
             name: "@deepseek-ai/dsh-tool-subagent"
             config:
@@ -564,9 +597,11 @@
           searchTimeoutMs: 60000
       - id: present
         name: "@deepseek-ai/dsh-tool-present"
+      - id: tool-office
+        name: "@deepseek-ai/dsh-tool-office"
       - id: tool-plugin-manager
         name: "@deepseek-ai/dsh-plugin-manager/tools"
-        disabled: true
+        disabled: !!js "!ctx.get('profileContext')"
       - id: tool-plugin-market
         name: "@deepseek-ai/dsh-plugin-market/tools"
         disabled: true
