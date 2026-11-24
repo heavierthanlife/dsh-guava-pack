@@ -253,6 +253,14 @@ const PATCHES = [
     markers: ['enforceToolResultAdjacency', 'tool_use always trails'],
     why: '修 400 tool_use ids were found without tool_result blocks',
   },
+  {
+    name: 'subagent-control 的 ./list-agents 子路径',
+    script: 'patches/apply-subagent-list-agents.sh',
+    file: join(DSH_HOME, 'node_modules/@deepseek-ai/dsh-tool-subagent-control/package.json'),
+    marker: './list-agents',
+    why: '上游 0.2.2-rc.5 漏发 lib/list-agents.js 且 exports 无该子路径；'
+      + '缺它时任何会话 resume 都报 tool-subagent-list-agents never started',
+  },
 ];
 
 /** 统一取标记：单条用 marker，多条用 markers（全部存在才算已打）。 */
