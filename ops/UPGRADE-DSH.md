@@ -31,19 +31,28 @@ systemctl --user restart dsh.service
 
 ## 3. 升级后自检（三步，缺一不可）
 
-### 3.1 服务端启动无告警
+### 3.1 一条命令看服务端（日志 + 端口 + 路由健康）
 
 ```bash
-python3 - <<'PY'
-from pathlib import Path
-lines = Path.home().joinpath('dsh/logs/web-run.log').read_text(errors='replace').splitlines()
-tail = lines[[i for i,l in enumerate(lines) if l.startswith('dsh web: http')][-1]:]
-print('\n'.join(tail[:20]))
-PY
+node ~/dsh/playground/themes/dsh-guava-pack/tools/check-boot.mjs
 ```
 
-期望：只有 `dsh web: http://...token=...` 和模型列表之类的正常行；
-**不应出现** `N entry did not activate`。
+它读 `~/dsh/logs/web-run.log` 的**最后一段**（上一次启动之前的一律不算），判三件事：
+
+| 检查 | 红意味着 |
+|---|---|
+| `did not activate` / `pending (waiting for service: …)` | 客户端模块清单缺包，界面会是空壳 → 第 4 节 |
+| `never started` | 上游包漏发 exports 子路径，会话打不开 → BREAK-GLASS §8.22 |
+| 3080 / 8318 没监听、`8318/health` 不是 200 | 服务或路由代理没起来 |
+
+退出码 `0` = 正常，`1` = 有异常（`--advisory` 恒 `0`，`--json` 出机器可读）。
+
+`[deepseek-account] request failed`（`no-response`）、`ExperimentalWarning` 这些已知噪音已过滤，
+不会误报。详见 `ops/tunnel/BREAK-GLASS.md` §8.21 / §8.22。
+
+> `node install.mjs --check` 末尾也会自动跑一遍（advisory，不计入失败数），
+> 所以一般**不必单独跑**；想在别的机器上核对日志用
+> `DSH_CHECK_PORTS=none DSH_CHECK_LOG=... node tools/check-boot.mjs`。
 
 ### 3.2 浏览器端插件图完整
 
@@ -52,7 +61,9 @@ PY
 - ❌ 出现 `web boot: N required entries did not activate` → 见第 4 节
 - ❌ 出现 `404 /api/web/listProviders` → 供应商路由插件没挂上
 
-### 3.3 端口与路由
+想直接看模块数，Console 里粘第 4 节那行脚本（正常 `count: 83`）。
+
+### 3.3 端口与路由（`check-boot` 已覆盖，留作手工核对）
 
 ```bash
 ss -ltn | grep -E ':(3080|8317|8318)'      # 三个都要在

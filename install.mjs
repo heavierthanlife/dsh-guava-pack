@@ -138,6 +138,13 @@ const REQUIRED = [
   'patches/apply-required-array.sh',
   'patches/apply-anthropic-tool-fixes.sh',
   'patches/apply-static-cache-headers.sh',
+  // 0.2.2-rc.5 起上游漏发 `./list-agents` 子路径（类型与 .js.map 都发了，就漏 .js），
+  // 缺它任何会话 resume 都报 never started —— vendor 一份同版本编译产物兜住。
+  'patches/apply-subagent-list-agents.sh',
+  'patches/vendor/subagent-control-list-agents.js',
+  // 运行态自检：磁盘全绿、界面空壳这种故障只有日志和端口能看出来。
+  'tools/check-boot.mjs',
+  'tools/tests/check-boot.mjs',
 ];
 
 /**
@@ -219,6 +226,10 @@ const MIN_BYTES = {
   'patches/apply-required-array.sh': 300,
   'patches/apply-anthropic-tool-fixes.sh': 500,
   'patches/apply-static-cache-headers.sh': 900,
+  'patches/apply-subagent-list-agents.sh': 1200,
+  'patches/vendor/subagent-control-list-agents.js': 1500,
+  'tools/check-boot.mjs': 5000,
+  'tools/tests/check-boot.mjs': 5000,
 };
 
 /**
@@ -475,6 +486,20 @@ function check() {
   }
 
   failed += reportPatches();
+
+  // 运行态自检（advisory）：`--check` 只能证明「磁盘上对」，证明不了「跑起来对」。
+  // 2026-11-24 升级 0.2.2-rc.5 时，包、补丁、preset 全绿，界面却是空壳 ——
+  // 只有 web-run.log 里的 `did not activate` 和端口能看出来。所以最后再看一眼，
+  // 但**不计入 failures**：服务没起、或在别的机器上跑 --check，都不该因此判红。
+  console.log('\n\u8fd0\u884c\u6001\u81ea\u68c0\uff08advisory\uff0c\u4e0d\u8ba1\u5165\u4e0a\u9762\u7684\u5931\u8d25\u6570\uff09\uff1a');
+  try {
+    execFileSync(process.execPath, [join(PACK_DIR, 'tools/check-boot.mjs'), '--advisory', '--no-title'], {
+      cwd: PACK_DIR,
+      stdio: 'inherit',
+    });
+  } catch (err) {
+    info(`check-boot \u6ca1\u8dd1\u8d77\u6765\uff1a${err.message}`);
+  }
 
   console.log(`\n\u7ed3\u679c\uff1a${failed === 0 ? '\u5305\u5b8c\u6574\uff0c\u53ef\u4ee5\u88c5' : failed + ' \u9879\u9700\u5904\u7406'}`);
   return failed === 0 ? 0 : 1;

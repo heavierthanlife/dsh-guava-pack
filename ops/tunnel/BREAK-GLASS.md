@@ -631,6 +631,105 @@ chmod 755 ops/backup/git-mirror-push.sh
 **判据**：`cat /srv/git-mirror/.last-run` 的时间应当和最近一次备份同一档；
 健康推送日志出现 `push up: git 镜像 0h 前`。
 
+### 8.21 界面空壳、`N required entries did not activate` = 客户端模块清单缺包
+
+**症状**（2026-11-24 升级 `0.2.2-rc.5` 实测）：服务端起来了、页面能开，但界面只剩空壳：
+
+```
+dsh: warning: 2 required entries did not activate
+@deepseek-ai/dsh-client-ui-sidebar (required): pending (waiting for service: uiWorkspace)
+@deepseek-ai/dsh-client-ui-chat (required): pending (waiting for services: uiWorkspace,
+                                              uiConversation, sidebarRight, fileDrag)
+…二十多条 pending
+```
+
+`/api/web/listProviders` 返回 404，供应商路由面板空。
+
+**根因**：`dsh-web-app` bundle 里的 `ui-context-menu` / `ui-file-drag` 两行**进了配置但没生效**，
+浏览器端拿到的 client 模块清单只有 **79 个（正常 83）**，缺这两个包 →
+提供 `contextMenus` / `fileDrag` 服务的模块不存在 → 所有依赖它们的插件永远 pending。
+
+**判据**（不用看源码，F12 → Console 粘一行）：
+
+```js
+const u = performance.getEntriesByType('resource').map(e=>e.name).filter(x=>x.includes('/plugins/'));
+const mods = new Set(); for (const x of u){const q=x.split('??')[1]; if(q) for(const p of q.split(',')) mods.add(p.split('&')[0]);}
+({count: mods.size, ctx: u.join().includes('context-menu'), drag: u.join().includes('file-drag')})
+```
+
+正常：`{count: 83, ctx: true, drag: true}`。`count` 变少就是缺包，别怀疑缓存。
+
+**修法**：在 bundle patch 层把这两行**同 id 同名重声明**一遍（等价于补插）。
+本仓库 `cordis.patch.yml` 末尾「0.2.2-rc.5 兼容补丁」段已经内置，所以通常只需：
+
+```bash
+cd ~/dsh/playground/themes/dsh-guava-pack && git pull --rebase
+systemctl --user restart dsh.service
+```
+
+上游哪天自己修好，这段重声明也无害（同 id 同名，等于没改）。
+
+**教训**：**`--dump-config` 里有这一行 ≠ 浏览器里加载了这个模块。**
+我升级前的兼容性核验就栽在这里：组合层全绿（211 个条目、两个 id 都在），
+激活层失败，而安装自检只看磁盘 —— 三层里只验了一层。
+所以新增了 `tools/check-boot.mjs`，把关口设在**启动日志 + 端口**这一层。
+
+**判据**：`node tools/check-boot.mjs` → 「运行态正常」；
+`~/dsh/logs/web-run.log` 最后一段没有 `did not activate`。
+
+---
+
+### 8.22 会话全都打不开、`… never started` = 上游包 exports 漏发子路径
+
+**症状**：点开任何已有会话 → 它从侧栏**消失**，输入框显示「会话不可用」。
+WebSocket 帧里才是真话：
+
+```
+api-session/error: resume failed … RemoteError: tool-subagent-list-agents
+  (@deepseek-ai/dsh-tool-subagent-control/list-agents): never started
+```
+
+**根因**：`@deepseek-ai/dsh-tool-subagent-control@0.2.2-rc.5` 的发布产物自相矛盾 ——
+
+```
+lib/index.js                  ← 有
+lib/types/list-agents.d.ts    ← 有（类型声明发了）
+lib/types/list-agents.js.map  ← 有（sourcemap 发了）
+lib/list-agents.js            ← 没有 ✗   ← 真正被 import 的那个
+exports["./list-agents"]      ← 没有 ✗
+```
+
+`files` 白名单漏配，`.js` 被排除而它的 `.d.ts` / `.js.map` 留下了。
+**`0.2.3-alpha.2` 一模一样，所以升 alpha 修不了。**（同一个包里 `wait-agent` 也漏了
+`lib/types/wait-agent.js`，只是暂时没人 import 才没炸。）
+
+**判据**（两秒）：
+
+```bash
+tar tzf <(curl -sS https://registry.npmjs.org/@deepseek-ai/dsh-tool-subagent-control/-/dsh-tool-subagent-control-0.2.2-rc.5.tgz) \
+  | grep '^package/lib/'
+node --input-type=module -e "import('@deepseek-ai/dsh-tool-subagent-control/list-agents').then(m=>console.log('OK',Object.keys(m))).catch(e=>console.log('FAIL',e.code))"
+```
+
+**修法**：用**同版本 src** 编译一份 `lib/list-agents.js` 塞进去，再补 `exports` 条目。
+本仓库已做成幂等补丁：
+
+```bash
+bash playground/themes/dsh-guava-pack/patches/apply-subagent-list-agents.sh
+# 或在升级后统一：node playground/themes/dsh-guava-pack/install.mjs --patch
+```
+
+产物在 `patches/vendor/subagent-control-list-agents.js`（esbuild 从同版本
+`src/list-agents.ts` 编出来）。上游一旦自带该文件与 exports 条目，脚本自动跳过。
+
+**教训**：**类型声明发了，不代表运行时产物发了。** `.d.ts` 能骗过 `tsc`、骗过所有
+静态检查，骗不过一次 `import()`。以后核对上游包，除了看 `exports` 键，还要
+`tar tzf` 确认 `exports` 指向的文件**真的在包里**。
+
+**判据**：`node tools/check-boot.mjs` 绿；连点两个会话都留在列表里、标题跟着变。
+
+---
+
 ### 8.15 排查顺序（省时间的模板）
 
 ```
