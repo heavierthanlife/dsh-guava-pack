@@ -730,6 +730,100 @@ bash playground/themes/dsh-guava-pack/patches/apply-subagent-list-agents.sh
 
 ---
 
+### 8.23 Node 连 Cloudflare 端点报 ETIMEDOUT、curl 却 200 —— 是 IPv6 自动选族
+
+**症状**（2026-11-25）：同一台机器、同一个 URL ——
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' https://openrouter.ai/api/v1/models   # 200
+node -e 'fetch("https://openrouter.ai/api/v1/models").then(r=>console.log(r.status))'
+#   → TypeError: fetch failed，cause: ETIMEDOUT（545ms 就死）
+```
+
+`opencode.ai` 同样，而且**时好时坏**（8 次里成功 5 次），最容易被当成"网络抖动"。
+
+**根因**：这台 WSL 只有 Tailscale 的 ULA（`fd7a:…`）、**没有 IPv6 默认路由**，
+而 Cloudflare 托管的这两家同时有 A 和 AAAA。Node 默认 `autoSelectFamily: true`
+（happy eyeballs）会并发试两族 —— IPv6 立刻 `ENETUNREACH`，聚合后整体抛
+**ETIMEDOUT**。curl 的 happy eyeballs 实现正确，所以完全不受影响。
+于是就有了最有误导性的组合：**curl 通、node 不通**。
+
+**判据**（10 秒内定位）：
+
+```bash
+ip -6 route show default        # 空 → 没有 v6 默认路由，这就是前提
+node -e 'require("node:net").connect({host:"openrouter.ai",port:443}).on("error",e=>console.log("auto:",e.code)).on("connect",()=>console.log("auto: ok"))'
+node -e 'require("node:net").connect({host:"openrouter.ai",port:443,family:4}).on("error",e=>console.log("v4:",e.code)).on("connect",()=>console.log("v4: ok"))'
+# 期望：auto: ETIMEDOUT / v4: ok
+```
+
+实测（8 次连续 `GET /models`）：
+
+| | openrouter | opencode |
+|---|---|---|
+| 默认（autoSelectFamily 开） | **0/8** | 5/8 |
+| `--no-network-family-autoselection` | 8/8 | 8/8 |
+
+**修法**（两处都要，各管一段）：
+
+```bash
+# ① DSH 本体：启动器 ~/dsh/dsh 里，exec node 之前（幂等 + 能力探测，老 Node 不会因此起不来）
+case " ${NODE_OPTIONS:-} " in
+  *--no-network-family-autoselection*) ;;
+  *) node --no-network-family-autoselection -e '' 2>/dev/null &&
+       export NODE_OPTIONS="${NODE_OPTIONS:-} --no-network-family-autoselection" ;;
+esac
+```
+
+```js
+// ② 工具：tools/lib/model-config.mjs 入口（同步工具与定时任务都 import 它）
+net.setDefaultAutoSelectFamily?.(false)
+```
+
+`--dns-result-order=ipv4first` **不够**：它能救 opencode，救不了 openrouter（实测仍 0/8）。
+
+**教训**：**「curl 通、node 不通」先怀疑 happy eyeballs / 双栈，别怀疑代理和证书。**
+另一个容易误判的点：`ETIMEDOUT` 只花了 545ms —— 真正的 SYN 超时是秒级，
+这么快的超时说明是「选错了地址」，不是「路上丢包」。
+
+---
+
+### 8.24 同一把 key 存两处 —— `.bashrc` 的旧副本把凭证库盖住了
+
+**症状**：同步工具对某家一律「探测失败 / 401」，但 DSH 里同一个模型跑得好好的。
+
+**根因**：key 有三个来源，优先级错了就会拿错那份：
+
+| 顺序 | 来源 | 谁在用 |
+|---|---|---|
+| 1 | `process.env` | 启动器注入、手动 export |
+| 2 | `<DSH_HOME>/.credentials.yaml` 的 `refs:` | **DSH 运行时（真正生效的那份）** |
+| 3 | `~/.bashrc` 的 `export NAME=…` | 桥接、定时任务、同步工具 |
+
+启动器 `~/dsh/dsh` 先 `eval` `.bashrc` 的 `*_API_KEY`，再跑
+`tools/export-provider-keys.mjs` 把凭证库整段导出 —— **后者覆盖前者**。
+所以 DSH 里生效的永远是凭证库那份；而工具只读 `.bashrc`。
+
+2026-11-25 实测：`.bashrc` 的 `OPENROUTER_API_KEY`（74 字符）是旧的，
+`/auth/key` 返回 401 `User not found`；凭证库那份（73 字符）返回 200。
+于是工具一直在用废 key 探测，报"探测失败"，看着像网络问题。
+
+**修法**：`tools/lib/model-config.mjs` 的 `resolveProviderKey()` 按
+**env → 凭证库 → .bashrc** 取，与运行时对齐。旧名 `envFromBashrc` 保留为别名。
+
+**判据**：
+
+```bash
+node --input-type=module -e 'const {resolveProviderKey}=await import("./tools/lib/model-config.mjs");
+console.log("len:", resolveProviderKey("OPENROUTER_API_KEY")?.length)'
+# 与凭证库里那份一致（本机 73），不是 .bashrc 里那份（74）
+```
+
+**教训**：**同一份密钥存两处，一定会漂。** 要么只留凭证库、把 `.bashrc` 那行删掉；
+要么让所有读方走同一个函数。顺手检查：`.bashrc` 里凡是 `*_API_KEY` 都该和凭证库核对一遍。
+
+---
+
 ### 8.15 排查顺序（省时间的模板）
 
 ```

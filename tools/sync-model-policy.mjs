@@ -99,7 +99,7 @@ const POLICY_PATH = resolve(valueOf('--policy') || join(PACK_DIR, 'config', 'mod
 const DSH_HOME = process.env.DSH_HOME || join(process.env.HOME || '', 'dsh');
 const PROFILE = valueOf('--profile') || join(DSH_HOME, 'profiles', 'web');
 const PATCH = join(PROFILE, 'cordis.patch.yml');
-const TIMEOUT_MS = Number(process.env.SYNC_TIMEOUT_MS || 20000);
+const TIMEOUT_MS = Number(process.env.SYNC_TIMEOUT_MS || 45000);
 
 const ok = (m) => console.log(`  \u2705 ${m}`);
 const bad = (m) => console.log(`  \u274c ${m}`);

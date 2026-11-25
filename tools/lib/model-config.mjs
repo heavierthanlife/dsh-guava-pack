@@ -19,6 +19,23 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import net from 'node:net';
+
+// ── 关掉 Node 的"自动选族"（happy eyeballs）─────────────────────────────
+//
+// 这台 WSL 只有 Tailscale 的 ULA（`fd7a:…`）、**没有 IPv6 默认路由**，
+// 而 Cloudflare 托管的端点（openrouter.ai / opencode.ai）都同时有 A 和 AAAA。
+// Node 默认 `autoSelectFamily: true` 会并发尝试两族，IPv6 立刻 ENETUNREACH，
+// 然后整体报 **ETIMEDOUT** —— 看起来像"网络不通"，其实是选族逻辑的坑。
+//
+// 2026-11-25 实测（8 次连续 GET /models）：
+//   默认           openrouter 0/8 成功（全 ETIMEDOUT）   opencode 5/8
+//   关掉自动选族   openrouter 8/8                        opencode 8/8
+//
+// 所以在库入口统一关掉：同步工具、定时任务（`tools/run-model-policy.sh`）
+// 都走这里，别指望每个调用方都记得带 `--no-network-family-autoselection`。
+// `?.` 守卫：Node 7 那种老版本没有这个方法，直接跳过。
+net.setDefaultAutoSelectFamily?.(false);
 
 // ── 缩进：从文件里探测，别硬编码 ─────────────────────────────────────────
 // 这份 patch 是手工维护的，缩进可能变。按 `providers:` 那行推出整条链：
@@ -289,9 +306,41 @@ export function renderModel(m, { efforts = null } = {}) {
   ];
 }
 
-/** 从 ~/.bashrc 取 `export NAME=value`（本机密钥放在那里）。 */
-export function envFromBashrc(name) {
+/**
+ * 取一个 provider 的 key。顺序与**运行时的实际生效顺序**一致：
+ *
+ *   1. `process.env` —— 用户显式导出/启动器注入的
+ *   2. `<DSH_HOME>/.credentials.yaml` 的 `refs:` —— DSH 自己的凭证库
+ *   3. `~/.bashrc` 的 `export NAME=…` —— 最老的约定，放最后
+ *
+ * 为什么凭证库要排在 .bashrc 前面：启动器 `~/dsh/dsh` 先 eval .bashrc 的
+ * `*_API_KEY`、再用 `tools/export-provider-keys.mjs` 把凭证库整段导出 ——
+ * **后者覆盖前者**，所以 DSH 进程里生效的永远是凭证库那份。
+ * 2026-11-25 实测：`.bashrc` 里的 `OPENROUTER_API_KEY` 是旧的（401
+ * `User not found`），凭证库里那份是好的（200）。工具只读 .bashrc，
+ * 于是一直用废 key 去探测 —— 报"探测失败"，看着像网络问题。
+ */
+export function resolveProviderKey(name) {
   if (process.env[name]) return process.env[name];
+
+  // DSH 凭证库：`refs:` 段是 `NAME: <明文 key>`（也可能是带引号的字符串）。
+  // 解析方式与 `tools/export-provider-keys.mjs` 逐行一致（遇顶格即段落结束）——
+  // 两处读同一个文件，规则不一致会变成"一边能探测、一边报 401"。
+  try {
+    const home = process.env.DSH_HOME || join(process.env.HOME || '', 'dsh');
+    const doc = readFileSync(join(home, '.credentials.yaml'), 'utf8');
+    let inRefs = false;
+    for (const line of doc.split('\n')) {
+      if (/^refs:\s*$/.test(line)) { inRefs = true; continue; }
+      if (!inRefs) continue;
+      if (/^\S/.test(line)) break; // 回到顶格 → refs 段结束
+      const m = line.match(/^\s+([A-Za-z0-9_]+):\s+(.+?)\s*$/);
+      if (!m || m[1] !== name) continue;
+      const value = m[2].replace(/^["']|["']$/g, '');
+      if (value) return value;
+    }
+  } catch {}
+
   try {
     const rc = readFileSync(join(process.env.HOME || '', '.bashrc'), 'utf8');
     const m = rc.match(new RegExp(`^\\s*(?:export\\s+)?${name}\\s*=\\s*["']?([^"'\\s#]+)`, 'm'));
@@ -299,6 +348,9 @@ export function envFromBashrc(name) {
   } catch {}
   return undefined;
 }
+
+/** @deprecated 名字只写了 .bashrc，实际会先查 env 与凭证库；用 {@link resolveProviderKey}。 */
+export const envFromBashrc = resolveProviderKey;
 
 /**
  * 从 profile patch 里找出所有**被别处引用**的 `provider::model`。

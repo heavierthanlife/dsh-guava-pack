@@ -96,7 +96,7 @@ const EXCLUDE = valueOf('--exclude') ? new RegExp(valueOf('--exclude')) : undefi
 const DSH_HOME = process.env.DSH_HOME || join(process.env.HOME || '', 'dsh');
 const PROFILE = valueOf('--profile') || join(DSH_HOME, 'profiles', 'web');
 const PATCH = join(PROFILE, 'cordis.patch.yml');
-const TIMEOUT_MS = Number(process.env.SYNC_TIMEOUT_MS || 20000);
+const TIMEOUT_MS = Number(process.env.SYNC_TIMEOUT_MS || 45000);
 
 // ── 小工具 ───────────────────────────────────────────────────────────────
 

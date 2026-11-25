@@ -15,7 +15,7 @@
  * 用法：node tests/model-policy.mjs
  */
 
-import { readFileSync, rmSync, existsSync } from 'node:fs';
+import { readFileSync, rmSync, existsSync, mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -187,6 +187,40 @@ if (!existsSync(piAiDir)) {
   check('两个同步工具都接了目录回落',
     readFileSync(join(PACK, 'tools', 'sync-model-policy.mjs'), 'utf8').includes("from './lib/pi-ai-catalog.mjs'") &&
     readFileSync(join(PACK, 'tools', 'sync-models.mjs'), 'utf8').includes("from './lib/pi-ai-catalog.mjs'"));
+}
+
+// ── 6c. key 解析优先级 ────────────────────────────────────────────────
+// 2026-11-25：`.bashrc` 里的 OPENROUTER_API_KEY 是旧的（401），凭证库那份是好的，
+// 而工具只读 .bashrc → 一直用废 key 探测，报"探测失败"，看着像网络问题。
+// 运行时（启动器）的顺序是 env → 凭证库（后者覆盖前者），工具必须对齐。
+console.log('\nkey 解析优先级');
+{
+  const { resolveProviderKey } = await import('../lib/model-config.mjs');
+  const { tmpdir } = await import('node:os');
+  const scratchHome = mkdtempSync(join(tmpdir(), 'dsh-key-order-'));
+  mkdirSync(join(scratchHome, 'dsh'), { recursive: true });
+  writeFileSync(join(scratchHome, 'dsh', '.credentials.yaml'), 'refs:\n  TEST_API_KEY: from-store\n');
+  writeFileSync(join(scratchHome, '.bashrc'), 'export TEST_API_KEY=from-bashrc\n');
+
+  const saved = { HOME: process.env.HOME, DSH_HOME: process.env.DSH_HOME, TEST_API_KEY: process.env.TEST_API_KEY };
+  process.env.HOME = scratchHome;
+  process.env.DSH_HOME = join(scratchHome, 'dsh');
+  delete process.env.TEST_API_KEY;
+  try {
+    check('凭证库优先于 .bashrc（旧副本不许盖住有效的）',
+      resolveProviderKey('TEST_API_KEY') === 'from-store', resolveProviderKey('TEST_API_KEY'));
+    process.env.TEST_API_KEY = 'from-env';
+    check('env 优先于凭证库', resolveProviderKey('TEST_API_KEY') === 'from-env');
+    delete process.env.TEST_API_KEY;
+    check('两边都没有 → undefined（不返回空串）', resolveProviderKey('NO_SUCH_KEY') === undefined);
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    rmSync(scratchHome, { recursive: true, force: true });
+  }
+  check('夹具已清理', !existsSync(scratchHome));
 }
 
 // ── 7. 保守口径：只剔"确凿坏的"，端点缺失的免费模型必须保留 ─────────────
