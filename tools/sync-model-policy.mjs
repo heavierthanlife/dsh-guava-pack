@@ -45,6 +45,9 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { loadYaml } from './lib/yaml.mjs';
+// profile 不写 baseURL 的供应商（openrouter / nvidia 这类）地址在 pi-ai 内置目录里，
+// 运行时由 dsh-llm-pi-ai 回落；工具侧要同样回落，否则永远"没声明 → 跳过探测"。
+import { catalogBaseUrl } from './lib/pi-ai-catalog.mjs';
 
 // js-yaml 走统一解析（以前写死绝对路径，换机器/换用户名就 ERR_MODULE_NOT_FOUND）。
 const yaml = await loadYaml();
@@ -677,7 +680,11 @@ async function main() {
     if (!rule) { info(`${p.name}: 策略表里没写规则，跳过（保持不动）`); continue; }
 
     const api = field(p.body, 'api');
-    const baseURL = field(p.body, 'baseURL');
+    const declaredBaseURL = field(p.body, 'baseURL');
+    // 没写 baseURL ≠ 没有地址：运行时是 `request.baseURL ?? base?.baseUrl ?? providerBaseUrl`，
+    // 会回落到 pi-ai 内置目录。这里照做，别让「没声明」变成「不探测」。
+    const catalogURL = declaredBaseURL ? undefined : await catalogBaseUrl(p.name);
+    const baseURL = declaredBaseURL ?? catalogURL;
     const apiKeyEnv = field(p.body, 'apiKeyEnv');
     const { headerIdx, models: existing, tail } = parseModels(p.body);
     if (headerIdx === -1) { info(`${p.name}: 没声明 models，跳过`); continue; }
@@ -685,6 +692,7 @@ async function main() {
     // 取端点候选
     let candidates = [];
     let probed = false;
+    if (catalogURL) info(`${p.name}: 未声明 baseURL，用 pi-ai 内置 ${catalogURL}`);
     if (baseURL) {
       const url = modelsUrl(baseURL, api);
       try {
@@ -695,7 +703,7 @@ async function main() {
         warn(`${p.name}: 查询 ${url} 失败 —— ${err.message}（按 ${defaults.on_probe_failure} 处理）`);
       }
     } else {
-      info(`${p.name}: 没声明 baseURL，只能用现有清单`);
+      info(`${p.name}: 没声明 baseURL，pi-ai 内置目录里也没有 → 只能用现有清单`);
     }
 
     // 探测失败 → 按 on_probe_failure：keep 则完全不动这家

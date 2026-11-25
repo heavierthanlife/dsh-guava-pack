@@ -122,6 +122,8 @@ const REQUIRED = [
   // js-yaml 的统一解析层：以前两个工具把 `/home/<user>/dsh/node_modules/...`
   // 写死在 import 里，换机器/换用户名就直接 ERR_MODULE_NOT_FOUND。
   'tools/lib/yaml.mjs',
+  // pi-ai 内置目录里的 provider 默认 baseURL（openrouter/nvidia 这类没写 baseURL 的靠它）
+  'tools/lib/pi-ai-catalog.mjs',
   'tools/tests/model-policy.mjs',
   'tools/tests/web-search-switch.mjs',
   'tools/tests/provider-router-adaptive.mjs',
@@ -212,6 +214,7 @@ const MIN_BYTES = {
   'tools/lib/model-config.mjs': 3000,
   'tools/lib/probe.mjs': 3000,
   'tools/lib/yaml.mjs': 500,
+  'tools/lib/pi-ai-catalog.mjs': 1200,
   'tools/tests/model-policy.mjs': 2000,
   'tools/tests/web-search-switch.mjs': 2000,
   'tools/tests/provider-router-adaptive.mjs': 2000,

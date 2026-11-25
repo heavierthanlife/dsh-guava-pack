@@ -179,6 +179,11 @@ providers:
   # ── openrouter（2026-11-11 新增）──────────────────────────────────────────
   # 意图：只用**免费**的 nemotron 两档；付费模型不在策略里占位。
   # 端点模型 id 带 vendor 前缀（`nvidia/...:free`），explicit 写完整 id。
+  #
+  # profile 里**没写 baseURL** —— 地址来自 pi-ai 内置目录
+  # （`https://openrouter.ai/api/v1`，见 tools/lib/pi-ai-catalog.mjs）。
+  # 2026-11-25 实测：本机到 openrouter.ai 的探测是 `fetch failed`（网络不通），
+  # 所以清单实际靠 `on_missing: keep` 维持；哪天网络通了会自动跟上端点。
   openrouter:
     intent: 只保留 nemotron 免费两档（够日常用，付费不占位）
     pick:
@@ -188,9 +193,15 @@ providers:
       on_missing: keep
 
   # ── nvidia（NVIDIA NIM，2026-11-11 新增）─────────────────────────────────
-  # 意图：只保留当前唯一可用的 Nemotron 3 Ultra。
+  # 意图：只点名 Nemotron 3 Ultra 一个。
+  #
+  # profile 里**没写 baseURL** —— 地址来自 pi-ai 内置目录
+  # （`https://integrate.api.nvidia.com/v1`）。
+  # 2026-11-25 接上目录回落后实测：该端点列出 **30 个型号**（NIM 上挂着各家模型，
+  # 包括更新的 `nemotron-3.5-super-vl`）。所以早先写的「端点目前唯一可用型号」
+  # 是错的 —— 是**主动只留一个**，不是没有别的。
   nvidia:
-    intent: 只保留 Nemotron 3 Ultra（端点目前唯一可用型号）
+    intent: 只保留 Nemotron 3 Ultra（端点另有 29 个，故意不铺开）
     pick:
       explicit:
         - 'nvidia/nemotron-3-ultra-550b-a55b'

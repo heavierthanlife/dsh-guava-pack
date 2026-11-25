@@ -76,6 +76,9 @@ import {
   envFromBashrc,
   sp,
 } from './lib/model-config.mjs';
+// profile 没写 baseURL 的供应商（openrouter / nvidia）地址在 pi-ai 内置目录里，
+// 运行时 dsh-llm-pi-ai 会回落；这里同样回落，否则这两家永远探测不到。
+import { catalogBaseUrl } from './lib/pi-ai-catalog.mjs';
 
 const PACK_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
 const argv = process.argv.slice(2);
@@ -127,11 +130,15 @@ async function main() {
   for (const p of providers) {
     if (ONLY && p.name !== ONLY) continue;
     const api = field(p.body, 'api');
-    const baseURL = field(p.body, 'baseURL');
+    const declaredBaseURL = field(p.body, 'baseURL');
+    // 没写 baseURL ≠ 没有地址：运行时回落 pi-ai 内置目录（见 lib/pi-ai-catalog.mjs）。
+    const catalogURL = declaredBaseURL ? undefined : await catalogBaseUrl(p.name);
+    const baseURL = declaredBaseURL ?? catalogURL;
     const apiKeyEnv = field(p.body, 'apiKeyEnv');
     const { headerIdx, models: existing, tail } = parseModels(p.body);
 
-    if (!baseURL) { info(`${p.name}: 没声明 baseURL（走 pi-ai 内置目录），跳过`); continue; }
+    if (!baseURL) { info(`${p.name}: 没声明 baseURL，pi-ai 内置目录里也没有，跳过`); continue; }
+    if (catalogURL) info(`${p.name}: 未声明 baseURL，用 pi-ai 内置 ${catalogURL}`);
     if (headerIdx === -1) { info(`${p.name}: 没声明 models，跳过`); continue; }
 
     const url = modelsUrl(baseURL, api);

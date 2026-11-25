@@ -164,6 +164,31 @@ check('cachedKind 对不存在的模型返回 undefined（→ 放宽而非剔除
 rmSync(scratch, { recursive: true, force: true });
 check('临时目录已清理（不污染仓库）', !existsSync(scratch));
 
+// ── 6b. baseURL 目录回落 ───────────────────────────────────────────────
+// 2026-11-25：`sync-model-policy` 原来只认 profile 里的 `baseURL`，没有就打印
+// 「没声明 baseURL，只能用现有清单」然后跳过探测。但运行时根本不是这样 ——
+// dsh-llm-pi-ai 的回落链是 `request.baseURL ?? base?.baseUrl ?? providerBaseUrl`，
+// openrouter / nvidia 的真地址就在 pi-ai 内置目录里。于是这两家的模型清单
+// 永远靠"现有清单"猜，端点换了也不知道，而那句提示还会让人以为系统里没有地址。
+console.log('\nbaseURL 目录回落');
+const { catalogBaseUrl } = await import('../lib/pi-ai-catalog.mjs');
+const piAiDir = join(process.env.DSH_HOME || join(process.env.HOME || '', 'dsh'), 'node_modules', '@earendil-works', 'pi-ai');
+if (!existsSync(piAiDir)) {
+  console.log('  （跳过：这台机器没有 pi-ai 目录）');
+} else {
+  const orUrl = await catalogBaseUrl('openrouter');
+  const nvUrl = await catalogBaseUrl('nvidia');
+  check('openrouter 的默认地址来自 pi-ai 目录（profile 里没写）',
+    typeof orUrl === 'string' && orUrl.includes('openrouter.ai'), orUrl);
+  check('nvidia 的默认地址来自 pi-ai 目录（profile 里没写）',
+    typeof nvUrl === 'string' && nvUrl.includes('nvidia.com'), nvUrl);
+  check('自定义网关不在目录里 → undefined（必须由 profile 自己声明 baseURL）',
+    (await catalogBaseUrl('zljz-hub')) === undefined);
+  check('两个同步工具都接了目录回落',
+    readFileSync(join(PACK, 'tools', 'sync-model-policy.mjs'), 'utf8').includes("from './lib/pi-ai-catalog.mjs'") &&
+    readFileSync(join(PACK, 'tools', 'sync-models.mjs'), 'utf8').includes("from './lib/pi-ai-catalog.mjs'"));
+}
+
 // ── 7. 保守口径：只剔"确凿坏的"，端点缺失的免费模型必须保留 ─────────────
 // 用户的明确要求是"少删些"。两条都踩过：
 //   1. `no-access`（需订阅）曾被当成"不可用"剔除 → 订阅可能明天就买，不该删。
