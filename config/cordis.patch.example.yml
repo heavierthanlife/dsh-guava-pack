@@ -155,7 +155,7 @@
         displayName: AgentRouter (Responses API · 支持工具)
         api: openai-responses
         baseURL: http://127.0.0.1:8318/agentrouter/v1
-        # 2026-10-27 线上目录实测只剩这三个，且**都只能走 /v1/responses**：
+        # 2026-11-25 线上目录实测只剩这两个（`gpt-6-astra` 已官方下线），且**都只能走 /v1/responses**：
         # 同模型在 /v1/chat/completions 上一律 400（原文：请改用 /v1/responses），
         # 在 /v1/responses 上工具调用正常（实测 function_call）。
         # 目录不提供上下文长度（created 还是 one-api 的假时间戳 1626777600），
@@ -170,13 +170,6 @@
               - image
           - id: gpt-5.6-sol
             name: GPT 5.6 Sol
-            contextWindow: 1000000
-            maxTokens: 64000
-            input:
-              - text
-              - image
-          - id: gpt-6-astra
-            name: GPT 6 Astra
             contextWindow: 1000000
             maxTokens: 64000
             input:

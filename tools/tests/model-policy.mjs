@@ -488,7 +488,7 @@ check('router start.sh 端口可被 DSH_ROUTER_PORT 覆盖', /DSH_ROUTER_PORT:-8
 check('router start.sh 会创建 mode.json 父目录', /mkdir -p "\$\(dirname "\$DSH_ROUTER_MODE_FILE"\)"/.test(startSrc));
 
 // ── 17. AgentRouter 的路由归属（2026-10-27 上游模型池变动）─────────────────
-// 事实（当日实测）：线上只剩 gpt-6.1-sol / gpt-5.6-sol / gpt-6-astra，
+// 事实（2026-11-25 实测）：线上只剩 gpt-6.1-sol / gpt-5.6-sol（gpt-6-astra 已下线），
 // **三个都只能走 /v1/responses**（chat/completions 一律 400）；
 // 原 Anthropic 路由唯一的 deepseek-v4-flash 已下线（503 无可用渠道）。
 // 所以策略里不再保留 anthropic 路由规则，三个模型全部归 responses 路由。
@@ -498,8 +498,12 @@ check('策略表里有 agentrouter-responses 路由', policyProviders.includes('
 check('策略表里已无 agentrouter（Anthropic）规则',
   !policyProviders.includes('agentrouter'), policyProviders.filter((n) => n.startsWith('agentrouter')));
 const responsesPick = policy.providers['agentrouter-responses']?.pick?.explicit ?? [];
-check('responses 路由覆盖三个在线模型',
-  ['gpt-6.1-sol', 'gpt-5.6-sol', 'gpt-6-astra'].every((m) => responsesPick.includes(m)), responsesPick);
+check('responses 路由覆盖两个在线模型',
+  ['gpt-6.1-sol', 'gpt-5.6-sol'].every((m) => responsesPick.includes(m)), responsesPick);
+// 2026-11-25：gpt-6-astra 官方下线（端点 /v1/models 只剩两行）。策略里再点名它
+// 会让每次同步都报「端点没列但保留」，模型选择器里也挂一个必失败的条目。
+check('responses 路由不再点名已下线的 gpt-6-astra',
+  !responsesPick.includes('gpt-6-astra'), responsesPick);
 check('responses 路由不再残留已下线的 deepseek-v4-flash',
   !responsesPick.includes('deepseek-v4-flash'));
 const exampleSrc = readFileSync(join(PACK, 'config', 'cordis.patch.example.yml'), 'utf8');
@@ -509,9 +513,10 @@ check('分发模板里没有 anthropic 协议的 agentrouter 路由',
   !/^\s{6}agentrouter:\s*$/m.test(exampleSrc));
 // 取 responses 块，避免跨块误匹配 / 正则转义踩坑
 const responsesBlock = exampleSrc.split('agentrouter-responses:')[1]?.slice(0, 1500) ?? '';
-check('分发模板的 responses 模型表覆盖三个在线模型',
-  ['gpt-6.1-sol', 'gpt-5.6-sol', 'gpt-6-astra'].every((m) => responsesBlock.includes(`- id: ${m}`)),
-  ['gpt-6.1-sol', 'gpt-5.6-sol', 'gpt-6-astra'].filter((m) => !responsesBlock.includes(`- id: ${m}`)));
+check('分发模板的 responses 模型表覆盖两个在线模型',
+  ['gpt-6.1-sol', 'gpt-5.6-sol'].every((m) => responsesBlock.includes(`- id: ${m}`)),
+  ['gpt-6.1-sol', 'gpt-5.6-sol'].filter((m) => !responsesBlock.includes(`- id: ${m}`)));
+check('分发模板不再夹带已下线的 gpt-6-astra', !responsesBlock.includes('- id: gpt-6-astra'));
 check('分发模板的 allowedModels 不再引用已下线的 agentrouter/deepseek-v4-flash',
   !/- provider: agentrouter\s*\n\s*model: deepseek-v4-flash/.test(exampleSrc));
 
@@ -522,8 +527,9 @@ check('live profile 已无 anthropic 协议的 agentrouter 路由',
   !/^\s{6}agentrouter:\s*$/m.test(profSrc));
 check('live profile 的 allowedModels 已无 agentrouter/deepseek-v4-flash',
   !/- provider: agentrouter\s*\n\s*model: deepseek-v4-flash/.test(profSrc));
-check('live profile 的 responses 路由覆盖三个在线模型',
-  ['gpt-6.1-sol', 'gpt-5.6-sol', 'gpt-6-astra'].every((m) => profSrc.includes(`- id: ${m}`)));
+check('live profile 的 responses 路由覆盖两个在线模型',
+  ['gpt-6.1-sol', 'gpt-5.6-sol'].every((m) => profSrc.includes(`- id: ${m}`)));
+check('live profile 已无 gpt-6-astra（下线模型不该留在选择器里）', !profSrc.includes('- id: gpt-6-astra'));
 
 // ── 18. 进程生命周期：改完代码必须能真的重启 ────────────────────────────
 // 事故（2026-10-22）：两个 start.sh 都是"健康就退出"，于是改了 router.mjs /

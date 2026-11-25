@@ -100,15 +100,18 @@ providers:
   # 现在反过来：**三个模型全部都只能走 /v1/responses**。
 
   # ── agentrouter-responses（OpenAI Responses 协议）────────────────────────
-  # 线上仅剩的三个模型都在这里（2026-10-27 实测，工具调用均正常）。
+  # 线上仅剩的两个模型都在这里（2026-11-25 实测，工具调用均正常）。
   # 同模型走 /v1/chat/completions 会 400（原文：请改用 /v1/responses）。
+  #
+  # 2026-11-25：`gpt-6-astra` **官方下线** —— 端点 /v1/models 现在只回
+  # `gpt-5.6-sol, gpt-6.1-sol`。所以从点名清单里删掉；留着会让每次同步都报
+  # 「端点已不再列出但保留」，而且模型选择器里挂一个必失败的条目。
   agentrouter-responses:
     intent: AgentRouter 全部在线模型（Responses-only，必须走该协议才有工具）
     pick:
       explicit:
         - gpt-6.1-sol
         - gpt-5.6-sol
-        - gpt-6-astra
       on_missing: keep
 
   # ── opencode-go / opencode / commandcode ──────────────────────────────────
@@ -201,10 +204,14 @@ providers:
   # 包括更新的 `nemotron-3.5-super-vl`）。所以早先写的「端点目前唯一可用型号」
   # 是错的 —— 是**主动只留一个**，不是没有别的。
   nvidia:
-    intent: 只保留 Nemotron 3 Ultra（端点另有 29 个，故意不铺开）
+    intent: Nemotron 3 Ultra + 3.5 Super VL（端点另有 28 个，故意不铺开）
     pick:
       explicit:
         - 'nvidia/nemotron-3-ultra-550b-a55b'
+        # 2026-11-25 新增：3.5 代旗舰，比 Ultra 新一代，带视觉（图/视频）+ 工具调用。
+        # 1M 上下文，推理型（思考链走 reasoning_content，`enable_thinking` 可关）。
+        # 端点 id 是 super-vl-120b-a12b（120B 总参 / 12B 激活）。
+        - 'nvidia/nemotron-3.5-super-vl-120b-a12b'
       on_missing: keep
 
   # ── zljz-hub（中联基智企业网关，2026-11-24 新增）─────────────────────────
@@ -284,6 +291,9 @@ strip:
   - '^free$'
 
 annotations:
+  - match: '^nemotron-3\.5-super-vl'
+    tag: '3.5 旗舰·视觉·1M'
+    why: 'NVIDIA 3.5 代旗舰（120B 总参 / 12B 激活），比 Nemotron 3 Ultra 新一代；图/视频输入 + 工具调用。推理型：思考链走 reasoning_content，max_tokens 要给够，否则正文为空（实测 max_tokens=8 时 content 为 null）。'
   - match: '^glyph-cluster'
     tag: '仅推理，不出正文'
     why: '实测 reasoning_tokens 吃光额度、content 为 0 字符 → DSH 会报 PI_AI_ERROR。不适合常规对话/编程。'
