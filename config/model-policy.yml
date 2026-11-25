@@ -70,22 +70,6 @@ providers:
       # 只有 profile 里还没有的新模型才用这些 id 关键词兜底。
       vision_hints: ['vl', 'vision', 'omni', 'image']
 
-  # ── antigravity（反代）─────────────────────────────────────────────────────
-  # 意图：反代能提供的、我认定的最好的五个 —— **人工点名，不用启发式**。
-  #       这五个是 2026-10-15 定的；反代换茬时脚本会报告"点名的某个不见了"，
-  #       由你决定换成哪个（脚本不会自己乱选）。
-  antigravity:
-    intent: 人工点名的五个（思考旗舰 / 通用 / 高推理 gemini / tiered / 图像）
-    pick:
-      explicit:
-        - claude-opus-4-6-thinking
-        - claude-sonnet-4-6
-        - gemini-3.8-flash-high
-        - gemini-3.8-flash-tiered
-        - gemini-3.1-flash-image
-      # 端点没列出点名的型号时：keep = 保留（可能被服务端别名）/ drop = 删掉
-      on_missing: keep
-
   # ── agentrouter（Anthropic 协议）：**路由已废弃（2026-10-27）** ────────────
   # 2026-10-27 实测（经 SSR + 合法 UA，见 HANDOFF §8.10）：
   #   · GET /v1/models 只剩 gpt-5.6-sol / gpt-6-astra / gpt-6.1-sol，
@@ -281,13 +265,9 @@ version_patterns:
 # 顺序敏感：第一条匹配的生效，所以把更具体的放前面。
 #
 # `strip`：写进 name 前要**剥掉**的既有括号内容（正则）。
-# 用户 2026-10-16 明确："手写的 Antigravity 不用保留" —— 模型 id 里已经能看出
-# 是哪家的，name 里重复标一遍是噪音。`(free)` 也一并剥掉（免费与否看 id 的
-# `free` 后缀即可，且在 UI 里不是决策依据）。
-# ⚠️ 只剥这些"纯归属/重复"标记；像 `(Antigravity)` 这种如果哪天你想留，
-# 从下面删掉即可。
+# `(free)` 剥掉 —— 免费与否看 id 的 `free` 后缀即可，且在 UI 里不是决策依据。
+# ⚠️ 只剥这类"纯归属/重复"标记：宁可少剥，也不要剥掉带信息的括号。
 strip:
-  - '^Antigravity$'
   - '^free$'
 
 annotations:

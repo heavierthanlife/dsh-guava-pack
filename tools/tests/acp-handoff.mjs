@@ -66,7 +66,7 @@ function makeEvents({ compactions = 2 } = {}) {
       type: 'tool/call',
       data: { name: 'edit', arguments: JSON.stringify({ file_path: 'profiles/web/cordis.patch.yml' }) },
     },
-    { type: 'request/context', data: { provider: 'antigravity', model: 'gemini-3.8-flash-high', contextWindow: 1000000 } },
+    { type: 'request/context', data: { provider: 'opencode-go', model: 'deepseek-v4.1-flash', contextWindow: 1000000 } },
     { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
   ];
   for (let i = 1; i <= compactions; i++) {
@@ -90,7 +90,7 @@ check('数到 2 个 turn/end', stats.turns === 2, stats.turns);
 check('数到 2 个 step/end', stats.steps === 2, stats.steps);
 check('数到 2 次压缩', stats.compactions === 2, stats.compactions);
 check('取最后一次压缩释放的 token', stats.lastFreedTokens === 2000, stats.lastFreedTokens);
-check('路由来自 request/context', stats.route === 'antigravity/gemini-3.8-flash-high', stats.route);
+check('路由来自 request/context', stats.route === 'opencode-go/deepseek-v4.1-flash', stats.route);
 check('窗口来自 request/context', stats.contextWindow === 1000000);
 check('收集到压缩摘要', stats.summaries.length === 2 && stats.summaries[1].includes('第 2 次'), stats.summaries);
 check('收集到动过的文件', stats.files.includes('profiles/web/cordis.patch.yml'), stats.files);
@@ -106,7 +106,7 @@ check('标题写明由 ACP 生成', /dsh-context-acp/.test(body));
 check('带会话 id', body.includes(session.id));
 check('带规模（2 轮 / 2 步）', body.includes('2 轮 / 2 步'), body.slice(0, 300));
 check('带压缩次数与阈值', body.includes('已压缩: 2 次') && body.includes('75%'));
-check('带路由', body.includes('antigravity/gemini-3.8-flash-high'));
+check('带路由', body.includes('opencode-go/deepseek-v4.1-flash'));
 check('列出动过的文件', body.includes('profiles/web/cordis.patch.yml'));
 check('包含压缩摘要小节', body.includes('## 压缩摘要') && body.includes('第 2 次压缩的摘要'));
 check('包含最近用户消息小节', body.includes('## 最近 2 条用户消息'));

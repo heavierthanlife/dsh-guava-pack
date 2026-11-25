@@ -64,7 +64,7 @@ const refDoc = [
   { id: 'agent-default-model', config: { provider: 'commandcode', model: 'stealth/glyph-cluster:free' } },
   { id: 'subagent-model-selection-settings', config: { allowedModels: [
     { provider: 'xiaomi-token-plan-cn', model: 'mimo-v2.6-pro' },
-    { provider: 'antigravity', model: 'claude-sonnet-4-6' },
+    { provider: 'opencode-go', model: 'deepseek-v4.1-flash' },
   ] } },
 ];
 const refs = collectModelRefs(refDoc);
@@ -72,7 +72,7 @@ check('认出 agent-default-model 的 provider/model',
   refs.has('commandcode::stealth/glyph-cluster:free')
   && refs.get('commandcode::stealth/glyph-cluster:free').includes('agent-default-model'));
 check('认出 allowedModels 的每条路由',
-  refs.has('xiaomi-token-plan-cn::mimo-v2.6-pro') && refs.has('antigravity::claude-sonnet-4-6'));
+  refs.has('xiaomi-token-plan-cn::mimo-v2.6-pro') && refs.has('opencode-go::deepseek-v4.1-flash'));
 check('不会把 llm-pi-ai 自己的定义当成引用',
   !refs.has('llm-pi-ai::anything'));
 check('引用总数正确', refs.size === 3, { size: refs.size });
@@ -104,10 +104,6 @@ check('opencode-go 的 ds → low/high/max（实测支持 max）',
   JSON.stringify(effortsFor('opencode-go', 'deepseek-v4.1-flash')) === '["low","high","max"]');
 check('commandcode 的 ds → low/medium/high',
   JSON.stringify(effortsFor('commandcode', 'deepseek/deepseek-v4.1-flash')) === '["low","medium","high"]');
-check('antigravity 的 claude → low/medium/high',
-  JSON.stringify(effortsFor('antigravity', 'claude-opus-4-6-thinking')) === '["low","medium","high"]');
-check('antigravity 的 gemini → 不给（手工条目也没给，宁缺勿错）',
-  effortsFor('antigravity', 'gemini-3.8-flash-high') === null);
 check('免费模型 → 不给',
   effortsFor('opencode', 'step-5-preview-free') === null);
 
@@ -118,10 +114,11 @@ const prof = yaml.load(readFileSync(join(process.env.HOME || '', 'dsh', 'profile
 const pi = prof.find((e) => e?.id === 'llm-pi-ai');
 const provs = Object.keys(pi?.config?.providers ?? {});
 check('策略表能解析', policy !== null && typeof policy === 'object');
-// 已废弃的上游路由允许没有策略规则（2026-10-27：AgentRouter 的 Anthropic 路由
-// 已无任何可用模型，策略故意不再覆盖它；profile 侧的移除因与并发会话冲突而延后）。
+// 已废弃的上游路由允许没有策略规则：
+//   agentrouter — 2026-10-27，Anthropic 路由已无任何可用模型；
+//   antigravity — 2026-11-25，会员不再续，provider 与 key 全部移除。
 // 除这些之外，策略必须覆盖 profile 里的每一家 —— 否则新供应商会静默漏配。
-const RETIRED_PROVIDERS = new Set(['agentrouter']);
+const RETIRED_PROVIDERS = new Set(['agentrouter', 'antigravity']);
 const uncovered = provs.filter((p) => !(p in (policy.providers ?? {})));
 check(`策略表覆盖全部在用供应商（已废弃的 ${[...RETIRED_PROVIDERS].join('/')} 除外）`,
   uncovered.every((p) => RETIRED_PROVIDERS.has(p)), uncovered);
@@ -131,12 +128,12 @@ check('每家的 pick 都非空', Object.values(policy.providers ?? {}).every((r
 check('exclude 正则在 JS 里可构造（不支持 (?i)）',
   (() => { try { new RegExp(policy.defaults.exclude, policy.defaults.exclude_flags ?? ''); return true; } catch { return false; } })());
 
-// ── 5. antigravity 点名的五个必须真实存在于端点（避免静默失效）────────
-console.log('\nantigravity 点名清单');
-const agRule = policy.providers.antigravity;
-check('antigravity 用 explicit（人工点名）而不是启发式', Array.isArray(agRule.pick.explicit));
-check('点名恰好 5 个', agRule.pick.explicit.length === 5, { n: agRule.pick.explicit.length });
-check('点名里没有任何重复', new Set(agRule.pick.explicit).size === agRule.pick.explicit.length);
+// ── 5. 已下线的供应商不得回流（2026-11-25 antigravity 退役）─────────────
+// 会员不续了 → provider、key、策略规则一起删。这条守卫防止哪次合并又把它带回来。
+console.log('\n已下线供应商');
+check('策略表里已无 antigravity 规则', !('antigravity' in (policy.providers ?? {})));
+check('profile 里已无 antigravity provider',
+  !(pi?.config?.providers && 'antigravity' in pi.config.providers));
 
 // ── 6. 免费模型策略必须依赖真探测（不能靠 id 猜）─────────────────────
 // 实测：端点列表里混着 "No endpoints found" / "已终止转付费" / "上游满载"，
@@ -290,8 +287,8 @@ check('重复跑幂等（不叠加成两个括号）', !r2.changed, r2.lines[1])
 const r3 = annotateName(r.lines, '免费但常满载', own);
 check('换标签是替换', r3.changed && /（免费但常满载）$/.test(r3.lines[1]) && !/仅推理/.test(r3.lines[1]), r3.lines[1]);
 // 手工括号要保留
-const r4 = annotateName(L('Gemini 3.8 Flash High (Antigravity)'), '固定推理档', own);
-check('手工括号 (Antigravity) 保留', /（Antigravity）?\(Antigravity\)/.test(r4.lines[1]) || r4.lines[1].includes('(Antigravity)'), r4.lines[1]);
+const r4 = annotateName(L('Some Model (beta)'), '固定推理档', own);
+check('手工括号 (beta) 保留', r4.lines[1].includes('(beta)'), r4.lines[1]);
 check('后缀加在手工括号之后', r4.lines[1].includes('（固定推理档）'), r4.lines[1]);
 // 其它行一字不动
 check('只改 name 行，其它行不动', r.lines[0] === L('Glyph Cluster')[0] && r.lines[2] === L('Glyph Cluster')[2]);
@@ -310,26 +307,25 @@ const src3 = readFileSync(join(PACK, 'tools', 'sync-model-policy.mjs'), 'utf8');
 check('新候选宽严有别：未探测的新候选不加入',
   /if \(kind === undefined\) \{ skippedNew\.push\(\{ id: m\.id, kind: 'unknown' \}\); continue; \}/.test(src3));
 
-// ── 10. 括号剥离（用户："手写的 Antigravity 不用保留"）─────────────────────
-// 归属信息在 id 里已有（antigravity/gemini-…），name 里重复标一遍是噪音。
-// 但**只剥明确列出的**，不认识的括号要留着 —— 万一哪天用户想留某个标记。
+// ── 10. 括号剥离（只剥策略表里明确列出的）──────────────────────────────
+// 归属信息在 id 里已有，name 里重复标一遍是噪音；但**只剥明确列出的**，
+// 不认识的括号要留着 —— 万一哪天用户想留某个标记。
 console.log('\n括号剥离');
 const stripList = policy.strip ?? [];
-check('策略表里配了 strip', Array.isArray(stripList) && stripList.length >= 2, stripList);
-check('strip 含 Antigravity', stripList.some((x) => /Antigravity/i.test(x)));
+check('策略表里配了 strip', Array.isArray(stripList) && stripList.length >= 1, stripList);
 check('strip 含 free', stripList.some((x) => /^\^free\$$/i.test(x.trim())));
 
 const own2 = new RegExp(ann.map((a) => a.tag).join('|'));
 const L2 = (n) => [`          - id: x`, `            name: ${n}`, `            contextWindow: 1`];
 
-// 剥 (Antigravity)，且加标签
-let a1 = annotateName(L2('Gemini 3.8 Flash High (Antigravity)'), '固定推理档', own2, stripList);
-check('剥掉 (Antigravity) 并加标签',
-  a1.changed && !/Antigravity/.test(a1.lines[1]) && /（固定推理档）$/.test(a1.lines[1]), a1.lines[1]);
-// 已经是 "X (Antigravity)（标签）" 的，也应剥干净
-let a2 = annotateName(L2('Gemini 3.8 Flash High (Antigravity)（固定推理档）'), '固定推理档', own2, stripList);
-check('已带标签的也能剥掉 (Antigravity)（幂等收敛）',
-  a2.changed && !/Antigravity/.test(a2.lines[1]) && /^.*Gemini 3\.8 Flash High（固定推理档）$/.test(a2.lines[1]), a2.lines[1]);
+// 剥 (free)，且加标签
+let a1 = annotateName(L2('Mimo V2.6 Flash (free)'), '固定推理档', own2, stripList);
+check('剥掉 (free) 并加标签',
+  a1.changed && !/\(free\)/.test(a1.lines[1]) && /（固定推理档）$/.test(a1.lines[1]), a1.lines[1]);
+// 已经是 "X (free)（标签）" 的，也应剥干净
+let a2 = annotateName(L2('Mimo V2.6 Flash (free)（固定推理档）'), '固定推理档', own2, stripList);
+check('已带标签的也能剥掉 (free)（幂等收敛）',
+  a2.changed && !/\(free\)/.test(a2.lines[1]) && /^.*Mimo V2\.6 Flash（固定推理档）$/.test(a2.lines[1]), a2.lines[1]);
 // 再跑一次应稳定
 let a3 = annotateName(a2.lines, '固定推理档', own2, stripList);
 check('剥完再跑幂等', !a3.changed, a3.lines[1]);
@@ -348,7 +344,7 @@ check('没有 strip 配置时不剥（向后兼容）', !a6.changed, a6.lines[1]
 check('剥括号也只改 name 行', a4.lines[0] === L2('Mimo V2.6 Flash (free)')[0] && a4.lines[2] === L2('Mimo V2.6 Flash (free)')[2]);
 
 // ── 11. 探针必须同时解析 OpenAI 与 Anthropic 两种协议 ────────────────────
-// 踩过：只认 `delta.content` 时，antigravity/agentrouter（anthropic-messages）
+// 踩过：只认 `delta.content` 时，anthropic-messages 供应商
 // 的正文数恒为 0 → 好模型被误判成"只出推理不出正文"。
 console.log('\n双协议解析');
 const pSrc = readFileSync(join(PACK, 'tools', 'lib', 'probe.mjs'), 'utf8');

@@ -17,7 +17,7 @@
  * `created` 是**假时间戳**（agentrouter 全 1626777600）。所以：
  *   - "最新" 只能按 id 里的**版本号**启发式判断，不是真实发布时间；
  *   - "视觉" 只能按 id 关键词推断（`vision_hints`）；
- *   - "旗舰 / 最好的五个" **完全无法自动判断** —— antigravity 那份是**人工点名**的。
+ *   - "旗舰 / 最好的五个" **完全无法自动判断** —— 只能靠 `pick.explicit` 人工点名。
  *
  * 因此本脚本的定位是"**忠实执行你写在策略表里的意图**"，而不是"替你做审美判断"。
  *
@@ -187,8 +187,8 @@ function looksVision(id, hints, existingById) {
  * ## 幂等性
  *
  * 已有的 `（…）` / `(…)` 后缀会被**替换**而不是叠加，所以反复跑不会变成
- * `Cat Jam（仅推理）（仅推理）`。手工加的其它括号（如 `(Antigravity)`、
- * `(free)`）按 `stripOnly` 的规则决定保留还是替换 —— 默认只剥我们自己的标记。
+ * `Cat Jam（仅推理）（仅推理）`。手工加的其它括号（如 `(free)`）按
+ * `stripOnly` 的规则决定保留还是替换 —— 默认只剥我们自己的标记。
  *
  * @param {string[]} lines - 该模型条目的原始 YAML 行
  * @param {string|null} tag - 要加的后缀文字；null = 不加
@@ -204,7 +204,7 @@ export function annotateName(lines, tag, ownTagRe, stripList) {
   const [, prefix, rawName] = m;
   // 先做"剥离"：把末尾的括号按规则去掉。要剥的包括
   //   ① 我们自己加过的标签（保证幂等）
-  //   ② `strip` 里列出的（用户说 `(Antigravity)` / `(free)` 不用保留）
+  //   ② `strip` 里列出的（如 `(free)` 不用保留）
   const stripRes = (stripList ?? []).map((x) => { try { return new RegExp(x); } catch { return null; } }).filter(Boolean);
   let stripped = rawName;
   for (;;) {
@@ -790,7 +790,7 @@ async function main() {
       const prev = existingById.get(id);
       if (prev) {
         // 已存在：只改 `name:` 那一行（人工的 contextWindow/efforts/compat 一字不动）。
-        // **即使没有 tag 也要走一遍** —— 否则 `strip` 剥不掉 `(Antigravity)`。
+        // **即使没有 tag 也要走一遍** —— 否则 `strip` 里的规则不会生效。
         const r = annotateName(prev.lines, tag, ownTagRe, stripList);
         if (r.changed) { annotated++; annotateLog.push({ id, before: r.before, after: r.after }); }
         return r.lines;

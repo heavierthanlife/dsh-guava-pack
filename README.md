@@ -137,7 +137,7 @@ curl -s http://127.0.0.1:8318/health
 ### ⚠️ node_modules 补丁 —— 不打的话 Anthropic 协议 provider 容易 400
 
 有两个补丁**不在插件目录里**，而是改 DSH 安装目录下的 `node_modules`。
-换机器只装包不打补丁，走 `api: anthropic-messages` 的路由（现在只剩 `antigravity`）仍会 400。
+换机器只装包不打补丁，走 `api: anthropic-messages` 的路由仍会 400。
 （这两个问题最早是在 `agentrouter` 的 `deepseek-v4-flash` 通道上暴露的；该路由已于
 **2026-10-27 随上游模型下线而废弃**，见下面的「AgentRouter 变更」。）
 
@@ -157,7 +157,7 @@ node install.mjs --patch          # 幂等，已打过就跳过
 
 - 补丁①是全局的 —— 影响 dsh 自己声明的内置工具 schema；语义等价（`required: []` ≡ 不写），
   已实测 xiaomi 两种写法都 200。MCP 工具的 schema 原样透传，不受影响。
-- 补丁②只作用于 `api: anthropic-messages` 的 provider（现为 `antigravity`；2026-10-27 前还包括 `agentrouter` 的 Anthropic 路由）；
+- 补丁②只作用于 `api: anthropic-messages` 的 provider（2026-11-25 起本机已无这类路由；补丁保留，将来接 anthropic 协议上游时不会踩同一个坑）；
   openai 系走另一个文件，完全没动。
 
 **这两个补丁会在 dsh 依赖升级后被 npm/pnpm 覆盖** —— 升级完必须重跑补丁脚本。
@@ -201,7 +201,7 @@ node tools/sync-models.mjs                  # 预览（默认 dry-run，不改�
 node tools/sync-models.mjs --write           # 落盘（自动备份）
 node tools/sync-models.mjs --free-only       # 只同步「有免费模型」的供应商
 node tools/sync-models.mjs --exclude "tts|asr|embed"   # 排除非对话模型
-node tools/sync-models.mjs --only antigravity
+node tools/sync-models.mjs --only opencode-go
 node tools/sync-models.mjs --prune --write   # 顺手删掉端点已无的（慎用，见下）
 ```
 
@@ -209,9 +209,8 @@ node tools/sync-models.mjs --prune --write   # 顺手删掉端点已无的（慎
 
 **三条从实测得来的设计约束**（不是凭空设的）：
 
-1. **默认绝不删模型。** antigravity 反代上 `gemini-2.5-flash` 已不在 `/models` 里，
-   但调用它**仍然成功** —— 服务端静默别名到 `gemini-3.1-flash-lite`；
-   `claude-opus-4-6` → `claude-opus-4-6-thinking` 同理。
+1. **默认绝不删模型。** 某个反代上 `gemini-2.5-flash` 已不在 `/models` 里，
+   但调用它**仍然成功** —— 服务端静默别名到 `gemini-3.1-flash-lite`。
    **端点没列 ≠ 不能用**，所以要删必须显式 `--prune`。
 2. **保留人工元数据。** 已存在模型的整段 YAML 原样保留（你手写的 contextWindow /
    reasoningEfforts / compat 都不会被覆盖），只追加新模型；新模型用默认值，
@@ -220,8 +219,8 @@ node tools/sync-models.mjs --prune --write   # 顺手删掉端点已无的（慎
    **拿不到**「每日 100 次」「capacity 用完为止」这类限制 —— 那些在服务商条款里。
 
 ⚠️ 另一个实测结论值得记下来：**「官方说会自动升级到新模型」未必属实**。
-antigravity 的 `gemini-3.5-flash` 调用后直接返回文字
-"Gemini 3.5 Flash is no longer…"，**并没有**自动连到 3.8。
+某个反代的旧 id 调用后直接返回文字
+"… is no longer…"，**并没有**自动连到新模型。
 
 ### 按自己的意图固定模型列表（sync-model-policy）
 
@@ -269,7 +268,7 @@ sh tools/run-model-policy.sh --probe --write
 2. **`created` 是假时间戳。** agentrouter 全是 `1626777600`（2021-07-20），其余三家
    各自也全是同一个数 → **不能用来排"最新"**。所以"最新"只能按 **id 里的版本号**
    启发式判断。
-3. **"最好的五个"无法自动判断。** 所以 antigravity 那份是**人工点名**的
+3. **"最好的五个"无法自动判断。** 所以这份清单是**人工点名**的
    （写在 `pick.explicit`），脚本只负责忠实执行 + 在点名的型号消失时提醒你。
 
 #### 🔒 硬保护：被引用的模型永不删
@@ -288,7 +287,7 @@ sh tools/run-model-policy.sh --probe --write
 
 探针必须看**正文产出**，不能只看状态码。两个真实教训：
 0. **两种协议格式完全不同**：`openai-completions` 的正文在 `choices[].delta.content`；
-   `anthropic-messages`（现为 antigravity）是**一整个 message 对象**，
+   `anthropic-messages` 是**一整个 message 对象**，
    正文在 `content: [{type:"text", text:"…"}]`。只认前者的话，后者正文数恒为 0
    → 好模型被误判成"只出推理不出正文"（踩过）。
 1. commandcode 的桥接**对失败也返回 200**，错误藏在 SSE body 里（`data: {"error":…}`）。
@@ -334,17 +333,16 @@ Laguna S 2.1（免费但常满载）
 
 规则写在策略表的 `annotations`（正则 → 标签），**幂等**：反复跑不会叠加成两个括号。
 
-**括号剥离**：策略表的 `strip` 列出要**去掉**的括号内容。默认剥 `(Antigravity)` 与
-`(free)` —— 归属在 id 里已有（`antigravity/gemini-…`），免费与否看 id 的 `free` 后缀，
-name 里重复标一遍是噪音。**不认识的括号会保留**（只剥明确列出的），所以
+**括号剥离**：策略表的 `strip` 列出要**去掉**的括号内容。默认剥 `(free)` ——
+免费与否看 id 的 `free` 后缀即可，name 里重复标一遍是噪音。**不认识的括号会保留**（只剥明确列出的），所以
 `(Experimental)` 这类不会被误删。
 
 #### 思考强度
 
 端点上**完全拿不到** reasoning effort（要发真实请求才知道），所以按 **id 家族**套用，
 规律是从现有手工配置里归纳的（见 `tools/lib/model-config.mjs` 的 `EFFORT_FAMILIES`）：
-deepseek 血统 → `low/medium/high`（opencode 系实测支持 `max`）；antigravity 的 claude →
-`low/medium/high`；**gemini 与免费模型不给**（手工条目也没给，给错档位会导致请求 400）。
+deepseek 血统 → `low/medium/high`（opencode 系实测支持 `max`）；
+**gemini 与免费模型不给**（手工条目也没给，给错档位会导致请求 400）。
 **你手工写在 profile 里的值永远优先**，脚本不会覆盖已存在条目的元数据。
 
 自检：`node tools/tests/model-policy.mjs`（23 项，含缩进往返、引用识别、efforts 家族）。
@@ -490,7 +488,7 @@ node tools/preflight.mjs --json   # 给别的脚本用
 |---|---|
 | Node / `DSH_HOME` | 版本太旧或家目录指错时，一切看起来都像"模型坏了" |
 | pack 位置 | 曾把默认值写成 `$HOME/dsh-guava-pack`（实际在 `$DSH_HOME/playground/themes/...`）→ 桥接与路由代理被**静默跳过**，8317/8318 双双起不来 |
-| `node_modules` 补丁 | 一次 `pnpm install` 就把 Anthropic 工具补丁冲掉，之后 anthropic 协议路由（antigravity）立刻 400，报错完全看不出原因 |
+| `node_modules` 补丁 | 一次 `pnpm install` 就把 Anthropic 工具补丁冲掉，之后 anthropic 协议路由立刻 400，报错完全看不出原因 |
 | 8318 / 8317 / 3080 | 三进程互相独立，挂哪个现象都不一样 |
 | `mode.json` 可写 | 不可写时面板开关"点了没反应"，没有任何提示 |
 | provider key 可得性 | 只报"有没有"，绝不打印值。缺 key 时探测全是 401，免费模型会被"保守保留"成噪音 |
@@ -738,6 +736,4 @@ systemctl --user restart dsh.service                  # 必须 restart
 ## 已知边界
 
 - `provider-router` 对 **loopback 目标恒直连**（把本机一跳塞进 SSR 没有意义）。
-- `antigravity` 走的是第三方反代（默认 `127.0.0.1:8045`），本包无法控制它的出口，
-  面板里对它的开关是禁用的。
 - 客户端改动刷新页面即可生效；**host 侧改动必须重启 DSH**。

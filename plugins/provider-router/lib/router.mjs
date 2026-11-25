@@ -103,7 +103,6 @@ const PROVIDERS_FILE = process.env.DSH_ROUTER_PROVIDERS || join(HERE, 'providers
 const BUILT_IN_PROVIDERS = {
   'xiaomi-token-plan-cn': { baseURL: 'https://token-plan-cn.xiaomimimo.com/v1' },
   'opencode-go': { baseURL: 'https://opencode.ai/zen/go/v1' },
-  'antigravity': { baseURL: 'http://127.0.0.1:8045' },
   // AgentRouter 有客户端白名单：只放行特定 User-Agent（实测 'pi (win32 ...)' 通过，
   // 其余一律 401 unauthorized client）。DSH 自身强制自带 UA 且会过滤配置里的 user-agent，
   // 所以必须由本代理在这一跳改写 UA。

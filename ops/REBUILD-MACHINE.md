@@ -94,7 +94,6 @@ export DSH_SSR_PROXY="http://127.0.0.1:2080"      # MSI 用 2099
 
 # provider key（从密码管理器逐条填）
 export AGENTROUTER_API_KEY="..."
-export ANTIGRAVITY_API_KEY="..."
 export OPENCODE_GO_API_KEY="..."
 export XIAOMI_TOKEN_PLAN_CN_API_KEY="..."
 export COMMANDCODE_API_KEY="..."                   # 见 SECRETS-INVENTORY 的注意事项

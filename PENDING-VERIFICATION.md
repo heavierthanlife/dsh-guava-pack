@@ -58,7 +58,7 @@
   非回环不放宽、`loopbackPrefixes: []` 可关）。变异测试确认去掉规则会红。
 - 真实形状矩阵（离屏，用 `matchesSessionHeaderTarget` 直接跑）：
   `8318/opencode-go/*` 打头；`8318/agentrouter`、`8318/xiaomi-token-plan-cn`、
-  `8317` 桥接、`8045` antigravity 全部不打。
+  `8317` 桥接全部不打。
 
 **没验证到的**：那个头在**运行中的 DSH 进程**里实际被写成了什么值。
 

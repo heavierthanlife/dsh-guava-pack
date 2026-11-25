@@ -59,7 +59,6 @@ window.__ModuleLoader__.load({
       provider: {
         'xiaomi-token-plan-cn': '小米 MiMo（国内）',
         'opencode-go': 'DeepSeek via opencode-go',
-        'antigravity': 'Antigravity（本地桥接）',
         'agentrouter': 'AgentRouter',
         'commandcode': 'CommandCode（本地桥接）',
       },
@@ -70,8 +69,8 @@ window.__ModuleLoader__.load({
      *   router   — baseURL points at 127.0.0.1:8318, so the switch is real.
      *   bridge   — a local bridge owns the upstream request; it hot-reads the
      *              same mode.json, so the switch is real too.
-     *   external — a third-party tool (antigravity-tools on :8045) owns the
-     *              egress; this plugin cannot change it, so no switch is shown.
+     *   external — a third-party tool owns the egress; this plugin cannot
+     *              change it, so no switch is shown.
      */
     /**
      * 供应商目录**不再写死**。

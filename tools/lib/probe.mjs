@@ -437,10 +437,10 @@ function analyzeBody(text) {
       if (typeof d?.content === 'string' && d.content.length > 0) { contentChars += d.content.length; hasContent = true; }
       if (ch?.finish_reason) finish = ch.finish_reason;
     }
-    // ── Anthropic 系（antigravity / agentrouter 用 anthropic-messages）──
+    // ── Anthropic 系（`api: anthropic-messages` 的供应商）──────────────
     // 格式完全不同：**不是 SSE 的 delta.content，而是一整个 message 对象**，
     // 正文在 `content: [{type:"text", text:"…"}]`。
-    // 踩过：只认 OpenAI 格式时，antigravity 的正文数恒为 0 →
+    // 踩过：只认 OpenAI 格式时，anthropic 协议的正文数恒为 0 →
     // 好模型被误判成"只出推理不出正文"。
     if (obj?.type === 'message' && Array.isArray(obj.content)) {
       for (const blk of obj.content) {

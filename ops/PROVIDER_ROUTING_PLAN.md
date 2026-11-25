@@ -68,7 +68,7 @@
 | 选项 | 做法 | 优点 | 缺点 | 结论 |
 |---|---|---|---|---|
 | **A. 本地路由代理** | WSL 起一个本地代理（如 `127.0.0.1:8318`），所有「翻墙」供应商的 `baseURL` 指向它；代理按映射把请求要么直连、要么经 SSR 出去 | 真·强制路由、按供应商、运行时可切换 | 要改 profile 的 baseURL（需重启一次）；新增一个常驻进程 | ✅ **推荐** |
-| B. 只检测+显示+切换 | 插件只做 UI；实际路由交给已有桥接（commandcode 8317 / antigravity 8045）各自支持 SSR | 侵入最小 | 只覆盖已桥接的供应商；opencode-go / agentrouter 仍是直连 | 兜底 |
+| B. 只检测+显示+切换 | 插件只做 UI；实际路由交给已有桥接（commandcode 8317）各自支持 SSR | 侵入最小 | 只覆盖已桥接的供应商；opencode-go / agentrouter 仍是直连 | 兜底 |
 | C. 切 Windows 系统代理 | host 插件改注册表 `ProxyEnable` | 简单 | 影响整个系统；**会打断 Tailscale（它依赖 SSR）**；DSH 在 WSL 根本不读 WinINET | ❌ **否决** |
 
 ### 3.3 数据流（选项 A）
@@ -136,7 +136,7 @@ mode.json  ←── 热读 ──  lib/router.mjs（127.0.0.1:8318，独立 WSL
 
 `opencode-go` / `agentrouter` 的 baseURL 已改为
 `http://127.0.0.1:8318/<provider>`（原始上游留在 router.mjs 的 PROVIDERS 表里）。
-`antigravity`(8045) / `commandcode`(8317) 仍走各自桥接 —— **范围外，未接入**。
+`commandcode`(8317) 仍走自己的桥接 —— **范围外，未接入**。
 
 ## 8.2 【三个大坑】—— 重挖一次很贵，务必先读
 
@@ -248,11 +248,11 @@ register(owner, ...) { owner.effect(() => owner.webServer.register(route), ...) 
 | 安装 | profile 已装并启用 |
 | 路由代理 | 常驻运行，`~/dsh/dsh` 启动器自动拉起 |
 | `opencode-go` / `agentrouter` baseURL | 均指向 `http://127.0.0.1:8318/<provider>` |
-| 界面 | 设置 → 供应商路由：5 家供应商 + 分类 + 直连/SSR 开关（用户已确认） |
+| 界面 | 设置 → 供应商路由：4 家供应商 + 分类 + 直连/SSR 开关（用户已确认） |
 | 备份 | `dsh.bak-provider-router-20261004-184039`、`cordis.patch.yml.bak-provider-router-20261004-184039` |
 
-**范围外（未做）**：~~antigravity(8045) / commandcode(8317) 的 SSR 路由需在各自桥接脚本里实现~~
-→ commandcode 已于 §9 接入（桥接读 mode.json）；antigravity 是第三方工具，改为面板标注不可控。
+**范围外（未做）**：~~commandcode(8317) 的 SSR 路由需在桥接脚本里实现~~
+→ commandcode 已于 §9 接入（桥接读 mode.json）。
 
 ---
 
@@ -268,12 +268,11 @@ register(owner, ...) { owner.effect(() => owner.webServer.register(route), ...) 
 | opencode-go | `https://opencode.ai/zen/go/v1` | 200 / 0.82s | 200 / 0.79s | 持平 |
 | **agentrouter** | `https://agentrouter.org/v1` | **000 / 12s 超时** ❌ | **401 / 1.70s** ✅ | **唯一真需翻墙** |
 | commandcode | `https://api.commandcode.ai`（经桥接） | 200 / **0.81s** | 200 / 2.09s | 直连更快 |
-| antigravity | `127.0.0.1:8045`（第三方 `antigravity-tools`） | 401 / 0.005s | — | 本地，无需 |
 
 **关键结论：默认映射从「4 家全 SSR」改为「只有 agentrouter 走 SSR」** —— 原默认是错的。
 （该网络比赛话早期好一个数量级：opencode-go 6s→0.82s、commandcode 4.8s→0.81s。）
 
-## 9.2 功能做齐：5 家的开关现在都真生效
+## 9.2 功能做齐：4 家的开关现在都真生效
 
 | 供应商 | 接入方式 | 开关 |
 |---|---|---|
@@ -281,7 +280,6 @@ register(owner, ...) { owner.effect(() => owner.webServer.register(route), ...) 
 | opencode-go | baseURL → 路由代理 | ✅ |
 | agentrouter | baseURL → 路由代理 | ✅ |
 | **commandcode** | 桥接**热读 mode.json**（**新实现**） | ✅ |
-| antigravity | 第三方工具，无法控制 | ❌ 面板已标注"由外部工具控制·开关不可用" |
 
 **运行中合成配置实证**（`./dsh --profile web --dump-config`，2401 行，exit=0）：
 
@@ -290,7 +288,6 @@ xiaomi-token-plan-cn  baseURL: http://127.0.0.1:8318/xiaomi-token-plan-cn
 opencode-go           baseURL: http://127.0.0.1:8318/opencode-go
 agentrouter           baseURL: http://127.0.0.1:8318/agentrouter
 commandcode           baseURL: http://127.0.0.1:8317/v1
-antigravity           baseURL: http://127.0.0.1:8045
 ```
 
 ## 9.3 本轮的四个真 bug 修复
@@ -326,13 +323,11 @@ antigravity           baseURL: http://127.0.0.1:8045
 | restart-dsh.sh 3/3 失败 | ✅ **属实**，已改用 systemd-run |
 | 启动器 `--trusted-host` 条件过宽 | ✅ **属实**，已修 |
 | "xiaomi/commandcode 的开关不影响实际路由" | ❌ **证伪**：它按"router 里 loopback 恒直连"**推断**，没注意 commandcode 的 baseURL 指向**桥接**（桥接自己读 mode.json）。实测 xiaomi 经代理 401/0.17s ✅；commandcode 热切换 direct 0.77s → ssr 0.85s → 还原 0.24s ✅；运行中合成配置也证明 xiaomi 的 baseURL 就是路由代理 ✅ |
-| antigravity 8045 没跑 | ✅ 属实（第三方工具未启动；面板已如实标注） |
 | agentrouter 401 是 key/风控问题 | ✅ 属实（与路由无关；路由 1.5s 到达上游）；**实测 agentrouter 可达，只是容易触发敏感词风控** |
 
 ## 9.5 遗留（未做，供后续决定）
 
 - ~~**DSH 常驻方案**~~ → **已做**，见 §10.1（systemd user service）。
-- **antigravity 供应商**：依赖第三方 `antigravity-tools`(8045)，它没跑时该供应商不可用。
 - **agentrouter 401**：**实测可达**（经 SSR），主要是**容易触发敏感词风控**；与路由无关。
 
 ---
@@ -470,7 +465,7 @@ upstream error: ETIMEDOUT | ETIMEDOUT 154.83.15.20:443 connect ETIMEDOUT 154.83.
 `opencode-go`），生效的就是 2 家 SSR。**排查时先看 mode.json，再看 DEFAULT_MODES。**
 
 本次已清除测试残留，当前 `mode.json` 与默认一致：
-`xiaomi/opencode-go/antigravity/commandcode = direct`，`agentrouter = ssr`。
+`xiaomi/opencode-go/commandcode = direct`，`agentrouter = ssr`。
 
 
 

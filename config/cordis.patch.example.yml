@@ -82,74 +82,6 @@
               requiresReasoningContentOnAssistantMessages: true
               thinkingFormat: deepseek
               supportsStrictMode: true
-      antigravity:
-        apiKeyEnv: ANTIGRAVITY_API_KEY
-        displayName: Antigravity (本地 127.0.0.1:8045)
-        api: anthropic-messages
-        baseURL: http://127.0.0.1:8045
-        thinkingBudgets:
-          minimal: 2048
-          low: 8192
-          medium: 16384
-          high: 32768
-        compat:
-          supportsEagerToolInputStreaming: false
-          supportsLongCacheRetention: false
-        models:
-          - id: claude-opus-4-6-thinking
-            name: Claude Opus 4.6 Thinking
-            contextWindow: 200000
-            maxTokens: 64000
-            input:
-              - text
-              - image
-            reasoningEfforts:
-              low: low
-              medium: medium
-              high: high
-          - id: claude-sonnet-4-6
-            name: Claude Sonnet 4.6
-            contextWindow: 200000
-            maxTokens: 64000
-            input:
-              - text
-              - image
-            reasoningEfforts:
-              low: low
-              medium: medium
-              high: high
-          - id: gemini-3.8-flash-high
-            name: Gemini 3.8 Flash High（固定推理档）
-            contextWindow: 1000000
-            maxTokens: 65536
-            input:
-              - text
-              - image
-          - id: gemini-3.8-flash-tiered
-            name: Gemini 3.8 Flash Tiered（固定推理档）
-            contextWindow: 1000000
-            maxTokens: 65536
-            input:
-              - text
-              - image
-          - id: gemini-3.1-flash-image
-            name: Gemini 3.1 Flash Image（图像生成）
-            contextWindow: 1000000
-            maxTokens: 65536
-            input:
-              - text
-              - image
-      # ── AgentRouter · Anthropic 协议路由：**已废弃（2026-10-27）** ────────
-      # 2026-10-27 实测（经 SSR、带合法 UA）：
-      #   · GET /v1/models 只剩 3 个模型，全部是 Responses-only；
-      #   · 原 Anthropic 路由唯一的 deepseek-v4-flash 已下线 →
-      #     503「当前分组 default 下对于模型 deepseek-v4-flash 无可用渠道」。
-      # 所以这里不再保留 anthropic-messages 路由（留着只会让用户选到必失败的模型）。
-      # 若上游将来重新提供 Anthropic 协议模型，按被删块的形状加回即可。
-      # ── AgentRouter · Responses API（走工具能力必须用这条路由）──────────
-      # 为什么单独开一家：AgentRouter 的 Anthropic 适配层会把 /v1/messages 翻成
-      # OpenAI /v1/chat/completions，而 gpt-6.1-sol 在该端点上**禁止 Function
-      # tools**（上游硬限制）。同一个模型走 /v1/responses 则完全支持工具调用。
       agentrouter-responses:
         apiKeyEnv: AGENTROUTER_API_KEY
         displayName: AgentRouter (Responses API · 支持工具)
@@ -286,8 +218,8 @@
 - id: agent-default-model
   name: "@deepseek-ai/dsh-agent-default-model"
   config:
-    provider: antigravity
-    model: gemini-3.8-flash-tiered
+    provider: opencode-go
+    model: deepseek-v4.1-flash
 - id: agent-preset-registry
   name: "@deepseek-ai/dsh-agent-preset-registry"
   config:
@@ -325,10 +257,6 @@
       # AgentRouter 的 Anthropic 路由已废弃（deepseek-v4-flash 下线），改指 Responses 路由
       - provider: agentrouter-responses
         model: gpt-5.6-sol
-      - provider: antigravity
-        model: gemini-3.8-flash-high
-      - provider: antigravity
-        model: claude-sonnet-4-6
       # commandcode 的 DeepSeek V4.1 Flash（1M 窗口，工具调用实测可用）
       - provider: commandcode
         model: deepseek/deepseek-v4.1-flash

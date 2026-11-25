@@ -27,7 +27,7 @@
 |---|---|---|
 | `router` | baseURL 指向 `127.0.0.1:8318/<prefix>` 且代理认识该前缀 | ✅ 真生效 |
 | `bridge` | 本地桥接读同一份 `mode.json`（commandcode） | ✅ 真生效 |
-| `external` | 第三方反代自己控制出口（antigravity） | ❌ 标灰 |
+| `external` | 第三方反代自己控制出口 | ❌ 标灰 |
 | `direct` | baseURL 不经过本代理（如 `opencode` 直连上游） | ❌ 标灰 |
 | `router-missing-upstream` | baseURL 指向本代理，但代理的上游表里没这个前缀 | ⚠️ 会 404，提示补 `providers.json` |
 | `unknown` | 读不到 baseURL —— **不猜** | ⚠️ 说明原因 |
@@ -69,20 +69,14 @@ GET /_router/measure?provider=  # 当场测一次，返回 direct/ssr 的 ok+ms
 |---|---|
 | `xiaomi-token-plan-cn`（小米，国内） | direct |
 | `opencode-go` | direct |
-| `antigravity` | direct |
 | `agentrouter` | **ssr** |
 | `commandcode` | direct |
 
 ## 启用路由
 
-**4 家可切、1 家禁用**（2026-10-04 实测，PLAN §9.2）：`xiaomi-token-plan-cn` / `opencode-go` /
+**4 家可切**（2026-10-04 实测，PLAN §9.2）：`xiaomi-token-plan-cn` / `opencode-go` /
 `agentrouter` 的 `baseURL` 已指向 `http://127.0.0.1:8318/<provider>`；
-`commandcode`(8317) 的桥接**热读 `mode.json`**，开关同样生效；
-`antigravity`(8045) 是第三方工具（`antigravity-tools`）持有，**开关不可用**、面板已标注「由外部工具控制」
-（`lib/client.js` 里该条 `control:'external'`，不受开关影响）。
-
-> 原文写"5 家开关均真生效"，紧接着自己又说 antigravity 不可用 —— 已按代码更正为
-> "4 家可切 + 1 家禁用"。
+`commandcode`(8317) 的桥接**热读 `mode.json`**，开关同样生效。
 
 ## 诊断：确认 `x-opencode-session` 真的按会话注入
 

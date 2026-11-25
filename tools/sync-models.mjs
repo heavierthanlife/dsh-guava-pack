@@ -7,7 +7,7 @@
  * DSH 的可选模型来自 profile 里**静态声明**的 `models:` 数组
  * （`dsh-llm-pi-ai` 的 `listModels()` 读的是编译后的配置，不查端点）。
  * 而各家 `/models` 是随时变的：commandcode 的免费模型换了一茬、
- * antigravity 反代已经提供 29 个而配置里只声明了 10 个、还有 3 个已下线。
+ * 某家反代已经提供 29 个而配置里只声明了 10 个、还有 3 个已下线。
  *
  * 两个松绑让「同步」成为可行方案：
  *   1. `llm` 服务文档明确：**Catalog membership does not constrain core routing**
@@ -21,10 +21,10 @@
  * - **合并，不是替换**：已存在的模型保留它原来的整段 YAML（人工写的
  *   contextWindow / maxTokens / reasoningEfforts / compat 都不丢），
  *   只新增端点有而配置没有的。
- * - **默认绝不删模型**：这点是实测逼出来的。antigravity 反代上
- *   `gemini-2.5-flash` 已不在 /models 里，但调用它**仍然成功**，服务端
- *   静默别名到 `gemini-3.1-flash-lite`；`claude-opus-4-6` → `-thinking`
- *   同理。说明「端点没列」≠「不能用」。所以要删得显式加 `--prune`。
+ * - **默认绝不删模型**：这点是实测逼出来的。某个反代上 `gemini-2.5-flash`
+ *   已不在 /models 里，但调用它**仍然成功**，服务端静默别名到
+ *   `gemini-3.1-flash-lite`。说明「端点没列」≠「不能用」。所以要删得显式加
+ *   `--prune`。
  * - **只动 `models:` 块**：纯文本手术，不重排你的文件、不动注释与其它字段。
  * - **默认 dry-run**：不加 `--write` 就只打印 diff，绝不落盘。
  * - 落盘前自动备份（`cordis.patch.yml.bak-modelsync-<时间戳>`）。
@@ -36,7 +36,7 @@
  *   node tools/sync-models.mjs --free-only         # 只要 id 含 free 的
  *   node tools/sync-models.mjs --exclude "tts|asr|embed"   # 排除非对话模型
  *   node tools/sync-models.mjs --prune --write     # 顺手删掉端点已无的（慎用）
- *   node tools/sync-models.mjs --only antigravity  # 只同步某一家
+ *   node tools/sync-models.mjs --only opencode-go  # 只同步某一家
  *
  * ## 已知边界（诚实说明）
  *
@@ -44,9 +44,9 @@
  *   那些在服务商条款里，同步器只能按 id 里的 `free` 标记判断是否免费。
  * - **端点列表 ≠ 可用列表**：旧 id 可能被服务端别名到新模型而继续可用
  *   （见上），所以默认不删。
- * - 「自动升级到新模型」这种事同步器查不到。实测 antigravity 的
- *   `gemini-3.5-flash` 直接返回 "Gemini 3.5 Flash is no longer…"，
- *   **并没有**自动连到 3.8 —— 官方说法和实际行为不一致，以实测为准。
+ * - 「自动升级到新模型」这种事同步器查不到。实测某家反代的旧 id 直接
+ *   返回 "… is no longer…"，**并没有**自动连到新模型 —— 官方说法和实际
+ *   行为不一致，以实测为准。
  * - 新模型没有 endpoint 元数据时**按 id 家族**给兜底值（`gemini-*` → 1M/65536、
  *   `claude-*` → 200k/64k、`gpt-oss*` → 128k/32k 且纯文本、其余 200k/64k）。
  *   家族表是**启发式**，不是端点事实 —— 需要精确值请手工改，改过之后

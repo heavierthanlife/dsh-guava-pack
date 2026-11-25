@@ -110,7 +110,7 @@ Kuma 监控（VPS `100.109.125.37:3001`）：
 - **live profile 迁移到 `agentrouter-responses`**（11:00，用户批准）：旧 `agentrouter`
   （`anthropic-messages` + 已下线的 `deepseek-v4-flash`）整块替换为 `openai-responses`
   + 三个 gpt 模型；`allowedModels` 补齐为 6 条真实可用的
-  （mimo / gpt-5.6-sol / antigravity sonnet+opus+gemini / commandcode）。
+  （mimo / gpt-5.6-sol / commandcode）。
   用凭证库 key 复核 `/agentrouter/v1/models` 确认上游正是这三个。
   备份留在 `profiles/web/cordis.patch.yml.bak-20261112-1105`。
   `tools/tests/model-policy.mjs` → **150 passed / 0 failed**。

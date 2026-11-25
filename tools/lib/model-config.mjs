@@ -166,7 +166,7 @@ export async function fetchModels(url, apiKey, api, timeoutMs = 20000) {
 }
 
 // ── 新模型的元数据兜底：按 id 家族给 ────────────────────────────────────
-// 实测：antigravity 的 /v1/models 只回 `{id, object, created, owned_by}` ——
+// 实测：各家 /v1/models 只回 `{id, object, created, owned_by}` ——
 // **一点 context/token 信息都没有**。全用同一个默认值会把 1M 的 Gemini
 // 写成 200000，与同家族手工写的条目自相矛盾（UI 上的上下文提示会错）。
 // 所以按 id 前缀家族给值。**这只是兜底**：一旦某条被手工改过，
@@ -203,9 +203,8 @@ export function familyOf(id) {
  *   - deepseek 血统（xiaomi 的 mimo 走 `thinkingFormat: deepseek`、
  *     opencode-go 的 ds、commandcode 的 ds）→ `low/medium/high`；
  *     但 opencode-go / opencode 的 ds 实测支持到 `max` → `low/high/max`。
- *   - antigravity 的 claude → `low/medium/high`（与手工条目一致）。
- *   - antigravity 的 gemini、以及各家免费模型 → 手工条目**多数没给**，
- *     所以默认也不给（宁缺勿错：给错档位会导致请求 400）。
+ *   - 各家免费模型 → 手工条目**多数没给**，所以默认也不给
+ *     （宁缺勿错：给错档位会导致请求 400）。
  *
  * 想改哪一条就改这里；**手工写在 profile 里的值永远优先**（见 solve 的保留逻辑）。
  */
@@ -214,7 +213,6 @@ export const EFFORT_FAMILIES = [
   { test: /^(deepseek|ds)-/, provider: /^(opencode|opencode-go)$/, efforts: ['low', 'high', 'max'] },
   { test: /^deepseek/, efforts: ['low', 'medium', 'high'] },
   { test: /^mimo-/, efforts: ['low', 'medium', 'high'] },
-  { test: /^claude-/, provider: /^antigravity$/, efforts: ['low', 'medium', 'high'] },
 ];
 
 /**

@@ -16,7 +16,7 @@
 
 ```
 profile 里 7 家                                    provider-router 认识 5 家
-xiaomi-token-plan-cn / opencode-go / antigravity   ✅
+xiaomi-token-plan-cn / opencode-go             ✅
 agentrouter / commandcode                          ✅
 agentrouter-responses                              ❌ 面板无此行
 opencode                                          ❌ 面板无此行
@@ -104,7 +104,6 @@ agentrouter     direct 不可用(311ms 失败) / ssr 2388ms  → 选 ssr（与�
 opencode-go     direct 1326ms / ssr 825ms              → 选 ssr
 xiaomi          direct 118ms / ssr 106ms（差 12ms）    → 选 direct（平手规则）
 commandcode     loopback 5ms                            → 选 direct（不绕代理）
-antigravity     loopback 4ms                            → 选 direct
 ```
 
 面板目录从 5 家 → **7 家**（补上 `agentrouter-responses` 与 `opencode`），

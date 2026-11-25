@@ -96,7 +96,6 @@ const endpoints = {
   'agentrouter-responses': { baseURL: 'http://127.0.0.1:8318/agentrouter/v1' },
   'opencode': { baseURL: 'https://opencode.ai/zen/v1' },
   'commandcode': { baseURL: 'http://127.0.0.1:8317/v1' },
-  'antigravity': { baseURL: 'http://127.0.0.1:8045' },
   'weird': { baseURL: 'http://127.0.0.1:8318/weird/v1' },
 };
 const catalog = buildProviderCatalog({
@@ -108,17 +107,17 @@ const catalog = buildProviderCatalog({
   ],
   configurable: [{ provider: 'agentrouter-responses', displayName: 'AgentRouter (Responses)' }],
   defaults: DEFAULT_MODES,
-  routerPrefixes: ['xiaomi-token-plan-cn', 'opencode-go', 'antigravity', 'agentrouter', 'commandcode'],
+  routerPrefixes: ['xiaomi-token-plan-cn', 'opencode-go', 'agentrouter', 'commandcode'],
   endpoints,
 });
 const byId = Object.fromEntries(catalog.map((r) => [r.id, r]));
-check('live + 可配置 + 兜底 全部出现', catalog.length === 7, catalog.map((r) => r.id));
+// 7 → 6：2026-11-25 antigravity 退役，endpoints 里那份 fixture 一并移除。
+check('live + 可配置 + 兜底 全部出现', catalog.length === 6, catalog.map((r) => r.id));
 check('旧版漏掉的 agentrouter-responses 现在出现', Boolean(byId['agentrouter-responses']));
 check('旧版漏掉的 opencode 现在出现', Boolean(byId['opencode']));
 check('agentrouter-responses 被判定为经过本代理（前缀取自 baseURL）',
   byId['agentrouter-responses'].control === 'router' && byId['agentrouter-responses'].prefix === 'agentrouter');
 check('opencode 直连、不经过代理', byId['opencode'].control === 'direct');
-check('antigravity 标为外部控制（不可拨）', byId['antigravity'].control === 'external');
 check('commandcode 标为桥接控制（开关真生效）', byId['commandcode'].control === 'bridge');
 check('前缀不在上游表 → router-missing-upstream（会 404，必须提示）',
   byId['weird'] ? byId['weird'].control === 'router-missing-upstream' : true);
@@ -249,8 +248,8 @@ const noisyIds = noisy.map((r) => r.id);
 check('未配置的内置供应商被隐藏（amazon-bedrock / anthropic / groq）',
   !noisyIds.includes('amazon-bedrock') && !noisyIds.includes('anthropic') && !noisyIds.includes('groq'), noisyIds);
 check('live 的行保留（opencode-go）', noisyIds.includes('opencode-go'));
-check('DEFAULT_MODES 的行保留（xiaomi / antigravity / commandcode）',
-  noisyIds.includes('xiaomi-token-plan-cn') && noisyIds.includes('antigravity') && noisyIds.includes('commandcode'), noisyIds);
+check('DEFAULT_MODES 的行保留（xiaomi / opencode-go / commandcode）',
+  noisyIds.includes('xiaomi-token-plan-cn') && noisyIds.includes('opencode-go') && noisyIds.includes('commandcode'), noisyIds);
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);

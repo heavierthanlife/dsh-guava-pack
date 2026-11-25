@@ -24,7 +24,6 @@ export const MODES = Object.freeze(['direct', 'ssr', 'auto']);
 export const DEFAULT_MODES = Object.freeze({
   'xiaomi-token-plan-cn': 'direct',
   'opencode-go': 'direct',
-  'antigravity': 'direct',
   'agentrouter': 'ssr',
   'commandcode': 'direct',
 });
@@ -38,7 +37,6 @@ export const DEFAULT_MODES = Object.freeze({
  * 其余（未列出的）= 默认按 `router` 处理（baseURL 指向 127.0.0.1:8318）。
  */
 export const CONTROL_OVERRIDES = Object.freeze({
-  antigravity: 'external',
   commandcode: 'bridge',
 });
 
