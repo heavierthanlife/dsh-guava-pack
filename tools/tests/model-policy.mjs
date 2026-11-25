@@ -111,7 +111,7 @@ check('antigravity 的 gemini → 不给（手工条目也没给，宁缺勿错�
 check('免费模型 → 不给',
   effortsFor('opencode', 'step-5-preview-free') === null);
 
-// ── 4. 策略表本身必须合法且覆盖 6 家 ─────────────────────────────────────
+// ── 4. 策略表本身必须合法且覆盖全部在用供应商 ─────────────────────────────────────
 console.log('\n策略表');
 const policy = yaml.load(readFileSync(join(PACK, 'config', 'model-policy.yml'), 'utf8'));
 const prof = yaml.load(readFileSync(join(process.env.HOME || '', 'dsh', 'profiles', 'web', 'cordis.patch.yml'), 'utf8'));

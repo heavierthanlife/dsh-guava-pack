@@ -196,6 +196,31 @@ providers:
         - 'nvidia/nemotron-3-ultra-550b-a55b'
       on_missing: keep
 
+  # ── zljz-hub（中联基智企业网关，2026-11-24 新增）─────────────────────────
+  # 意图：人工点名的两个 —— Flash 走日常与主界面（也是 agent-default-model），
+  #       Pro 走重推理。模型数量少、由网关方决定，不做自动发现。
+  #
+  # 为什么不用 family + take: latest（像 opencode-go 那样）：
+  #   那边的 `deepseek-v4.1-flash` 是**一条模型线**，端点上新版本就该往前滚；
+  #   这里的 Flash 与 Pro 是**两条线**（`-1017` / `-0813` 是网关的构建日期，
+  #   不是模型版本），`latest` 只会剩其中一个，等于偷偷删掉另一个。
+  #
+  # 端点改名或下架时 `on_missing: keep` 保留（可能是服务端别名，官方
+  # sync-models 也写明「端点没列 ≠ 不能用」）；dry-run 会打出
+  # 「端点已不再列出但保留」提示，改不改由人决定。
+  # 另外：手动在裸 shell 里跑时没有 `ZLJZ_HUB_API_KEY`，查 /v1/models 会 401
+  # （同样按 keep 处理）。要真正探测就 `set -a; . <凭证>; set +a` 后再跑，
+  # 或用定时任务入口 `tools/run-model-policy.sh`（它会自动补 key）。
+  # 注意：`--write` 对已存在的模型只改 `name:` 一行，人工写的
+  # contextWindow / reasoningEfforts / compat **一字不动**。
+  zljz-hub:
+    intent: 人工点名的两个（Flash 日常 / Pro 重推理）
+    pick:
+      explicit:
+        - DeepSeek-V4.1-Flash-1017
+        - DeepSeek-V4-Pro-0813
+      on_missing: keep
+
 # ── 视觉推断表 ──────────────────────────────────────────────────────────────
 # 端点上**没有**视觉字段（实测 6 家都没有），所以只能按 id 关键词推断。
 # 这直接影响"旗舰没视觉时要补一个视觉型号"这条规则。
