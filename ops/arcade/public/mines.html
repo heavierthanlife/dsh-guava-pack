@@ -351,7 +351,7 @@
     </div>
   </div>
 
-  <p class="hint small muted" id="hint">左键翻开 · 右键插旗 / 再右键取消 · 中键和弦（触屏：轻点翻开 · 长按插旗）</p>
+  <p class="hint small muted" id="hint">左键翻开 · 右键插旗 / 再右键取消 · 左右键同时按住和弦（触屏：轻点翻开 · 长按插旗）</p>
   <p class="bestline small muted" id="best">最佳 --</p>
 
   <!-- 三档最高分 + 就地删除（mountScoreRow 渲染） -->
@@ -369,7 +369,7 @@
    * 操作语义对齐经典 95 版：
    *   · 左键翻开；旗子格左键**无效**（不会点爆）
    *   · 右键插旗；再右键取消；旗数不设上限（计数器会变负数，经典行为）
-   *   · 已翻开的数字格：中键/双键和弦（周围旗数 == 数字时，翻开其余邻格）
+   *   · 已翻开的数字格：左右键同时按住 = 和弦（周围旗数 == 数字时翻开其余邻格）
    *   · 首点安全：第一下点开的格子及其八邻不布雷 */
   var LONG_PRESS_MS = 420;
 
@@ -540,6 +540,7 @@
   var pressing = false;
 
   var press = null;
+  var chordDone = false;
   var suppressCtxUntil = 0;
   var timerId = null;
   var timerRunning = false;
@@ -698,12 +699,16 @@
 
   /* ── 棋盘尺寸 ─────────────────────────────────────────── */
   function layout() {
-    var avail = elWrap ? elWrap.clientWidth : 320;
-    if (!avail || avail < 80) avail = Math.max(240, window.innerWidth - 32);
+    /* 不能量 .field 自己的宽度：经典外壳是 width:max-content，量它会锁死在初始值
+     * （越量越小、越量越不动）。所以按页面容器宽度算，再减掉固定装饰：
+     *   wrap 左右内边距 32 + 外壳 border 4 + 外壳内边距 10 + 凹槽 border 4 + 凹槽内边距 2 = 52 */
+    var wrapEl = document.querySelector('.wrap');
+    var container = wrapEl && wrapEl.clientWidth ? wrapEl.clientWidth : window.innerWidth;
+    var avail = Math.max(200, container - 52);
     elBoard.style.setProperty('--cols', String(G.cols));
-    /* 经典是 16px 的格子；手机上按宽度铺满，最小 20px（再小就点不准了） */
-    var fit = Math.floor((avail - 4) / G.cols);
-    var size = Math.max(20, Math.min(32, fit));
+    var fit = Math.floor(avail / G.cols);
+    /* 2026-11-26：整体放大 1.1 倍（用户鼠标灵敏度高：格子边长 32 → 35、下限 20 → 22） */
+    var size = Math.max(22, Math.min(35, fit));
     elBoard.style.setProperty('--cell', size + 'px');
   }
 
@@ -986,9 +991,16 @@
 
   elBoard.addEventListener('pointerdown', function (e) {
     if (over || paused) return;
-    /* 中键 = 和弦（经典的双键同时按，桌面上用中键更稳） */
-    if (e.button === 1) {
+
+    /* 和弦 = 左右键**同时按住**（经典 95 的双键操作；中键保留为别名，但很多鼠标
+     * 的中键硬得按不动，所以默认用双键）。判定靠 e.buttons 位掩码：1=左 2=右 4=中。
+     * 先按左再按右、或先按右再按左都能触发；触发后这一轮的手势不再翻开/插旗。 */
+    var both = (e.button === 0 && (e.buttons & 2)) || (e.button === 2 && (e.buttons & 1));
+    if (both || e.button === 1) {
       e.preventDefault();
+      chordDone = true;
+      suppressCtxUntil = Date.now() + 600;   /* 随后的 contextmenu 别再插旗 */
+      cancelPress();
       var ci = cellAt(e);
       if (ci >= 0) actChord(ci);
       return;
@@ -1030,6 +1042,8 @@
   });
 
   elBoard.addEventListener('pointerup', function (e) {
+    /* 和弦手势：这一轮左右键都松开后什么都不做（翻开/插旗都已在 pointerdown 里让位） */
+    if (chordDone) { chordDone = false; cancelPress(); return; }
     if (!press) return;
     var p = press;
     var wasLong = p.long;

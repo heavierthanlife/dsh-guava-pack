@@ -52,7 +52,7 @@ ssh -F /dev/null root@100.109.125.37 '
 | `index.html` | 统一首页（入口卡） |
 | `g2048.html` | 2048 |
 | `snake.html` | 贪吃蛇 |
-| `mines.html` | 扫雷（初/中/高三档，经典 95 外观：LED 计数器 + 笑脸；右键插旗/取消，旗子格左键无效，中键和弦） |
+| `mines.html` | 扫雷（初/中/高三档，经典 95 外观：LED 计数器 + 笑脸；右键插旗/取消，旗子格左键无效，左右键同按和弦） |
 | `tetris.html` | 俄罗斯方块 |
 | `relax.html` | 白噪音（Web Audio 合成）· 呼吸引导 · 番茄钟 |
 | `decide.html` | 转盘 / 骰子 / 抽签 |
