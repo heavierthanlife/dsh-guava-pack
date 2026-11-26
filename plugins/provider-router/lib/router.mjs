@@ -483,6 +483,13 @@ const server = createServer(async (req, res) => {
     const mode = await currentMode(provider);
     const upstreamPath = '/' + parts.slice(1).join('/');
     const target = new URL(entry.baseURL.replace(/\/$/, '') + upstreamPath);
+    // 保留 query string 转发给上游。
+    //
+    // 为什么必须保留：google 的流式接口用 `?alt=sse` 决定返回**SSE** 还是**裸 JSON 数组**。
+    // 以前这里只拼 pathname，query 被整段丢掉 —— 上游于是返回 JSON 数组，
+    // 客户端仍按 SSE 逐行解析，报出 "Incomplete JSON segment at the end"。
+    // 面板自省端点走的是 pathname 分支（见上），不受这一行影响。
+    target.search = new URL(req.url || '/', 'http://localhost').search;
 
     // ── 先把请求体读完，再构造上游请求 ──────────────────────────────────
     // 顺序是关键：headers 一旦交给 http(s).request() 就被拷进 ClientRequest，

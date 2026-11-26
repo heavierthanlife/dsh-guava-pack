@@ -148,4 +148,15 @@ if [ "$WANT_TRUSTED_HOST" = true ]; then
       ;;
   esac
 fi
+# WSL 只有 Tailscale 的 ULA、**没有 IPv6 默认路由**，而 Cloudflare 托管的端点
+# （openrouter.ai / opencode.ai）同时有 A 和 AAAA。Node 的 autoSelectFamily 会并发
+# 试两族，v6 立刻 ENETUNREACH，聚合后整体抛 ETIMEDOUT —— 而 curl 完全正常，
+# 于是表现为「curl 通、DSH 连不上」。实测 openrouter 0/8，关掉后 8/8。
+# 详见 ops/tunnel/BREAK-GLASS.md §8.23。
+case " ${NODE_OPTIONS:-} " in
+  *--no-network-family-autoselection*) ;;
+  *) node --no-network-family-autoselection -e '' 2>/dev/null &&
+       export NODE_OPTIONS="${NODE_OPTIONS:-} --no-network-family-autoselection" ;;
+esac
+
 exec node "$basedir/node_modules/@deepseek-ai/dsh/lib/bin.js" "$@"
