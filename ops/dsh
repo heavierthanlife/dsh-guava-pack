@@ -22,7 +22,7 @@ basedir=$(cd "$(dirname "$0")" && pwd)
 # 供应商路由的 mode.json 必须**三方共用同一个文件**：
 #   host 插件（从 dsh-guava-pack 加载）、router、commandcode 桥接
 # 各自的相对路径不同，各读各的会让面板开关切换后不生效（真踩过）。这里统一指定。
-export DSH_ROUTER_MODE_FILE="${DSH_ROUTER_MODE_FILE:-$basedir/playground/themes/provider-router/mode.json}"
+export DSH_ROUTER_MODE_FILE="${DSH_ROUTER_MODE_FILE:-$basedir/playground/themes/dsh-guava-pack/plugins/provider-router/mode.json}"
 # 目录不存在时 router 那边写不进去（面板开关会静默失效）—— 先建好。
 mkdir -p "$(dirname "$DSH_ROUTER_MODE_FILE")" 2>/dev/null || true
 
