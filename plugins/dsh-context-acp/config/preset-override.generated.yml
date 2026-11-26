@@ -13,6 +13,7 @@
 # （agentPreset=standard，allowedAgentPresets=standard/ptc/minimal），
 # fork 行不动：它继承父会话历史与预设，架构上不允许独立选择。
 # 子 agent 预设策略覆盖: preset-cordis, preset-ptc, preset-standard
+# time-context 读数间隔: 2700000ms（覆盖: preset-cordis, preset-ptc, preset-standard）
 - id: preset-cordis
   config:
     id: cordis
@@ -28,6 +29,8 @@
           maxBytes: 65536
       - id: time-context
         name: "@deepseek-ai/dsh-time-context"
+        config:
+          refreshIntervalMs: 2700000
       - id: tool-bash
         name: "@deepseek-ai/dsh-tool-bash"
         disabled: !!js process.platform === 'win32'
@@ -287,6 +290,8 @@
           maxBytes: 65536
       - id: time-context
         name: "@deepseek-ai/dsh-time-context"
+        config:
+          refreshIntervalMs: 2700000
       - id: tool-bash
         name: "@deepseek-ai/dsh-tool-bash"
         disabled: !!js process.platform === 'win32'
@@ -453,6 +458,8 @@
           maxBytes: 65536
       - id: time-context
         name: "@deepseek-ai/dsh-time-context"
+        config:
+          refreshIntervalMs: 2700000
       - id: tool-bash
         name: "@deepseek-ai/dsh-tool-bash"
         disabled: !!js process.platform === 'win32'

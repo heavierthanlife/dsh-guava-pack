@@ -16,6 +16,10 @@
     "protectAgentInstructions": true,
     "protectSkillCatalog": true
   },
+  "timeContext": {
+    "$comment": "time-context 的读数间隔（毫秒）。45 分钟：够模型解释「明天下午」这类无时区时间，又不会每 10 分钟就往会话里塞一条上下文注入。0 = 每个符合条件的步骤都注入；上游默认 600000（10 分钟）。",
+    "refreshIntervalMs": 2700000
+  },
   "engine": {
     "fallbackToLlmSummary": true
   },

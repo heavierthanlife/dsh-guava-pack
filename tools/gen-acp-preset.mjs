@@ -243,6 +243,36 @@ function applySubagentPresetPolicy(config, presetLabel) {
   return { patched: true };
 }
 
+/** `time-context` 行的 id（上游 standard/ptc/cordis 声明它，minimal 不声明）。 */
+const TIME_CONTEXT_ID = 'time-context';
+
+/**
+ * 给 preset 里的 `time-context` 行设置读数间隔。
+ *
+ * 为什么允许覆盖上游：上游把频率写死在插件默认值（600000 = 10 分钟），
+ * 而 10 分钟一条上下文注入在长会话里很吵；这个值又没有 profile 层可用的覆盖点
+ * （time-context 在 preset 里，不在 profile 的条目树里），只能在这里改。
+ *
+ * 上游没声明该行（minimal）时原样跳过，不报错。
+ *
+ * @param {object} config preset 行的 config（已深拷贝）
+ * @param {string} presetLabel 仅用于错误消息
+ * @param {number|undefined} refreshIntervalMs 未配置时保持上游默认
+ * @returns {{ patched: boolean }}
+ */
+function applyTimeContextInterval(config, presetLabel, refreshIntervalMs) {
+  if (refreshIntervalMs === undefined) return { patched: false };
+  if (!Number.isSafeInteger(refreshIntervalMs) || refreshIntervalMs < 0) {
+    throw new Error(`${presetLabel}: acp.json 的 timeContext.refreshIntervalMs 必须是非负安全整数，实际是 ${JSON.stringify(refreshIntervalMs)}`);
+  }
+  const plugins = config?.plugins;
+  if (!Array.isArray(plugins)) return { patched: false };
+  const row = plugins.find((item) => item !== null && typeof item === 'object' && item.id === TIME_CONTEXT_ID);
+  if (row === undefined) return { patched: false };
+  row.config = { ...(row.config ?? {}), refreshIntervalMs };
+  return { patched: true };
+}
+
 /**
  * 计算上游指纹：文件名 + 内容，按固定顺序。上游重排/改一个字符都会变。
  * @param {{name:string,text:string}[]} files
@@ -295,6 +325,8 @@ function generate({ explicitPresetsDir, backendOverride }) {
   const upstreamHash = fingerprint(files);
   const replaced = [];
   const subagentPatched = [];
+  const timeContextPatched = [];
+  const timeContextMs = source?.timeContext?.refreshIntervalMs;
 
   return (async () => {
     const yaml = await loadYaml();
@@ -318,6 +350,9 @@ function generate({ explicitPresetsDir, backendOverride }) {
       // 子 agent 预设策略：spawn 型 tool-subagent 允许按任务选预设（fork 行不动）。
       const subagent = applySubagentPresetPolicy(config, label);
       if (subagent.patched) subagentPatched.push(entry.id);
+      // time-context 读数间隔：值来自 acp.json 的 timeContext.refreshIntervalMs。
+      const timeContext = applyTimeContextInterval(config, label, timeContextMs);
+      if (timeContext.patched) timeContextPatched.push(entry.id);
       // 只覆盖 config，不重复 insert（行已由上游 layer 创建；重复 insert 会撞 id）。
       patchList.push({ id: entry.id, config: result.config });
     }
@@ -338,11 +373,16 @@ function generate({ explicitPresetsDir, backendOverride }) {
       `# （agentPreset=${SUBAGENT_DEFAULT_PRESET}，allowedAgentPresets=${SUBAGENT_ALLOWED_PRESETS.join('/')}），`,
       '# fork 行不动：它继承父会话历史与预设，架构上不允许独立选择。',
       `# 子 agent 预设策略覆盖: ${subagentPatched.join(', ') || '(无)'}`,
+      timeContextMs === undefined
+        ? '# time-context 读数间隔: 保持上游默认'
+        : `# time-context 读数间隔: ${timeContextMs}ms（覆盖: ${timeContextPatched.join(', ') || '(无)'}）`,
       '',
     ].join('\n');
     const presetText = `${header}${dumpYaml(yaml, schema, patchList)}`;
 
-    const runtime = { ...source, backend, $generated: { upstream: `@deepseek-ai/dsh-web-app@${version}`, upstreamSha256: upstreamHash } };
+    // timeContext 是 preset 生成期的输入，不是 ACP 引擎的运行时配置 —— 别混进 runtime.json。
+    const { timeContext: _timeContext, ...runtimeSource } = source;
+    const runtime = { ...runtimeSource, backend, $generated: { upstream: `@deepseek-ai/dsh-web-app@${version}`, upstreamSha256: upstreamHash } };
     const runtimeText = `${JSON.stringify(runtime, null, 2)}\n`;
 
     return {
@@ -353,6 +393,8 @@ function generate({ explicitPresetsDir, backendOverride }) {
       upstreamVersion: version,
       replaced,
       presetRows: patchList.map((row) => row.id),
+      timeContextMs,
+      timeContextPatched,
     };
   })();
 }
@@ -370,6 +412,9 @@ try {
 
   info(`上游：@deepseek-ai/dsh-web-app@${generated.upstreamVersion}；backend=${generated.backend}；替换 ${generated.replaced.length} 个 preset`);
   info(`上游指纹：${generated.upstreamHash}`);
+  if (generated.timeContextMs !== undefined) {
+    info(`time-context 读数间隔 ${generated.timeContextMs}ms（${generated.timeContextMs / 60000} 分钟），覆盖 ${generated.timeContextPatched.length} 个 preset`);
+  }
 
   if (mode === 'write') {
     mkdirSync(CONFIG_DIR, { recursive: true });
