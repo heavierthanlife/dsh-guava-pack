@@ -429,6 +429,7 @@ function check() {
   try {
     const lines = readFileSync(join(PACK_DIR, 'cordis.patch.yml'), 'utf8').split(/\r?\n/);
     const names = [];
+    const flatIdRows = [];
     let idCount = 0;
     for (let i = 0; i < lines.length; i++) {
       if (!/^\s*-\s*id:\s*\S/.test(lines[i])) continue;
@@ -441,6 +442,10 @@ function check() {
         failed++;
       } else {
         names.push(value);
+        // 顶层「- id:」（没有缩进、不在 insert: 里）只能**按 id 定位已有行**，不能新增。
+        // 2026-11-24 的事故就是拿它当"补插"：那 4 行盖住了上游已插入的行，
+        // 两个 client 模块从 manifest 里消失，界面全 pending。见 ops/UPGRADE-DSH.md §4。
+        if (/^-\s*id:/.test(lines[i])) flatIdRows.push({ line: i + 1, name: value });
       }
     }
     const pluginRows = names.filter((n) => n.startsWith('./plugins/')).length;
@@ -453,7 +458,11 @@ function check() {
       bad(`cordis.patch.yml \u6709 ${pluginRows} \u4e2a\u6307\u5411 ./plugins/ \u7684\u6761\u76ee\uff0cplugins/ \u4e0b\u6709 ${pluginDirs.length} \u4e2a\u76ee\u5f55 \u2014\u2014 \u4e24\u8fb9\u5fc5\u987b\u4e00\u4e00\u5bf9\u5e94`);
       failed++;
     } else {
-      ok(`\u63d2\u4ef6\u884c ${pluginRows} == plugins/ \u76ee\u5f55\u6570 ${pluginDirs.length}` + (idCount > pluginRows ? `\uff08\u53e6\u6709 ${idCount - pluginRows} \u884c\u662f\u4e0a\u6e38 id \u7684\u517c\u5bb9\u8865\u4e01\uff09` : ''));
+      ok(`插件行 ${pluginRows} == plugins/ 目录数 ${pluginDirs.length}`);
+    }
+    for (const row of flatIdRows) {
+      bad(`第 ${row.line} 行是顶层「- id:」+ name: ${row.name} —— 顶层条目只能按 id 定位已有行，**不能新增**；要新增必须写进「- insert:」（见 ops/UPGRADE-DSH.md §4）`);
+      failed++;
     }
     for (const rel of names) {
       if (!rel.startsWith('./')) { info(`name: ${rel}\uff08\u975e\u76f8\u5bf9\u8def\u5f84\uff0c\u8df3\u8fc7\u5b58\u5728\u6027\u68c0\u67e5\uff09`); continue; }

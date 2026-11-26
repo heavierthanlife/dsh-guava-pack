@@ -125,6 +125,7 @@ web boot: 2 required entries did not activate
 | host 启动日志 | ❌ | 0 warning，补丁「成功应用」了 |
 | `--dump-config` | ❌ | 两行照样打印，1 个不多 1 个不少 |
 | `/api/web/listProviders` 之外的服务端接口 | ❌ | 服务端一切正常 |
+| `install.mjs --check`（**旧版**） | ❌ | 曾把多出来的 id 行称作「上游 id 的兼容补丁」并打 ✅ —— 检查器替错误背书了。**2026-11-26 已改成硬断言：顶层 `- id:` 一律判红** |
 | **client manifest 条目数** | ✅ | 79 ≠ 83，缺的正是这两个 |
 
 这就是必须看**浏览器端真正收到的模块清单**的原因 —— 它是唯一能暴露该故障的地方。

@@ -645,11 +645,32 @@ dsh: warning: 2 required entries did not activate
 
 `/api/web/listProviders` 返回 404，供应商路由面板空。
 
-**根因**：`dsh-web-app` bundle 里的 `ui-context-menu` / `ui-file-drag` 两行**进了配置但没生效**，
-浏览器端拿到的 client 模块清单只有 **79 个（正常 83）**，缺这两个包 →
-提供 `contextMenus` / `fileDrag` 服务的模块不存在 → 所有依赖它们的插件永远 pending。
+**根因**（2026-11-26 更正 —— 之前这节记反了）：`dsh-web-app` bundle 插入的
+`ui-context-menu` / `ui-file-drag` 两行**没有进到浏览器端的 client manifest**
+（实测 **79**，正常 **83**），于是提供 `contextMenus` / `fileDrag` 服务的模块不存在，
+所有依赖它们的插件永远 pending。
 
-**判据**（不用看源码，F12 → Console 粘一行）：
+**这个坑是我们自己造的**：2026-11-24 我们误以为"这两行没生效"，于是在 bundle patch 里
+加了 4 行（同 id + 同名、没有 `insert:`，见 `cc9017b`）。按 loader 的 patch 方言：
+
+> **只有 `insert:` 能新增行。** 带 `id` 且没有 `insert` 的 patch **定位已存在的行**，
+> 提供的字段替换该行字段；一个真值 `name` 只是**断言**已有插件名 —— 不改名，更不插入；
+> 匹配不到任何行就告警跳过。
+
+那 4 行正好命中了上游 `dsh-web-app` 已经插入的行，等于给它们盖了个"已被 patch"的章，
+于是它们从 client manifest 里消失。**把那 4 行整段删掉即恢复**（`b78f69e`，79 → 83）。
+
+**为什么极难发现**：host 启动日志 **0 warning**（补丁"成功应用"了）、
+`--dump-config` 里两行**照样打印**、所有服务端接口**一切正常**。
+唯一能暴露它的是浏览器端**真正收到的模块清单**。
+
+**判据**（优先用守卫测试，不用开浏览器）：
+
+```bash
+node tools/tests/client-manifest.mjs     # 正常：83 条、两个模块在列、id 不重复
+```
+
+服务没起时它会明确跳过并 exit 0，不会误报。手工版（F12 → Console）：
 
 ```js
 const u = performance.getEntriesByType('resource').map(e=>e.name).filter(x=>x.includes('/plugins/'));
@@ -657,22 +678,34 @@ const mods = new Set(); for (const x of u){const q=x.split('??')[1]; if(q) for(c
 ({count: mods.size, ctx: u.join().includes('context-menu'), drag: u.join().includes('file-drag')})
 ```
 
-正常：`{count: 83, ctx: true, drag: true}`。`count` 变少就是缺包，别怀疑缓存。
+正常：`{count: 83, ctx: true, drag: true}`。`count` 变少就是缺模块，别先怀疑缓存。
 
-**修法**：在 bundle patch 层把这两行**同 id 同名重声明**一遍（等价于补插）。
-本仓库 `cordis.patch.yml` 末尾「0.2.2-rc.5 兼容补丁」段已经内置，所以通常只需：
+**修法**：
 
 ```bash
-cd ~/dsh/playground/themes/dsh-guava-pack && git pull --rebase
+# 1) 确认 patch 里没有那 4 行（有就删掉；不需要任何替代补丁）
+grep -n 'ui-context-menu\|ui-file-drag' playground/themes/dsh-guava-pack/cordis.patch.yml
+# 2) 重启 host，再跑守卫
 systemctl --user restart dsh.service
+node tools/tests/client-manifest.mjs
+# 3) 浏览器硬刷新一次（Ctrl+Shift+R）：坏掉的客户端图会粘在标签页里
 ```
 
-上游哪天自己修好，这段重声明也无害（同 id 同名，等于没改）。
+**别再补回来**：要新增挂载行只有一种写法 —— 写进 `- insert:`。那 4 行已在
+`b78f69e` 整段删除；`6c227d0` 又把文件里"等价于补插"的错误注释一并清了。
 
-**教训**：**`--dump-config` 里有这一行 ≠ 浏览器里加载了这个模块。**
-我升级前的兼容性核验就栽在这里：组合层全绿（211 个条目、两个 id 都在），
-激活层失败，而安装自检只看磁盘 —— 三层里只验了一层。
-所以新增了 `tools/check-boot.mjs`，把关口设在**启动日志 + 端口**这一层。
+**事故档案（2026-11-26）**：另一台机器照着**旧版** `ops/UPGRADE-DSH.md` 第 4 节
+"同 id 同名重声明一遍"去升级，界面直接空壳，用 pi 修了半天。
+真凶就是那段"修法"本身。修完后：`6c227d0` 重写第 4 节（4.1 成因 / 4.2 为什么难发现 /
+4.3 判据 / 4.4 修法）、新增 `tools/tests/client-manifest.mjs` 并接进 `npm test`。
+
+**教训（两条，都要记住）**：
+
+1. **`--dump-config` 里有这一行 ≠ 浏览器里加载了这个模块。** 组合层 / 激活层 / 客户端层
+   是三件事：`check-boot.mjs` 只看启动日志 + 端口，**天生看不见 client manifest**。
+2. **检查器不能给"不认识的行"开绿灯。** 事故里 `install.mjs --check` 曾把多出来的 2 行
+   称作"上游 id 的 **兼容补丁**"并打 ✅ —— 这句放行话本身把错误固定成了"正常"。
+   现在改成硬断言：顶层 `- id:`（不在 `insert:` 里）一律判红，并点名本节。
 
 **判据**：`node tools/check-boot.mjs` → 「运行态正常」；
 `~/dsh/logs/web-run.log` 最后一段没有 `did not activate`。
