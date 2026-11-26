@@ -17,7 +17,7 @@
 | GUI | `http://127.0.0.1:3080` |
 | 中继入口（手机） | `http://100.109.125.37:22023/go`（VPS 端口 **22023**；主力机是 22022） |
 | SSR 代理 | `http://127.0.0.1:**2099**`（主力机是 2080；`.bashrc` 里 `DSH_SSR_PROXY`） |
-| 会话工作目录 | `/home/guava5tar_/dsh/playground/themes` |
+| 会话工作目录 | `/home/guava5tar_/dsh/playground/themes`（2026-11-26 起这里**只有 `dsh-guava-pack/`**，旧的插件副本已删） |
 
 **两台的关系**：各自独立的 DSH（不同会话/工作目录/插件状态），只共享 VPS 侧的
 Kuma / ntfy / restic 仓库 / miniserve / 控制台(8090)。
@@ -110,7 +110,7 @@ Kuma 监控（VPS `100.109.125.37:3001`）：
 - **live profile 迁移到 `agentrouter-responses`**（11:00，用户批准）：旧 `agentrouter`
   （`anthropic-messages` + 已下线的 `deepseek-v4-flash`）整块替换为 `openai-responses`
   + 三个 gpt 模型；`allowedModels` 补齐为 6 条真实可用的
-  （mimo / gpt-5.6-sol / commandcode）。
+  （mimo / gpt-5.6-sol / antigravity sonnet+opus+gemini / commandcode）。
   用凭证库 key 复核 `/agentrouter/v1/models` 确认上游正是这三个。
   备份留在 `profiles/web/cordis.patch.yml.bak-20261112-1105`。
   `tools/tests/model-policy.mjs` → **150 passed / 0 failed**。
@@ -155,6 +155,31 @@ Kuma 监控（VPS `100.109.125.37:3001`）：
   `plugins/provider-router/start.sh` 会自己 `eval` `.bashrc` 里的 `DSH_*`
   （`router.log` 实测 `DSH_SSR_PROXY=http://127.0.0.1:2099`）；2099 代理实测通
   （google 204）；`config/machines.json` 的 `msi.ssr_proxy` 也是 2099。三方一致。
+
+### 3.9 升级到 0.2.2-rc.5 + 工作区彻底收干净（11-26 晚）
+
+- **DSH 升到 0.2.2-rc.5**（`pnpm add`）。升级后必须重打的补丁已由 pi 补齐：
+  dsh-tools 恒输出 required:[]、pi-ai 两个协议兜底、subagent-control 的
+  `./list-agents` 子路径（0.2.2 上游漏发，缺它任何会话 resume 都报 never started）。
+- **pack 不再钉 `@deepseek-ai/*` 版本**：原先那 5 条 0.2.1-rc.5 依赖是为
+  「pack 在 ~/dsh 之外」准备的，归位后反而**遮住新版** —— dsh-context-acp 会解析到
+  pack 内的旧副本，正是 af44065 警告过的 ACP 引擎静默失配。删掉后与 DSH 共用
+  根目录同一份 0.2.2-rc.5。`undici`/`zod` 仍留在 pack（桥接的 ProxyAgent 必须配对）。
+- **`playground/themes` 下 8 个旧插件副本全部删除**（provider-router / commandcode-bridge /
+  theme-manager / dsh-mobile-ui / dsh-opencode-session-header / dsh-session-purge /
+  dsh-code-theme / dsh-theme-cyberpunk2077）。它们与 pack 内容重复，profile 的 bundles
+  还指着它们；运行时虽由 pack 副本胜出，但属于「改错地方以为生效」的隐患。
+  现在 `playground/themes` 只剩 `dsh-guava-pack/` 与会话记录。
+- **profile bundles 收敛为 3 个**：`@deepseek-ai/dsh-base`、`@deepseek-ai/dsh-web-app`、
+  `dsh-guava-pack`。插件一律由 pack 的 `cordis.patch.yml` 用 `insert:` 挂载。
+- **`mode.json` 归位**：面板/桥接/路由三方共用的活状态从工作区移到
+  `dsh-guava-pack/plugins/provider-router/mode.json`，启动器默认路径同步；
+  同时删掉其中已下线的 `antigravity` 键。**下次找不到 mode.json 就看这里。**
+- **新增守卫测试** `tools/tests/client-manifest.mjs`：解析 `__DSH_BOOT__.entries`，
+  断言 client manifest 有 83 条、`ui-context-menu`/`ui-file-drag` 在列、id 不重复。
+  这是唯一能发现「界面空壳但服务端日志干净」的检查，已进 `npm test`。
+- 仓库卫生：`.gitignore` 忽略 `tunnel.env` 与 `profiles/*/*.bak*`；
+  `playground/review`（一个无关的 LocalAI 克隆）保持未跟踪。
 - **tag 方案已上线**（主力机 `f5aa36f`，10:11）：`restic-backup.sh` 自动打
   `host-<短主机名小写>`；13/13 条历史快照已在 VPS 侧补标（`host-msi`=2、`host-ygy12`=11，
   已实测过滤生效）。`--tag` 与 `--host` 两种过滤都可用，推荐前者。
