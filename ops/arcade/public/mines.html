@@ -13,21 +13,44 @@
 <style>
   .wrap { padding: 14px 16px 30px; }
 
-  /* 棋盘的"面"和"缝"跟着明暗走：亮色模式下留一块黑棋盘会很刺眼。
-     这里只动中性色；数字 1-8 的彩色是玩法信息，放到后面单独给亮色加深版。 */
+  /* ── 经典外观（Windows 95 扫雷）───────────────────────────────────────
+   * 只动中性灰：未翻开的凸起格子、翻开的凹面、LED 数字、笑脸。
+   * 暗色模式不是"黑化经典"，而是把同一套立体关系换个中性色阶，
+   * 免得半夜开一局先被一片 #c0c0c0 晃到。 */
   :root {
-    --cell-line: #2c3440;
-    --cell-face-a: #1e242d;
-    --cell-face-b: #181d25;
-    --cell-press: #29323e;
-    --cell-open-line: #20262e;
+    --face: #c0c0c0;
+    --face-hi: #ffffff;
+    --face-lo: #808080;
+    --opened: #c0c0c0;
+    --grid: #808080;
+    --frame: #c0c0c0;
+    --led-bg: #0a0a0a;
+    --led-off: #3a0f0f;
+    --led-on: #ff2d2d;
+    --num-1: #0000ff;
+    --num-2: #008000;
+    --num-3: #ff0000;
+    --num-4: #000080;
+    --num-5: #800000;
+    --num-6: #008080;
+    --num-7: #000000;
+    --num-8: #808080;
   }
-  html[data-mode="light"] {
-    --cell-line: #b9c4d2;
-    --cell-face-a: #e9eff6;
-    --cell-face-b: #dde5ef;
-    --cell-press: #cfd9e6;
-    --cell-open-line: #c6d0dd;
+  html[data-mode="dark"] {
+    --face: #3f444b;
+    --face-hi: #717a86;
+    --face-lo: #171b1f;
+    --opened: #2b3036;
+    --grid: #1b1f24;
+    --frame: #33383f;
+    --num-1: #6ea8ff;
+    --num-2: #6fdc8c;
+    --num-3: #ff7b7b;
+    --num-4: #9c9cff;
+    --num-5: #ff9c9c;
+    --num-6: #64e0e0;
+    --num-7: #e8edf4;
+    --num-8: #a0a8b0;
   }
 
   /* 顶部"上次没玩完"提示：存在存档才出现，一条就够，不用弹窗 */
@@ -47,7 +70,6 @@
   .resume .resume-msg { flex: 1 1 150px; min-width: 0; line-height: 1.5; }
   .resume .btn { padding: 0 12px; font-size: 13px; }
 
-  /* mountScoreRow 生成 .rec-row；shared.css 只给了 .slot，这里补上记录行 */
   #score-row { margin-bottom: 10px; }
   .rec-row {
     display: flex;
@@ -71,50 +93,101 @@
   .rec-row .rec-val.has { color: var(--accent); }
   .rec-row .btn { padding: 0 12px; font-size: 13px; }
 
-  .seg { display: flex; gap: 8px; margin-bottom: 12px; }
-  .seg .btn { flex: 1 1 0; min-width: 0; padding: 0 6px; font-size: 13px; white-space: nowrap;
-    overflow: hidden; text-overflow: ellipsis; }
+  .seg { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; }
+  .seg .btn { min-width: 0; width: 100%; padding: 0 6px; font-size: 13px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-  .bar { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px; }
-  .stat {
-    min-width: 0;
-    padding: 7px 10px;
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    background: var(--panel);
+  /* 顶栏里有 mountSlots 插进来的按钮：标题必须能收缩，否则窄屏会把明暗按钮顶出去 */
+  .topbar { gap: 8px; }
+  .topbar h1 { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* ── 经典外壳：整块凸起，棋盘凹进去 ─────────────────────────────────── */
+  .classic {
+    width: max-content;
+    max-width: 100%;
+    margin: 0 auto 10px;
+    background: var(--face);
+    border: 2px solid;
+    border-color: var(--face-hi) var(--face-lo) var(--face-lo) var(--face-hi);
+    box-shadow: 1px 1px 0 rgba(0, 0, 0, .35);
+    padding: 5px;
   }
-  .stat .k { display: block; font-size: 11px; letter-spacing: .04em; color: var(--muted); }
-  .stat .v {
+
+  .classic-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 2px 0 5px;
+  }
+  .classic-bar .led { flex: 0 0 auto; }
+  .classic-bar .face { flex: 0 0 auto; }
+
+  /* LED 数字：黑底 + 红色七段 */
+  .led {
+    display: inline-flex;
+    gap: 2px;
+    padding: 2px 3px;
+    background: var(--led-bg);
+    border: 2px solid;
+    border-color: var(--face-lo) var(--face-hi) var(--face-hi) var(--face-lo);
+    line-height: 0;
+  }
+  .dig { position: relative; display: inline-block; width: 12px; height: 20px; }
+  .dig i {
+    position: absolute;
     display: block;
-    font-size: 17px;
-    font-weight: 600;
-    line-height: 1.3;
-    font-variant-numeric: tabular-nums;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    background: var(--led-off);
+    border-radius: 1px;
   }
+  .dig i.on {
+    background: var(--led-on);
+    box-shadow: 0 0 3px color-mix(in srgb, var(--led-on) 65%, transparent);
+  }
+  .dig i.a { left: 2px; top: 0; width: 8px; height: 2px; }
+  .dig i.b { right: 0; top: 2px; width: 2px; height: 7px; }
+  .dig i.c { right: 0; bottom: 2px; width: 2px; height: 7px; }
+  .dig i.d { left: 2px; bottom: 0; width: 8px; height: 2px; }
+  .dig i.e { left: 0; bottom: 2px; width: 2px; height: 7px; }
+  .dig i.f { left: 0; top: 2px; width: 2px; height: 7px; }
+  .dig i.g { left: 2px; top: 9px; width: 8px; height: 2px; }
 
-  .actions { margin-bottom: 8px; }
-  .actions .btn { flex: 1 1 0; min-width: 0; padding: 0 10px; font-size: 13px; }
-  .actions .btn.primary { font-weight: 600; }
+  /* 笑脸：经典凸起按钮，三种表情 */
+  .face {
+    width: 34px;
+    height: 34px;
+    padding: 2px;
+    background: var(--face);
+    border: 2px solid;
+    border-color: var(--face-hi) var(--face-lo) var(--face-lo) var(--face-hi);
+    cursor: pointer;
+    line-height: 0;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .face:active { border-color: var(--face-lo) var(--face-hi) var(--face-hi) var(--face-lo); }
+  .face svg { width: 100%; height: 100%; display: block; }
+  .face g { display: none; }
+  .face[data-face="normal"] .f-normal,
+  .face[data-face="press"] .f-press,
+  .face[data-face="lose"] .f-lose,
+  .face[data-face="win"] .f-win { display: block; }
 
-  .hint { margin: 2px 0 10px; line-height: 1.55; }
-
-  /* 棋盘：页面不横滚，只有这一层可以左右滑（高级 30 列在手机上偏宽） */
-  .board-wrap {
+  /* 棋盘：凹进去的一层，格子之间不留缝（经典是拼死的） */
+  .field {
     max-width: 100%;
     overflow-x: auto;
     overflow-y: hidden;
     overscroll-behavior-x: contain;
     -webkit-overflow-scrolling: touch;
-    padding: 2px 0 8px;
+    border: 2px solid;
+    border-color: var(--face-lo) var(--face-hi) var(--face-hi) var(--face-lo);
+    background: var(--opened);
+    padding: 1px;
   }
 
   #board {
     display: grid;
-    grid-template-columns: repeat(var(--cols, 9), var(--cell, 32px));
-    gap: var(--gap, 2px);
+    grid-template-columns: repeat(var(--cols, 9), var(--cell, 22px));
     width: max-content;
     margin: 0 auto;
     touch-action: manipulation;
@@ -123,18 +196,21 @@
   }
 
   .cell {
-    width: var(--cell, 32px);
-    height: var(--cell, 32px);
+    position: relative;
+    width: var(--cell, 22px);
+    height: var(--cell, 22px);
+    box-sizing: border-box;
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 0;
-    border: 1px solid var(--cell-line);
-    border-radius: 4px;
-    background: linear-gradient(180deg, var(--cell-face-a), var(--cell-face-b));
-    color: var(--text);
-    font: 600 14px/1 system-ui, -apple-system, "Segoe UI", "Noto Sans SC", sans-serif;
-    font-size: calc(var(--cell, 32px) * .56);
+    background: var(--face);
+    /* 未翻开：抬起来的立体感（上/左亮，下/右暗） */
+    border: 2px solid;
+    border-color: var(--face-hi) var(--face-lo) var(--face-lo) var(--face-hi);
+    color: var(--num-7);
+    font: 700 13px/1 Tahoma, "Segoe UI", system-ui, sans-serif;
+    font-size: calc(var(--cell, 22px) * .62);
     font-variant-numeric: tabular-nums;
     cursor: pointer;
     touch-action: manipulation;
@@ -142,53 +218,58 @@
     -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
-    transition: background .08s ease, transform .08s ease, border-color .08s ease;
+    overflow: hidden;
   }
-  .cell:active, .cell.down { background: var(--cell-press); transform: scale(.95); }
-  .cell:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; position: relative; z-index: 1; }
+  /* 按住时：翻过来的"到底了"的感觉（经典按下态） */
+  .cell.down { border-color: var(--face-lo); background: var(--opened); }
+  .cell:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; z-index: 1; }
 
+  /* 翻开：变成平的，只剩细细的网格线 */
   .cell.open {
-    background: var(--panel-2);
-    border-color: var(--cell-open-line);
-    transform: none;
-    font-weight: 700;
+    border-color: var(--grid);
+    background: var(--opened);
+    cursor: default;
   }
-  /* 亮色下翻开的格子要更"平"一点，和凸起的未翻开格子拉开层次 */
-  html[data-mode="light"] .cell.open { background: #f8fafd; }
-  .cell.flag { color: var(--warn); }
-  .cell.mine { color: var(--bad); }
+  .cell.open:active, .cell.open.down { border-color: var(--grid); background: var(--opened); }
+
+  .cell.n1 { color: var(--num-1); }
+  .cell.n2 { color: var(--num-2); }
+  .cell.n3 { color: var(--num-3); }
+  .cell.n4 { color: var(--num-4); }
+  .cell.n5 { color: var(--num-5); }
+  .cell.n6 { color: var(--num-6); }
+  .cell.n7 { color: var(--num-7); }
+  .cell.n8 { color: var(--num-8); }
+
+  /* 旗子与地雷用内联 SVG（data URI）：不联网，任意尺寸都清晰。
+     图形照着 95 版画：红旗 + 黑杆 + 底座；地雷是黑球带高光。 */
+  .cell.flag {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M6 4.2 12 6.6 6 9z' fill='%23d40000'/%3E%3Crect x='5' y='3' width='1.6' height='9' fill='%23111'/%3E%3Crect x='3.4' y='12' width='7.4' height='1.6' fill='%23111'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: 90% 90%;
+  }
+  .cell.mine {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='4.1' fill='%23111'/%3E%3Cpath d='M8 1.6v12.8M1.6 8h12.8M3.5 3.5l9 9M12.5 3.5l-9 9' stroke='%23111' stroke-width='1.3'/%3E%3Ccircle cx='6.6' cy='6.4' r='1' fill='%23fff'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: 92% 92%;
+  }
   .cell.boom {
-    background: color-mix(in srgb, var(--bad) 22%, transparent);
-    border-color: var(--bad);
-    color: var(--text);
+    background-color: #e00000;
+    border-color: var(--grid);
   }
-  .cell.wrong { color: var(--bad); }
-
-  .cell.n1 { color: #6fb6ff; }
-  .cell.n2 { color: #7ee0a8; }
-  .cell.n3 { color: #ff8b8b; }
-  .cell.n4 { color: #b79cff; }
-  .cell.n5 { color: #f5c451; }
-  .cell.n6 { color: #4fd1c5; }
-  .cell.n7 { color: #e8edf4; }
-  .cell.n8 { color: #9aa6b2; }
-
-  /* 数字 1-8 的彩色是玩法信息（扫一眼就知道几颗雷），所以不接 --accent。
-     亮色模式下只压深明度保住对比度，色相与"数字→颜色"的对应关系不变。 */
-  html[data-mode="light"] .cell.n1 { color: #1258a8; }
-  html[data-mode="light"] .cell.n2 { color: #0b7a52; }
-  html[data-mode="light"] .cell.n3 { color: #c8323f; }
-  html[data-mode="light"] .cell.n4 { color: #5b32c4; }
-  html[data-mode="light"] .cell.n5 { color: #8a5a00; }
-  html[data-mode="light"] .cell.n6 { color: #0a7378; }
-  html[data-mode="light"] .cell.n7 { color: #16202e; }
-  html[data-mode="light"] .cell.n8 { color: #52606f; }
-
-  .cell.pulse { animation: cellPulse .34s ease; }
-  @keyframes cellPulse {
-    0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 80%, transparent); }
-    100% { box-shadow: 0 0 0 10px color-mix(in srgb, var(--accent) 0%, transparent); }
+  /* 插错的旗：旗子上打红叉 */
+  .cell.wrong::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(45deg, transparent 44%, #e00000 44%, #e00000 56%, transparent 56%),
+      linear-gradient(-45deg, transparent 44%, #e00000 44%, #e00000 56%, transparent 56%);
   }
+
+  .bestline { margin: 2px 0 10px; line-height: 1.5; }
 
   .banner { display: none; }
   .banner.show {
@@ -211,7 +292,7 @@
 
   @media (max-width: 360px) {
     .seg .btn { font-size: 12px; }
-    .stat .v { font-size: 15px; }
+    .classic-bar { gap: 6px; }
   }
 </style>
 </head>
@@ -235,25 +316,46 @@
     <button type="button" class="btn" data-level="hard" aria-pressed="false">高级 30×16</button>
   </div>
 
-  <div class="bar">
-    <div class="stat"><span class="k">剩余雷</span><span class="v" id="minesLeft">10</span></div>
-    <div class="stat"><span class="k">用时（秒）</span><span class="v" id="time">0.0</span></div>
-    <div class="stat"><span class="k">最佳（秒）</span><span class="v" id="best">--</span></div>
+  <!-- 经典三件套：剩余雷数 / 笑脸 / 用时 -->
+  <div class="classic">
+    <div class="classic-bar">
+      <div class="led" id="ledMines" role="img" aria-label="剩余雷数"></div>
+      <button class="face" id="face" type="button" aria-label="重新开始" data-face="normal">
+        <svg viewBox="0 0 26 26" aria-hidden="true" focusable="false">
+          <circle cx="13" cy="13" r="11.4" fill="#ffe000" stroke="#111" stroke-width="1.6"/>
+          <g class="f-normal">
+            <rect x="7.6" y="8.6" width="2.6" height="2.6" fill="#111"/>
+            <rect x="15.8" y="8.6" width="2.6" height="2.6" fill="#111"/>
+            <path d="M7.8 15.6c1.8 2.6 8.6 2.6 10.4 0" stroke="#111" stroke-width="1.7" fill="none" stroke-linecap="round"/>
+          </g>
+          <g class="f-press">
+            <rect x="7.6" y="7.8" width="2.6" height="2.6" fill="#111"/>
+            <rect x="15.8" y="7.8" width="2.6" height="2.6" fill="#111"/>
+            <circle cx="13" cy="16.6" r="2.4" fill="#111"/>
+          </g>
+          <g class="f-lose">
+            <path d="M6.8 6.8l4 4M10.8 6.8l-4 4M15.2 6.8l4 4M19.2 6.8l-4 4" stroke="#111" stroke-width="1.7" stroke-linecap="round"/>
+            <path d="M7.8 18.4c1.8-2.4 8.6-2.4 10.4 0" stroke="#111" stroke-width="1.7" fill="none" stroke-linecap="round"/>
+          </g>
+          <g class="f-win">
+            <rect x="5.6" y="8.4" width="14.8" height="4.6" rx="1" fill="#111"/>
+            <path d="M9 17.6c1.6 1.6 6.4 1.6 8 0" stroke="#111" stroke-width="1.7" fill="none" stroke-linecap="round"/>
+          </g>
+        </svg>
+      </button>
+      <div class="led" id="ledTime" role="img" aria-label="用时（秒）"></div>
+    </div>
+
+    <div class="field" id="boardWrap">
+      <div id="board" role="grid" aria-label="扫雷棋盘"></div>
+    </div>
   </div>
+
+  <p class="hint small muted" id="hint">左键翻开 · 右键插旗 / 再右键取消 · 中键和弦（触屏：轻点翻开 · 长按插旗）</p>
+  <p class="bestline small muted" id="best">最佳 --</p>
 
   <!-- 三档最高分 + 就地删除（mountScoreRow 渲染） -->
   <div id="score-row"></div>
-
-  <div class="row actions">
-    <button type="button" class="btn" id="restart">重开</button>
-    <button type="button" class="btn ghost" id="flagMode" aria-pressed="false">🚩 插旗模式</button>
-  </div>
-
-  <p class="hint small muted" id="hint">轻点翻开 · 长按 0.4 秒或右键插旗</p>
-
-  <div class="board-wrap" id="boardWrap">
-    <div id="board" role="grid" aria-label="扫雷棋盘"></div>
-  </div>
 
   <div class="banner" id="banner" role="status" aria-live="polite"></div>
 
@@ -263,7 +365,147 @@
 (function () {
   'use strict';
 
-  var LONG_PRESS_MS = 400;
+  /* PURE:START —— 纯逻辑（不碰 DOM）：tools/tests/mines-logic.mjs 直接抽这一段跑断言。
+   * 操作语义对齐经典 95 版：
+   *   · 左键翻开；旗子格左键**无效**（不会点爆）
+   *   · 右键插旗；再右键取消；旗数不设上限（计数器会变负数，经典行为）
+   *   · 已翻开的数字格：中键/双键和弦（周围旗数 == 数字时，翻开其余邻格）
+   *   · 首点安全：第一下点开的格子及其八邻不布雷 */
+  var LONG_PRESS_MS = 420;
+
+  function createGame(rows, cols, mineCount) {
+    var total = rows * cols;
+    return {
+      rows: rows, cols: cols, total: total, mineCount: mineCount,
+      mines: new Uint8Array(total),
+      adj: new Uint8Array(total),
+      /* 每格状态：0 未翻开 / 1 已翻开 / 2 插旗 */
+      state: new Uint8Array(total),
+      opened: 0, flags: 0, started: false
+    };
+  }
+
+  function neighbors(g, i) {
+    var out = [];
+    var r = (i / g.cols) | 0;
+    var c = i % g.cols;
+    for (var dr = -1; dr <= 1; dr++) {
+      for (var dc = -1; dc <= 1; dc++) {
+        if (!dr && !dc) continue;
+        var rr = r + dr;
+        var cc = c + dc;
+        if (rr >= 0 && cc >= 0 && rr < g.rows && cc < g.cols) out.push(rr * g.cols + cc);
+      }
+    }
+    return out;
+  }
+
+  function placeMines(g, safe) {
+    var banned = {};
+    banned[safe] = true;
+    var nb = neighbors(g, safe);
+    for (var b = 0; b < nb.length; b++) banned[nb[b]] = true;
+
+    var pool = [];
+    for (var i = 0; i < g.total; i++) if (!banned[i]) pool.push(i);
+    /* 密度极高（比如 9×9 摆 70 颗）时退化为"只保证首点不是雷" */
+    if (pool.length < g.mineCount) {
+      pool = [];
+      for (var j = 0; j < g.total; j++) if (j !== safe) pool.push(j);
+    }
+    for (var k = 0; k < g.mineCount; k++) {
+      var pick = k + Math.floor(Math.random() * (pool.length - k));
+      var tmp = pool[k];
+      pool[k] = pool[pick];
+      pool[pick] = tmp;
+      g.mines[pool[k]] = 1;
+    }
+    computeAdj(g);
+  }
+
+  function computeAdj(g) {
+    for (var p = 0; p < g.total; p++) {
+      if (g.mines[p]) { g.adj[p] = 0; continue; }
+      var nb = neighbors(g, p);
+      var n = 0;
+      for (var k = 0; k < nb.length; k++) if (g.mines[nb[k]]) n++;
+      g.adj[p] = n;
+    }
+  }
+
+  function floodOpen(g, start) {
+    if (g.state[start] !== 0 || g.mines[start]) return;
+    g.state[start] = 1;
+    g.opened++;
+    if (g.adj[start] !== 0) return;
+    var stack = [start];
+    while (stack.length) {
+      var cur = stack.pop();
+      var nb = neighbors(g, cur);
+      for (var k = 0; k < nb.length; k++) {
+        var n = nb[k];
+        if (g.state[n] !== 0 || g.mines[n]) continue;
+        g.state[n] = 1;
+        g.opened++;
+        if (g.adj[n] === 0) stack.push(n);
+      }
+    }
+  }
+
+  /** 左键：翻开。旗子格 / 已开格返回 changed:false（旗子保护，经典行为）。 */
+  function reveal(g, i) {
+    if (g.state[i] !== 0) return { changed: false, hit: false };
+    if (!g.started) { g.started = true; placeMines(g, i); }
+    if (g.mines[i]) {
+      g.state[i] = 1;
+      g.opened++;
+      return { changed: true, hit: true };
+    }
+    floodOpen(g, i);
+    return { changed: true, hit: false };
+  }
+
+  /** 右键：插旗 / 取消插旗。已翻开的格子不能插旗。 */
+  function toggleFlag(g, i) {
+    if (g.state[i] === 1) return false;
+    if (g.state[i] === 2) { g.state[i] = 0; g.flags--; return true; }
+    g.state[i] = 2;
+    g.flags++;
+    return true;
+  }
+
+  function flagsAround(g, i) {
+    var nb = neighbors(g, i);
+    var f = 0;
+    for (var k = 0; k < nb.length; k++) if (g.state[nb[k]] === 2) f++;
+    return f;
+  }
+
+  /** 和弦：只在"已翻开的数字格"且"周围旗数 == 数字"时成立。 */
+  function canChord(g, i) {
+    return g.state[i] === 1 && g.adj[i] > 0 && flagsAround(g, i) === g.adj[i];
+  }
+
+  function chord(g, i) {
+    if (!canChord(g, i)) return { changed: false, hit: false };
+    var hit = false;
+    var opened = false;
+    var nb = neighbors(g, i);
+    for (var k = 0; k < nb.length; k++) {
+      var n = nb[k];
+      if (g.state[n] !== 0) continue;
+      var r = reveal(g, n);
+      if (r.changed) opened = true;
+      if (r.hit) hit = true;
+    }
+    return { changed: opened || hit, hit: hit };
+  }
+
+  function isWin(g) {
+    return g.opened === g.total - g.mineCount;
+  }
+  /* PURE:END */
+
   var LEVELS = {
     easy:   { rows: 9,  cols: 9,  mines: 10, label: '初级' },
     medium: { rows: 16, cols: 16, mines: 40, label: '中级' },
@@ -273,31 +515,29 @@
 
   var elBoard = document.getElementById('board');
   var elWrap = document.getElementById('boardWrap');
-  var elMines = document.getElementById('minesLeft');
-  var elTime = document.getElementById('time');
+  var elLedMines = document.getElementById('ledMines');
+  var elLedTime = document.getElementById('ledTime');
+  var elFace = document.getElementById('face');
   var elBest = document.getElementById('best');
   var elHint = document.getElementById('hint');
   var elBanner = document.getElementById('banner');
-  var elRestart = document.getElementById('restart');
-  var elFlagMode = document.getElementById('flagMode');
   var elMode = document.getElementById('mode');
   var elScoreRow = document.getElementById('score-row');
   var elResume = document.getElementById('resumeHint');
 
-  var S = {
-    rows: 9, cols: 9, total: 81, mineCount: 10,
-    mines: null, adj: null, state: null,
-    started: false, over: false, won: false, paused: false,
-    opened: 0, flags: 0,
-    flagMode: false, boom: -1
-  };
-
+  var G = createGame(9, 9, 10);
   var level = 'easy';
   var cells = [];
   var focusIdx = 0;
   var best = {};
   var scoreRow = null;
   var slotStore = null;
+
+  var paused = false;
+  var won = false;
+  var over = false;
+  var boom = -1;
+  var pressing = false;
 
   var press = null;
   var suppressCtxUntil = 0;
@@ -306,19 +546,78 @@
   var tStart = 0;
   var elapsedAcc = 0;
 
+  /* ── LED 七段显示 ─────────────────────────────────────── */
+  var SEGMENTS = {
+    '0': 'abcdef', '1': 'bc', '2': 'abged', '3': 'abgcd', '4': 'fgbc',
+    '5': 'afgcd', '6': 'afgedc', '7': 'abc', '8': 'abcdefg', '9': 'abcdfg',
+    '-': 'g', ' ': ''
+  };
+
+  function buildLed(el) {
+    el.textContent = '';
+    el.__digits = [];
+    for (var d = 0; d < 3; d++) {
+      var dig = document.createElement('span');
+      dig.className = 'dig';
+      for (var k = 0; k < 7; k++) {
+        var seg = document.createElement('i');
+        seg.className = 'abcdefg'.charAt(k);
+        dig.appendChild(seg);
+      }
+      el.appendChild(dig);
+      el.__digits.push(dig);
+    }
+  }
+
+  function setLed(el, text) {
+    if (!el || !el.__digits) return;
+    for (var d = 0; d < 3; d++) {
+      var ch = text.charAt(d) || ' ';
+      var on = SEGMENTS[ch] || '';
+      var dig = el.__digits[d];
+      for (var k = 0; k < 7; k++) {
+        var name = 'abcdefg'.charAt(k);
+        var seg = dig.children[k];
+        seg.className = on.indexOf(name) >= 0 ? name + ' on' : name;
+      }
+    }
+  }
+
+  /** 经典三段式：负号占最左一位（-01），上限 999。 */
+  function ledText(value, max) {
+    var v = Math.max(-99, Math.min(max, Math.round(value)));
+    if (v < 0) {
+      var abs = Math.min(99, -v);
+      return '-' + String(abs < 10 ? '0' + abs : abs);
+    }
+    var s = String(Math.min(max, v));
+    while (s.length < 3) s = '0' + s;
+    return s;
+  }
+
+  function paintHud() {
+    setLed(elLedMines, ledText(G.mineCount - G.flags, 999));
+    setLed(elLedTime, ledText(elapsedMs() / 1000, 999));
+    paintBest();
+  }
+
+  function paintFace() {
+    if (!elFace) return;
+    var state = 'normal';
+    if (over) state = won ? 'win' : 'lose';
+    else if (pressing) state = 'press';
+    elFace.setAttribute('data-face', state);
+  }
+
   /* ── 最高分 ───────────────────────────────────────────────
-   * 读写全部走 Arcade（键 arcade.mines.best，结构 {easy,medium,hard}），
-   * 持久化全部经 Arcade（内部已有 try/catch），本页不再直接碰浏览器存储。
-   * 值的历史口径是**毫秒**（本页 fmtMs 除以 1000 显示）；早期版本可能按
-   * "秒"写过，normalizeBest 统一折成毫秒，比较才不会错一个数量级。
-   * 每次显示都重新从存储读：页内删掉记录后 HUD 不会还挂着一份旧值。
+   * 读写全部走 Arcade（键 arcade.mines.best，结构 {easy,medium,hard}）。
+   * 值的历史口径是**毫秒**；早期版本可能按"秒"写过，normalizeBest 折成毫秒。
    */
-  var bestMemory = {};   // 存储写不进去时（隐私模式）本会话仍能看到成绩
+  var bestMemory = {};
 
   function normalizeBest(v) {
     var n = typeof v === 'number' ? v : Number(v);
     if (!isFinite(n) || n <= 0) return 0;
-    /* 毫秒记录必然 >= 1000；更小的数只可能来自"秒"口径的旧记录 */
     return n < 1000 ? n * 1000 : n;
   }
 
@@ -326,7 +625,6 @@
     var out = {};
     var data = Arcade.getScore('mines');
     if (typeof data === 'number') {
-      /* 更早版本存过单个数值：当作每一档的历史最佳 */
       var all = normalizeBest(data);
       if (all > 0) {
         for (var j = 0; j < LEVEL_KEYS.length; j++) out[LEVEL_KEYS[j]] = all;
@@ -338,7 +636,6 @@
         if (ms > 0) out[k] = ms;
       }
     }
-    /* 写失败时的兜底：只补存储里没有的档，不会把已删除的记录"复活" */
     for (var m = 0; m < LEVEL_KEYS.length; m++) {
       var key = LEVEL_KEYS[m];
       if (!out[key] && bestMemory[key]) out[key] = bestMemory[key];
@@ -349,7 +646,6 @@
 
   function saveBest() {
     if (!Arcade.writeJSON('mines.best', best)) {
-      /* 存储不可用：本会话先记在内存里，刷新即丢（与 Arcade 的降级策略一致） */
       bestMemory = {};
       for (var i = 0; i < LEVEL_KEYS.length; i++) {
         if (best[LEVEL_KEYS[i]]) bestMemory[LEVEL_KEYS[i]] = best[LEVEL_KEYS[i]];
@@ -360,9 +656,9 @@
   }
 
   /* ── 计时 ─────────────────────────────────────────────── */
-  function fmtMs(ms) {
+  function secs(ms) {
     if (!isFinite(ms) || ms < 0) ms = 0;
-    return (ms / 1000).toFixed(1);
+    return Math.round(ms / 1000);
   }
 
   function elapsedMs() {
@@ -370,26 +666,22 @@
   }
 
   function paintClock() {
-    if (elTime) elTime.textContent = fmtMs(elapsedMs());
+    setLed(elLedTime, ledText(elapsedMs() / 1000, 999));
   }
 
   function startTimer() {
-    if (timerRunning || S.over || S.won || S.paused) return;
+    if (timerRunning || over || won || paused) return;
     timerRunning = true;
     tStart = Date.now();
-    if (timerId === null) {
-      timerId = setInterval(paintClock, 100);
-    }
+    if (timerId === null) timerId = setInterval(paintClock, 200);
   }
 
   function stopTimer() {
     if (!timerRunning) return;
     elapsedAcc += Date.now() - tStart;
     timerRunning = false;
-    if (timerId !== null) {
-      clearInterval(timerId);
-      timerId = null;
-    }
+    if (timerId !== null) { clearInterval(timerId); timerId = null; }
+    paintClock();
   }
 
   function resetTimer() {
@@ -398,28 +690,20 @@
     paintClock();
   }
 
-  /* ── 存档展示 ─────────────────────────────────────────── */
   function paintBest() {
+    if (!elBest) return;
     var b = syncBest()[level];
-    elBest.textContent = b ? fmtMs(b) : '--';
-  }
-
-  function paintHud() {
-    elMines.textContent = String(S.mineCount - S.flags);
-    paintBest();
-    paintClock();
+    elBest.textContent = '最佳 ' + LEVELS[level].label + '：' + (b ? secs(b) + 's' : '--');
   }
 
   /* ── 棋盘尺寸 ─────────────────────────────────────────── */
   function layout() {
     var avail = elWrap ? elWrap.clientWidth : 320;
     if (!avail || avail < 80) avail = Math.max(240, window.innerWidth - 32);
-    var gap = S.cols > 20 ? 1 : 2;
-    elBoard.style.setProperty('--gap', gap + 'px');
-    elBoard.style.setProperty('--cols', String(S.cols));
-    var fit = Math.floor((avail - gap * (S.cols - 1)) / S.cols);
-    /* 小屏也不小于 18px，否则点不准；高级超宽时交给容器横向滚动 */
-    var size = Math.max(18, Math.min(40, fit));
+    elBoard.style.setProperty('--cols', String(G.cols));
+    /* 经典是 16px 的格子；手机上按宽度铺满，最小 20px（再小就点不准了） */
+    var fit = Math.floor((avail - 4) / G.cols);
+    var size = Math.max(20, Math.min(32, fit));
     elBoard.style.setProperty('--cell', size + 'px');
   }
 
@@ -428,21 +712,12 @@
     if (nextLevel && LEVELS[nextLevel]) level = nextLevel;
     var cfg = LEVELS[level];
 
-    S.rows = cfg.rows;
-    S.cols = cfg.cols;
-    S.total = cfg.rows * cfg.cols;
-    S.mineCount = cfg.mines;
-    S.mines = new Uint8Array(S.total);
-    S.adj = new Uint8Array(S.total);
-    S.state = new Uint8Array(S.total);
-    S.started = false;
-    S.over = false;
-    S.won = false;
-    S.paused = false;
-    S.opened = 0;
-    S.flags = 0;
-    S.boom = -1;
-
+    G = createGame(cfg.rows, cfg.cols, cfg.mines);
+    paused = false;
+    over = false;
+    won = false;
+    boom = -1;
+    pressing = false;
     focusIdx = 0;
     cancelPress();
     resetTimer();
@@ -451,17 +726,17 @@
     layout();
     render(true);
     paintHud();
+    paintFace();
     paintLevels();
-    paintHint();
   }
 
   function buildCells() {
     elBoard.textContent = '';
-    elBoard.setAttribute('aria-rowcount', String(S.rows));
-    elBoard.setAttribute('aria-colcount', String(S.cols));
-    cells = new Array(S.total);
+    elBoard.setAttribute('aria-rowcount', String(G.rows));
+    elBoard.setAttribute('aria-colcount', String(G.cols));
+    cells = new Array(G.total);
     var frag = document.createDocumentFragment();
-    for (var i = 0; i < S.total; i++) {
+    for (var i = 0; i < G.total; i++) {
       var d = document.createElement('div');
       d.className = 'cell';
       d.setAttribute('role', 'gridcell');
@@ -473,227 +748,51 @@
     elBoard.appendChild(frag);
   }
 
-  /* ── 布雷 / 展开 ──────────────────────────────────────── */
-  function placeMines(safe) {
-    var banned = {};
-    banned[safe] = true;
-    var sr = (safe / S.cols) | 0;
-    var sc = safe % S.cols;
-    for (var dr = -1; dr <= 1; dr++) {
-      for (var dc = -1; dc <= 1; dc++) {
-        var r = sr + dr;
-        var c = sc + dc;
-        if (r >= 0 && c >= 0 && r < S.rows && c < S.cols) banned[r * S.cols + c] = true;
-      }
-    }
-
-    var pool = [];
-    for (var i = 0; i < S.total; i++) {
-      if (!banned[i]) pool.push(i);
-    }
-    /* 密度极高时退化为“只保证首点不是雷” */
-    if (pool.length < S.mineCount) {
-      pool = [];
-      for (var j = 0; j < S.total; j++) {
-        if (j !== safe) pool.push(j);
-      }
-    }
-
-    for (var k = 0; k < S.mineCount; k++) {
-      var pick = k + Math.floor(Math.random() * (pool.length - k));
-      var tmp = pool[k];
-      pool[k] = pool[pick];
-      pool[pick] = tmp;
-      S.mines[pool[k]] = 1;
-    }
-
-    computeAdj();
-  }
-
-  /** 由雷区重算每格的邻雷数。恢复存档时也走这里，不信存档里的冗余数字。 */
-  function computeAdj() {
-    for (var p = 0; p < S.total; p++) {
-      if (S.mines[p]) {
-        S.adj[p] = 0;
-        continue;
-      }
-      var pr = (p / S.cols) | 0;
-      var pc = p % S.cols;
-      var n = 0;
-      for (var ar = -1; ar <= 1; ar++) {
-        for (var ac = -1; ac <= 1; ac++) {
-          if (!ar && !ac) continue;
-          var rr = pr + ar;
-          var cc = pc + ac;
-          if (rr < 0 || cc < 0 || rr >= S.rows || cc >= S.cols) continue;
-          if (S.mines[rr * S.cols + cc]) n++;
-        }
-      }
-      S.adj[p] = n;
-    }
-  }
-
-  function openZone(start) {
-    var stack = [start];
-    while (stack.length) {
-      var cur = stack.pop();
-      var cr = (cur / S.cols) | 0;
-      var cc = cur % S.cols;
-      for (var dr = -1; dr <= 1; dr++) {
-        for (var dc = -1; dc <= 1; dc++) {
-          if (!dr && !dc) continue;
-          var r = cr + dr;
-          var c = cc + dc;
-          if (r < 0 || c < 0 || r >= S.rows || c >= S.cols) continue;
-          var n = r * S.cols + c;
-          if (S.state[n] !== 0 || S.mines[n]) continue;
-          S.state[n] = 1;
-          S.opened++;
-          if (S.adj[n] === 0) stack.push(n);
-        }
-      }
-    }
-  }
-
-  function revealCell(i) {
-    if (S.over || S.won || S.paused) return;
-    if (S.state[i] !== 0) return;
-
-    if (!S.started) {
-      S.started = true;
-      placeMines(i);
-      startTimer();
-    }
-
-    if (S.mines[i]) {
-      lose(i);
-      return;
-    }
-
-    S.state[i] = 1;
-    S.opened++;
-    if (S.adj[i] === 0) openZone(i);
-
-    render();
-    paintHud();
-    checkWin();
-  }
-
-  function flagCell(i) {
-    if (S.over || S.won || S.paused) return;
-    if (S.state[i] === 1) return;
-
-    if (S.state[i] === 2) {
-      S.state[i] = 0;
-      S.flags--;
-    } else {
-      if (S.flags >= S.mineCount) return;
-      S.state[i] = 2;
-      S.flags++;
-    }
-
-    render();
-    paintHud();
-  }
-
-  function checkWin() {
-    if (S.over || S.won) return;
-    if (S.opened === S.total - S.mineCount) win();
-  }
-
-  function win() {
-    S.won = true;
-    S.over = true;
-    stopTimer();
-
-    /* 先把插错的旗撤掉，再把剩下的雷补齐，旗数才和雷数对得上 */
-    for (var i = 0; i < S.total; i++) {
-      if (S.state[i] === 2 && !S.mines[i]) S.state[i] = 0;
-    }
-    S.flags = 0;
-    for (var k = 0; k < S.total; k++) {
-      if (S.mines[k] && S.state[k] === 0) S.state[k] = 2;
-      if (S.state[k] === 2) S.flags++;
-    }
-
-    var ms = elapsedMs();
-    var record = false;
-    syncBest();   /* 页内可能刚删过记录：比较前先按存储里的现状来 */
-    if (!best[level] || ms < best[level]) {
-      best[level] = ms;
-      saveBest();
-      record = true;
-    }
-
-    render(true);
-    paintHud();
-    if (scoreRow) scoreRow.refresh();
-    var msg = '🎉 全部扫清 · 用时 ' + fmtMs(ms) + ' 秒' + (record ? ' · 新纪录！' : '');
-    showBanner('win', msg);
-  }
-
-  function lose(hit) {
-    S.over = true;
-    S.won = false;
-    S.boom = hit;
-    S.state[hit] = 1;
-    S.opened++;
-    stopTimer();
-    render(true);
-    paintHud();
-    showBanner('lose', '💣 踩到雷了 · 用时 ' + fmtMs(elapsedMs()) + ' 秒');
-  }
-
   /* ── 渲染 ─────────────────────────────────────────────── */
   function paintCell(i, force) {
     var d = cells[i];
     if (!d) return;
-    var st = S.state[i];
+    var st = G.state[i];
     var cls = 'cell';
-    var text = '';
     var what = '未翻开';
-    var row = ((i / S.cols) | 0) + 1;
-    var col = (i % S.cols) + 1;
+    var row = ((i / G.cols) | 0) + 1;
+    var col = (i % G.cols) + 1;
 
     if (st === 1) {
       cls += ' open';
-      if (S.mines[i]) {
+      if (G.mines[i]) {
         cls += ' mine';
-        text = '✹';
         what = '地雷';
-      } else if (S.adj[i] > 0) {
-        cls += ' n' + S.adj[i];
-        text = String(S.adj[i]);
-        what = S.adj[i] + ' 个相邻雷';
+      } else if (G.adj[i] > 0) {
+        cls += ' n' + G.adj[i];
+        what = G.adj[i] + ' 个相邻雷';
       } else {
         what = '空白';
       }
     } else if (st === 2) {
       cls += ' flag';
-      text = '⚑';
       what = '已插旗';
-      if (S.over && !S.mines[i]) {
+      if (over && !G.mines[i]) {
         cls += ' wrong';
         what = '插错的旗';
       }
-    } else if (S.over && S.mines[i]) {
+    } else if (over && G.mines[i]) {
       cls += ' mine';
-      text = '✹';
       what = '地雷';
     }
 
-    if (i === S.boom) cls += ' boom';
+    if (i === boom) cls += ' boom';
 
-    var sig = cls + '|' + text + '|' + what;
+    var sig = cls + '|' + what;
     if (!force && d.__sig === sig) return;
     d.__sig = sig;
     d.className = cls;
-    d.textContent = text;
+    d.textContent = (st === 1 && !G.mines[i] && G.adj[i] > 0) ? String(G.adj[i]) : '';
     d.setAttribute('aria-label', '第' + row + '行第' + col + '列，' + what);
   }
 
   function render(force) {
-    for (var i = 0; i < S.total; i++) paintCell(i, force);
+    for (var i = 0; i < G.total; i++) paintCell(i, force);
   }
 
   function focusCell(i) {
@@ -701,22 +800,7 @@
     if (cells[focusIdx] && cells[focusIdx] !== cells[i]) cells[focusIdx].tabIndex = -1;
     focusIdx = i;
     cells[i].tabIndex = 0;
-    try {
-      cells[i].focus();
-    } catch (err) {
-      /* 某些环境 focus 不可用，忽略 */
-    }
-  }
-
-  /* ── 提示 / 按钮状态 ──────────────────────────────────── */
-  function paintHint() {
-    if (S.flagMode) {
-      elHint.textContent = '插旗模式：轻点插旗 · 再点取消 · 长按翻开';
-    } else if (level === 'hard') {
-      elHint.textContent = '轻点翻开 · 长按 0.4 秒或右键插旗 · 棋盘偏宽可左右滑动';
-    } else {
-      elHint.textContent = '轻点翻开 · 长按 0.4 秒或右键插旗';
-    }
+    try { cells[i].focus(); } catch (err) { /* 个别环境 focus 不可用 */ }
   }
 
   function paintLevels() {
@@ -729,13 +813,7 @@
     }
   }
 
-  /**
-   * 底部状态条：胜利 / 踩雷 / 暂停共用同一个壳。
-   *
-   * @param {string} kind win | lose | paused
-   * @param {string} text
-   * @param {Array} [actions] [{label, primary, onClick}]；默认是"再来一局"
-   */
+  /* ── 底部状态条 ───────────────────────────────────────── */
   function showBanner(kind, text, actions) {
     elBanner.textContent = '';
     elBanner.className = 'banner show ' + kind;
@@ -764,91 +842,314 @@
     elBanner.textContent = '';
   }
 
-  /* ── 暂停 / 继续 ────────────────────────────────────────
-   * 读档后必须停在这里：计时不走，等用户主动点"继续"。
-   * 这样"打开一个旧档"不会白送几秒，也不会一恢复就被手滑打开格子。
-   */
+  /* ── 暂停 / 继续 ──────────────────────────────────────── */
   function pauseGame(text) {
-    if (S.over || S.won) return;
-    S.paused = true;
+    if (over || won) return;
+    paused = true;
     cancelPress();
     stopTimer();
-    paintClock();
-    showBanner(
-      'paused',
-      text || ('已暂停 · 计时停在 ' + fmtMs(elapsedMs()) + ' 秒'),
-      [
-        { label: '继续', primary: true, onClick: resumeGame },
-        { label: '重开', onClick: function () { newGame(); } }
-      ]
-    );
+    showBanner('paused', text || ('已暂停 · 计时停在 ' + secs(elapsedMs()) + ' 秒'), [
+      { label: '继续', primary: true, onClick: resumeGame },
+      { label: '重开', onClick: function () { newGame(); } }
+    ]);
   }
 
   function resumeGame() {
-    if (!S.paused) return;
-    S.paused = false;
+    if (!paused) return;
+    paused = false;
     hideBanner();
     paintClock();
-    if (S.started && !S.over && !S.won) startTimer();
+    if (G.started && !over && !won) startTimer();
   }
 
-  /* ── 存档槽：capture / restore / onPause ─────────────────
-   * mountSlots 负责面板、自动存档、淘汰；这里只回答三件事：
-   *   当前局面是什么（capture）、怎么把局面放回去（restore）、离开时怎么停（onPause）。
-   */
+  /* ── 胜负 ─────────────────────────────────────────────── */
+  function checkWin() {
+    if (over || won) return;
+    if (isWin(G)) win();
+  }
 
-  /** 当前局面 → 可 JSON 序列化的快照；null = 现在没东西可存。 */
+  function win() {
+    won = true;
+    over = true;
+    stopTimer();
+
+    /* 插错的旗先撤掉，再把剩下的雷补齐（经典收尾：所有雷自动插旗） */
+    for (var i = 0; i < G.total; i++) {
+      if (G.state[i] === 2 && !G.mines[i]) G.state[i] = 0;
+    }
+    G.flags = 0;
+    for (var k = 0; k < G.total; k++) {
+      if (G.mines[k] && G.state[k] === 0) G.state[k] = 2;
+      if (G.state[k] === 2) G.flags++;
+    }
+
+    var ms = elapsedMs();
+    var record = false;
+    syncBest();
+    if (!best[level] || ms < best[level]) {
+      best[level] = ms;
+      saveBest();
+      record = true;
+    }
+
+    render(true);
+    paintHud();
+    paintFace();
+    if (scoreRow) scoreRow.refresh();
+    var msg = '🎉 雷区清空 · 用时 ' + secs(ms) + ' 秒' + (record ? ' · 新纪录！' : '');
+    showBanner('win', msg);
+  }
+
+  function lose(hit) {
+    over = true;
+    won = false;
+    boom = hit;
+    stopTimer();
+    render(true);
+    paintHud();
+    paintFace();
+    showBanner('lose', '💣 踩雷了 · 用时 ' + secs(elapsedMs()) + ' 秒');
+  }
+
+  /* ── 操作 ─────────────────────────────────────────────── */
+  function afterChange(hit) {
+    render();
+    paintHud();
+    if (hit) { lose(findBoom()); return; }
+    checkWin();
+  }
+
+  /* reveal() 把踩中的雷置成了 opened；从状态里找出它（只有一个） */
+  function findBoom() {
+    for (var i = 0; i < G.total; i++) if (G.mines[i] && G.state[i] === 1) return i;
+    return -1;
+  }
+
+  function actReveal(i) {
+    if (over || paused) return;
+    var wasStarted = G.started;
+    var r = reveal(G, i);
+    if (!r.changed) return;
+    if (!wasStarted) startTimer();
+    afterChange(r.hit);
+  }
+
+  function actFlag(i) {
+    if (over || paused) return;
+    if (toggleFlag(G, i)) { render(); paintHud(); }
+  }
+
+  function actChord(i) {
+    if (over || paused) return;
+    var r = chord(G, i);
+    if (!r.changed) return;
+    afterChange(r.hit);
+  }
+
+  function tapAction(i) {
+    actReveal(i);
+  }
+
+  function longAction(i) {
+    actFlag(i);
+  }
+
+  /* ── 触摸 / 鼠标 ──────────────────────────────────────── */
+  function vibrate() {
+    try {
+      if (navigator && typeof navigator.vibrate === 'function') navigator.vibrate(12);
+    } catch (err) { /* 不支持就算 */ }
+  }
+
+  function cellAt(e) {
+    var t = e.target && e.target.closest ? e.target.closest('.cell') : null;
+    if (!t || !elBoard.contains(t)) return -1;
+    var idx = parseInt(t.getAttribute('data-i'), 10);
+    return isNaN(idx) ? -1 : idx;
+  }
+
+  function cancelPress() {
+    if (!press) return;
+    if (press.timer !== null) clearTimeout(press.timer);
+    if (press.cell && press.cell.classList) press.cell.classList.remove('down');
+    press = null;
+    pressing = false;
+    paintFace();
+  }
+
+  function markPulse(i) {
+    var d = cells[i];
+    if (!d || !d.classList) return;
+    d.classList.add('pulse');
+    setTimeout(function () { d.classList.remove('pulse'); }, 360);
+  }
+
+  elBoard.addEventListener('pointerdown', function (e) {
+    if (over || paused) return;
+    /* 中键 = 和弦（经典的双键同时按，桌面上用中键更稳） */
+    if (e.button === 1) {
+      e.preventDefault();
+      var ci = cellAt(e);
+      if (ci >= 0) actChord(ci);
+      return;
+    }
+    if (e.button !== 0) return;
+    var idx = cellAt(e);
+    if (idx < 0) return;
+
+    cancelPress();
+    pressing = true;
+    paintFace();
+    var cell = cells[idx];
+    if (cell && cell.classList) cell.classList.add('down');
+
+    press = {
+      i: idx, cell: cell, id: e.pointerId,
+      x: typeof e.clientX === 'number' ? e.clientX : 0,
+      y: typeof e.clientY === 'number' ? e.clientY : 0,
+      long: false, timer: null
+    };
+    press.timer = setTimeout(function () {
+      if (!press) return;
+      press.long = true;
+      /* 长按已处理：随后浏览器补发的 contextmenu 别再插一次旗 */
+      suppressCtxUntil = Date.now() + 900;
+      longAction(idx);
+      vibrate();
+      markPulse(idx);
+    }, LONG_PRESS_MS);
+  });
+
+  elBoard.addEventListener('pointermove', function (e) {
+    if (!press) return;
+    if (press.id !== undefined && e.pointerId !== undefined && press.id !== e.pointerId) return;
+    var dx = (e.clientX || 0) - press.x;
+    var dy = (e.clientY || 0) - press.y;
+    /* 手指在动 = 想滑动棋盘，放弃长按 */
+    if (dx * dx + dy * dy > 144) cancelPress();
+  });
+
+  elBoard.addEventListener('pointerup', function (e) {
+    if (!press) return;
+    var p = press;
+    var wasLong = p.long;
+    var idx = cellAt(e);
+    cancelPress();
+    if (wasLong) return;
+    if (idx < 0 || idx !== p.i) return;
+    tapAction(idx);
+  });
+
+  elBoard.addEventListener('pointercancel', cancelPress);
+  elBoard.addEventListener('pointerleave', cancelPress);
+  window.addEventListener('pointerup', cancelPress);
+
+  /* 右键：插旗 / 取消。整个棋盘上都要吃掉浏览器菜单，否则点到格子会弹菜单 */
+  elBoard.addEventListener('contextmenu', function (e) {
+    e.preventDefault();
+    if (Date.now() < suppressCtxUntil) return;
+    var idx = cellAt(e);
+    if (idx < 0) return;
+    if (over || paused) return;
+    actFlag(idx);
+  });
+
+  /* ── 键盘（可选：Tab 进入，方向键移动） ───────────────── */
+  elBoard.addEventListener('keydown', function (e) {
+    var t = e.target;
+    if (!t || !t.classList || !t.classList.contains('cell')) return;
+    var idx = parseInt(t.getAttribute('data-i'), 10);
+    if (isNaN(idx)) return;
+
+    var r = (idx / G.cols) | 0;
+    var c = idx % G.cols;
+    var nr = r;
+    var nc = c;
+    var handled = true;
+
+    if (e.key === 'ArrowLeft') nc = Math.max(0, c - 1);
+    else if (e.key === 'ArrowRight') nc = Math.min(G.cols - 1, c + 1);
+    else if (e.key === 'ArrowUp') nr = Math.max(0, r - 1);
+    else if (e.key === 'ArrowDown') nr = Math.min(G.rows - 1, r + 1);
+    else if (e.key === 'Enter' || e.key === ' ') tapAction(idx);
+    else if (e.key === 'f' || e.key === 'F') actFlag(idx);
+    else handled = false;
+
+    if (!handled) return;
+    e.preventDefault();
+    if (nr !== r || nc !== c) focusCell(nr * G.cols + nc);
+  });
+
+  /* ── 按钮 ─────────────────────────────────────────────── */
+  var levelBtns = document.querySelectorAll('[data-level]');
+  for (var li = 0; li < levelBtns.length; li++) {
+    (function (btn) {
+      btn.addEventListener('click', function () {
+        var lv = btn.getAttribute('data-level');
+        if (lv && lv !== level) newGame(lv);
+      });
+    })(levelBtns[li]);
+  }
+
+  if (elFace) elFace.addEventListener('click', function () { newGame(); });
+
+  /* ── 切后台就停表 ─────────────────────────────────────── */
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) {
+      cancelPress();
+      stopTimer();
+      paintClock();
+    } else if (G.started && !over && !won && !paused) {
+      startTimer();
+    }
+  });
+
+  window.addEventListener('pagehide', function () {
+    cancelPress();
+    stopTimer();
+  });
+
+  var resizeTimer = null;
+  window.addEventListener('resize', function () {
+    if (resizeTimer !== null) clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function () { resizeTimer = null; layout(); }, 120);
+  });
+  window.addEventListener('orientationchange', function () { layout(); });
+
+  /* ── 存档槽：capture / restore / onPause ──────────────── */
   function capture() {
-    /* 还没下第一手，或者已经分出胜负：没有"继续"的意义，别占存档位 */
-    if (!S.started || S.over || S.won) return null;
+    if (!G.started || over || won) return null;
 
     var ms = Math.round(elapsedMs());
-    var sec = Math.round(ms / 1000);
-
     var mineList = [];
-    for (var i = 0; i < S.total; i++) {
-      if (S.mines[i]) mineList.push(i);
-    }
+    for (var i = 0; i < G.total; i++) if (G.mines[i]) mineList.push(i);
     var cellsStr = '';
-    for (var k = 0; k < S.total; k++) cellsStr += String(S.state[k]);
+    for (var k = 0; k < G.total; k++) cellsStr += String(G.state[k]);
 
     return {
-      /* 淘汰依据是"分数最低"。扫雷用时越短越好，所以 score 传**负的秒数**：
-       * 20 秒的局 = -20，90 秒的局 = -90。这样"分最低"恰好等于"磨得最久"，
-       * 槽位满了会先淘汰那局最没进展的，留下的都是还值得继续的。
-       * 下限取 1ms 是为了避免开局立刻切走时出现 -0（-0 < 0 为假，排序会退化成 0）。 */
+      /* 淘汰依据是"分数最低"；扫雷用时越短越好，所以 score 传负的秒数 */
       score: -(Math.max(1, ms) / 1000),
-      label: LEVELS[level].label + ' · ' + sec + 's',
+      label: LEVELS[level].label + ' · ' + secs(ms) + 's',
       state: {
         v: 1,
         level: level,
-        rows: S.rows,
-        cols: S.cols,
-        mineCount: S.mineCount,
-        /* 雷只存下标（最多 99 个）；邻雷数恢复时由 computeAdj 重算，不存冗余 */
+        rows: G.rows,
+        cols: G.cols,
+        mineCount: G.mineCount,
         mines: mineList,
-        /* 0 未翻开 / 1 已翻开 / 2 插旗，行优先拼成字符串，省体积也好校验 */
         cells: cellsStr,
-        opened: S.opened,
-        flags: S.flags,
-        elapsedMs: ms,
-        flagMode: S.flagMode === true
+        opened: G.opened,
+        flags: G.flags,
+        elapsedMs: ms
       }
     };
   }
 
-  /** 坏档：给个安静的提示，不动当前局面。槽位来源（面板 / 顶部提示）都能复用。 */
   function rejectState() {
     showBanner('lose', '这条存档读不出来，已跳过');
     return false;
   }
 
-  /**
-   * 把 state 应用回游戏。恢复后处于**暂停**态（计时不走），等用户点"继续"。
-   * 先整体校验再落盘：坏档直接返回 false，不动当前局面。
-   *
-   * @returns {boolean} 是否恢复成功
-   */
   function restore(state) {
     if (!state || typeof state !== 'object') return rejectState();
 
@@ -868,7 +1169,7 @@
     for (var i = 0; i < mineList.length; i++) {
       var idx = mineList[i];
       if (typeof idx !== 'number' || idx !== Math.floor(idx) || idx < 0 || idx >= total) return rejectState();
-      if (mines[idx]) return rejectState();      // 同一个格子两条雷 = 坏档
+      if (mines[idx]) return rejectState();
       mines[idx] = 1;
     }
 
@@ -878,7 +1179,6 @@
     for (var k = 0; k < total; k++) {
       var ch = cellsStr.charAt(k);
       if (ch === '1') {
-        /* 踩到雷就结束的局不会入档；已翻开的格子是雷 ⇒ 数据被改坏了 */
         if (mines[k]) return rejectState();
         stArr[k] = 1;
         opened++;
@@ -889,29 +1189,22 @@
         return rejectState();
       }
     }
-    if (opened === 0) return rejectState();                   // 没翻过任何格 = 没下过第一手
-    if (opened >= total - cfg.mines) return rejectState();    // 已经赢了的局不该在存档里
+    if (opened === 0) return rejectState();
+    if (opened >= total - cfg.mines) return rejectState();
 
-    /* 校验通过，开始落地。雷区直接用存档里的位置：
-     * 首点不是雷的规则在当初布雷时已经满足，恢复不能重新布雷，否则局面就变了。 */
-    stopTimer();                     // 先停表，再把时间重置为存档里的值
+    stopTimer();
     level = lv;
-    S.rows = cfg.rows;
-    S.cols = cfg.cols;
-    S.total = total;
-    S.mineCount = cfg.mines;
-    S.mines = mines;
-    S.adj = new Uint8Array(total);
-    S.state = stArr;
-    computeAdj();
-    S.started = true;
-    S.over = false;
-    S.won = false;
-    S.paused = true;
-    S.opened = opened;
-    S.flags = flags;
-    S.boom = -1;
-    S.flagMode = state.flagMode === true;
+    G = createGame(cfg.rows, cfg.cols, cfg.mines);
+    G.mines = mines;
+    G.state = stArr;
+    computeAdj(G);
+    G.started = true;
+    G.opened = opened;
+    G.flags = flags;
+    over = false;
+    won = false;
+    paused = true;
+    boom = -1;
 
     var ms = Number(state.elapsedMs);
     elapsedAcc = isFinite(ms) && ms > 0 ? ms : 0;
@@ -922,31 +1215,20 @@
     layout();
     render(true);
     paintHud();
+    paintFace();
     paintLevels();
-    paintHint();
-    elFlagMode.setAttribute('aria-pressed', S.flagMode ? 'true' : 'false');
-    if (S.flagMode) elFlagMode.classList.add('primary');
-    else elFlagMode.classList.remove('primary');
-
     if (elResume) elResume.hidden = true;
-    pauseGame('已载入存档 · 计时停在 ' + fmtMs(elapsedAcc) + ' 秒');
+    pauseGame('已载入存档 · 计时停在 ' + secs(elapsedAcc) + ' 秒');
     return true;
   }
 
-  /**
-   * 页面隐藏 / 卸载时由 Arcade.mountSlots 调用：真的停表。
-   * 这里不置 S.paused —— 切回标签页沿用原来的"自动接着计时"，不用多点一次。
-   */
   function onPause() {
     cancelPress();
     stopTimer();
     paintClock();
   }
 
-  /* ── 顶部"继续上次"提示 ──────────────────────────────────
-   * 只在真的有存档时出现，一条横条、不弹窗、不挡操作；"忽略"只藏这一次。
-   * 没有存档就完全安静（elResume.hidden = true）。
-   */
+  /* ── 顶部"继续上次"提示 ───────────────────────────────── */
   function latestSlot() {
     var list = Arcade.listSlots('mines');
     if (!list.length) return null;
@@ -961,10 +1243,7 @@
     if (!elResume) return;
     elResume.textContent = '';
     var entry = latestSlot();
-    if (!entry) {
-      elResume.hidden = true;
-      return;
-    }
+    if (!entry) { elResume.hidden = true; return; }
 
     var when = Arcade.timeAgo(entry.at);
     var msg = document.createElement('span');
@@ -976,7 +1255,7 @@
     go.className = 'btn primary';
     go.textContent = '继续';
     go.addEventListener('click', function () {
-      if (restore(entry.state)) return;   // restore 会隐藏提示、进入暂停态并负责报错
+      if (restore(entry.state)) return;
       elResume.hidden = true;
     });
 
@@ -992,234 +1271,43 @@
     elResume.hidden = false;
   }
 
-  /* 页内删掉最高分后 HUD 要立刻跟着变。confirmAction 在按钮上
-   * stopPropagation，所以监听走捕获阶段，并用 setTimeout 把刷新放到
-   * "删除已经写进存储"之后（第二次点击才是真删）。 */
   function wireScoreRow() {
     if (!elScoreRow) return;
     elScoreRow.addEventListener('click', function (e) {
       var btn = e.target && e.target.closest ? e.target.closest('.btn.danger') : null;
       if (!btn) return;
-      if (btn.classList.contains('armed')) bestMemory = {};   // 隐私模式下的内存兜底也清掉
+      if (btn.classList.contains('armed')) bestMemory = {};
       setTimeout(function () { paintHud(); }, 0);
     }, true);
   }
 
-  /* ── 长按 / 触摸 ──────────────────────────────────────── */
-  function vibrate() {
-    try {
-      if (navigator && typeof navigator.vibrate === 'function') navigator.vibrate(12);
-    } catch (err) {
-      /* 不支持震动就算了 */
-    }
-  }
-
-  function tapAction(i) {
-    if (S.flagMode) flagCell(i);
-    else revealCell(i);
-  }
-
-  function longAction(i) {
-    if (S.flagMode) revealCell(i);
-    else flagCell(i);
-  }
-
-  function cancelPress() {
-    if (press) {
-      if (press.timer !== null) clearTimeout(press.timer);
-      if (press.cell && press.cell.classList) press.cell.classList.remove('down');
-      press = null;
-    }
-  }
-
-  function markPulse(i) {
-    var d = cells[i];
-    if (!d || !d.classList) return;
-    d.classList.add('pulse');
-    setTimeout(function () { d.classList.remove('pulse'); }, 360);
-  }
-
-  elBoard.addEventListener('pointerdown', function (e) {
-    if (S.over || S.paused) return;
-    if (e.pointerType === 'mouse' && e.button !== 0) return;
-    var t = e.target && e.target.closest ? e.target.closest('.cell') : null;
-    if (!t || !elBoard.contains(t)) return;
-
-    var idx = parseInt(t.getAttribute('data-i'), 10);
-    if (isNaN(idx)) return;
-
-    cancelPress();
-    if (t.classList) t.classList.add('down');
-    press = {
-      i: idx,
-      cell: t,
-      id: e.pointerId,
-      x: typeof e.clientX === 'number' ? e.clientX : 0,
-      y: typeof e.clientY === 'number' ? e.clientY : 0,
-      long: false,
-      timer: null
-    };
-    press.timer = setTimeout(function () {
-      if (!press) return;
-      press.long = true;
-      /* 长按已经处理过了，随后浏览器补发的 contextmenu 别再插一次旗 */
-      suppressCtxUntil = Date.now() + 900;
-      longAction(idx);
-      vibrate();
-      markPulse(idx);
-    }, LONG_PRESS_MS);
-  });
-
-  elBoard.addEventListener('pointermove', function (e) {
-    if (!press) return;
-    if (press.id !== undefined && e.pointerId !== undefined && press.id !== e.pointerId) return;
-    var dx = (e.clientX || 0) - press.x;
-    var dy = (e.clientY || 0) - press.y;
-    /* 手指在动 = 想滚动棋盘，放弃长按 */
-    if (dx * dx + dy * dy > 144) cancelPress();
-  });
-
-  elBoard.addEventListener('pointerup', function (e) {
-    if (!press) return;
-    var p = press;
-    var wasLong = p.long;
-    cancelPress();
-    if (wasLong) return;
-
-    var t = e.target && e.target.closest ? e.target.closest('.cell') : null;
-    if (!t) return;
-    var idx = parseInt(t.getAttribute('data-i'), 10);
-    if (isNaN(idx) || idx !== p.i) return;
-    tapAction(idx);
-  });
-
-  elBoard.addEventListener('pointercancel', cancelPress);
-  elBoard.addEventListener('pointerleave', cancelPress);
-
-  window.addEventListener('pointerup', cancelPress);
-
-  elBoard.addEventListener('contextmenu', function (e) {
-    e.preventDefault();
-    /* 长按路径已经插/拔过旗，避免一次长按被记两次 */
-    if (Date.now() < suppressCtxUntil) return;
-    var t = e.target && e.target.closest ? e.target.closest('.cell') : null;
-    if (!t || S.over || S.paused) return;
-    var idx = parseInt(t.getAttribute('data-i'), 10);
-    if (!isNaN(idx)) flagCell(idx);
-  });
-
-  /* ── 键盘（可选：单 Tab 进入，方向键移动） ─────────────── */
-  elBoard.addEventListener('keydown', function (e) {
-    var t = e.target;
-    if (!t || !t.classList || !t.classList.contains('cell')) return;
-    var idx = parseInt(t.getAttribute('data-i'), 10);
-    if (isNaN(idx)) return;
-
-    var r = (idx / S.cols) | 0;
-    var c = idx % S.cols;
-    var nr = r;
-    var nc = c;
-    var handled = true;
-
-    if (e.key === 'ArrowLeft') nc = Math.max(0, c - 1);
-    else if (e.key === 'ArrowRight') nc = Math.min(S.cols - 1, c + 1);
-    else if (e.key === 'ArrowUp') nr = Math.max(0, r - 1);
-    else if (e.key === 'ArrowDown') nr = Math.min(S.rows - 1, r + 1);
-    else if (e.key === 'Enter' || e.key === ' ') tapAction(idx);
-    else if (e.key === 'f' || e.key === 'F') flagCell(idx);
-    else handled = false;
-
-    if (!handled) return;
-    e.preventDefault();
-    if (nr !== r || nc !== c) focusCell(nr * S.cols + nc);
-  });
-
-  /* ── 按钮 ─────────────────────────────────────────────── */
-  var levelBtns = document.querySelectorAll('[data-level]');
-  for (var li = 0; li < levelBtns.length; li++) {
-    (function (btn) {
-      btn.addEventListener('click', function () {
-        var lv = btn.getAttribute('data-level');
-        if (lv && lv !== level) newGame(lv);
-      });
-    })(levelBtns[li]);
-  }
-
-  elRestart.addEventListener('click', function () { newGame(); });
-
-  elFlagMode.addEventListener('click', function () {
-    S.flagMode = !S.flagMode;
-    elFlagMode.setAttribute('aria-pressed', S.flagMode ? 'true' : 'false');
-    if (S.flagMode) elFlagMode.classList.add('primary');
-    else elFlagMode.classList.remove('primary');
-    paintHint();
-  });
-
-  /* ── 切后台就停表，回来接着算（读档暂停时保持暂停）───── */
-  document.addEventListener('visibilitychange', function () {
-    if (document.hidden) {
-      cancelPress();
-      stopTimer();
-      paintClock();
-    } else if (S.started && !S.over && !S.won && !S.paused) {
-      startTimer();
-    }
-  });
-
-  window.addEventListener('pagehide', function () {
-    cancelPress();
-    stopTimer();
-  });
-
-  var resizeTimer = null;
-  window.addEventListener('resize', function () {
-    if (resizeTimer !== null) clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(function () {
-      resizeTimer = null;
-      layout();
-    }, 120);
-  });
-  window.addEventListener('orientationchange', function () {
-    layout();
-  });
-
-  /* ── 最高分行的格式 ─────────────────────────────────────
-   * 记录是 {easy,medium,hard} 的用时；syncBest 已统一成毫秒，
-   * 这里按秒取整显示 → "初级 42s · 中级 88s · 高级 260s"。
-   */
+  /* 最高分行格式：{easy,medium,hard} 的用时，按秒显示 */
   function formatBestRow(value) {
-    var order = [
-      ['easy', '初级'],
-      ['medium', '中级'],
-      ['hard', '高级']
-    ];
+    var order = [['easy', '初级'], ['medium', '中级'], ['hard', '高级']];
     if (!value || typeof value !== 'object') return '暂无记录';
     var parts = [];
     for (var i = 0; i < order.length; i++) {
       var ms = normalizeBest(value[order[i][0]]);
-      if (ms > 0) parts.push(order[i][1] + ' ' + Math.round(ms / 1000) + 's');
+      if (ms > 0) parts.push(order[i][1] + ' ' + secs(ms) + 's');
     }
     return parts.length ? parts.join(' · ') : '暂无记录';
   }
 
-  /* 手机状态栏的颜色跟着明暗走，别在亮色页面顶一条黑边 */
   function paintMeta() {
     var meta = document.querySelector('meta[name="theme-color"]');
     if (meta) meta.setAttribute('content', Arcade.getMode('mines') === 'light' ? '#f4f6fa' : '#0b0d10');
   }
 
   /* ── 启动 ─────────────────────────────────────────────── */
+  buildLed(elLedMines);
+  buildLed(elLedTime);
   syncBest();
   newGame('easy');
 
-  /* 共用运行时装配：座位（#mode / #score-row / .topbar）必须先存在 */
   Arcade.mountModeToggle(elMode, 'mines');
   paintMeta();
   if (elMode) {
-    elMode.addEventListener('click', function () {
-      /* mountModeToggle 的监听先执行，这里读到的已经是新值 */
-      paintMeta();
-    });
+    elMode.addEventListener('click', function () { paintMeta(); });
   }
 
   scoreRow = Arcade.mountScoreRow(elScoreRow, 'mines', { format: formatBestRow });
@@ -1233,7 +1321,6 @@
     onPause: onPause
   });
 
-  /* 有存档才出现一条提示；没有就安静 */
   paintResumeHint();
 })();
 </script>
