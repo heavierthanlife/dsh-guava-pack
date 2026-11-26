@@ -54,14 +54,17 @@ node ~/dsh/playground/themes/dsh-guava-pack/tools/check-boot.mjs
 > 所以一般**不必单独跑**；想在别的机器上核对日志用
 > `DSH_CHECK_PORTS=none DSH_CHECK_LOG=... node tools/check-boot.mjs`。
 
-### 3.2 浏览器端插件图完整
+### 3.2 客户端插件图完整（**必做**，服务端日志看不见这一层）
 
-打开带 token 的地址，按 F12 看 Console：
+```bash
+node tools/tests/client-manifest.mjs        # 正常：83 个模块、两个模块都在
+```
 
-- ❌ 出现 `web boot: N required entries did not activate` → 见第 4 节
-- ❌ 出现 `404 /api/web/listProviders` → 供应商路由插件没挂上
+这一步不能省：`--dump-config` 与服务端日志**天生发现不了** client manifest 缺模块
+（见第 4 节）。守卫测试服务没起时会明确跳过，不会误报。
 
-想直接看模块数，Console 里粘第 4 节那行脚本（正常 `count: 83`）。
+也可开浏览器看 F12 → Console：出现 `web boot: N required entries did not activate`
+或 `404 /api/web/listProviders` 即异常。
 
 ### 3.3 端口与路由（`check-boot` 已覆盖，留作手工核对）
 
@@ -72,9 +75,9 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8318/health
 
 ---
 
-## 4. 已知坑：升级到 0.2.2-rc.5 后客户端插件全部 pending
+## 4. 已知坑：客户端插件全部 pending（client manifest 缺模块）
 
-**症状**（2026-11-24 实测）：
+**症状**：
 
 ```
 web boot: 2 required entries did not activate
@@ -85,11 +88,65 @@ web boot: 2 required entries did not activate
 
 界面只剩空壳，`/api/web/listProviders` 返回 404。
 
-**根因**：`dsh-web-app` bundle 里的 `ui-context-menu` / `ui-file-drag` 两行没有实际生效，
-浏览器端拿到的 client 模块清单里**缺这两个模块**（实测 79 个，正常应为 83 个），
-于是 `contextMenus` / `fileDrag` 服务根本不存在，所有依赖它们的插件永远 pending。
+**根因**：`dsh-web-app` bundle 插入的 `ui-context-menu` / `ui-file-drag` 两行**没有进到
+浏览器端的 client manifest**（实测 79 个模块，正常 83 个），于是 `contextMenus` /
+`fileDrag` 服务不存在，依赖它们的插件永远 pending。
 
-**判断方法**（不用看源码）：F12 → Console 里执行
+### 4.1 这个坑是怎么被自己造出来的（2026-11-24→11-26 真实事故）
+
+2026-11-24 有人以为「升级到 0.2.2-rc.5 后这两行没生效」，于是在 bundle patch 里加了：
+
+```yaml
+- id: ui-context-menu
+  name: "@deepseek-ai/dsh-client-ui-context-menu"
+- id: ui-file-drag
+  name: "@deepseek-ai/dsh-client-ui-file-drag"
+```
+
+**这个判断是错的，而且补丁本身就是病因**。Loader patch 方言（见
+`dsh-doc` 技能的 `references/composition-reference.md`）规定：
+
+> `insert: [rows]` 追加行。**只有 `insert:` 能新增行。**
+> 带 `id` 且没有 `insert` 的 patch **定位已存在的行**，提供的字段替换该行字段；
+> 一个真值 `name` 只是**断言**已有插件名，不会改名，更不会插入。
+> 没有非空 `id` 的非插入 patch、以及**匹配不到任何行**的 patch，只会告警并跳过。
+
+那 4 行没有 `insert:`，却用了**上游 bundle 已经插入的行 id** —— 于是它们不是「补插」，
+而是给这两行各盖了一个「被 patch 过」的章。这两行随后不再出现在 client manifest 里，
+79 vs 83 的缺口就是这么来的。实测把 4 行删掉即恢复 83。
+
+> ⚠️ **别再往 cordis.patch.yml 里加这两行，也不要加任何「同名同 id」的补丁行。**
+> 这个补丁已经在 2026-11-26（`b78f69e`）整段删除。要新增挂载行，只有 `insert:`。
+
+### 4.2 为什么它极难发现
+
+| 检查手段 | 能否发现 | 原因 |
+|---|---|---|
+| host 启动日志 | ❌ | 0 warning，补丁「成功应用」了 |
+| `--dump-config` | ❌ | 两行照样打印，1 个不多 1 个不少 |
+| `/api/web/listProviders` 之外的服务端接口 | ❌ | 服务端一切正常 |
+| **client manifest 条目数** | ✅ | 79 ≠ 83，缺的正是这两个 |
+
+这就是必须看**浏览器端真正收到的模块清单**的原因 —— 它是唯一能暴露该故障的地方。
+
+### 4.3 判断方法（推荐用守卫测试，不用开浏览器）
+
+```bash
+node tools/tests/client-manifest.mjs
+```
+
+它从 `~/dsh/logs/web-run.log` 取最后一次启动的 token，抓 `/?token=…`，
+解析 `globalThis["__DSH_BOOT__"].entries`，断言：
+
+- `@deepseek-ai/dsh-client-ui-context-menu` 与 `@deepseek-ai/dsh-client-ui-file-drag` 在列；
+- 条目 id 无重复；
+- 条目数不低于下限（默认 60，可用 `DSH_MANIFEST_MIN` 覆盖）。
+
+服务没在跑时它会**明确跳过并 exit 0**，不会把 `npm test` 链弄断。
+
+要看细节可以加 `--json`；它同时会用内置的「回归夹具」自证能抓到 79/缺模块那种载荷。
+
+浏览器手工版（F12 → Console）：
 
 ```js
 const u = performance.getEntriesByType('resource').map(e=>e.name).filter(x=>x.includes('/plugins/'));
@@ -99,15 +156,16 @@ const mods = new Set(); for (const x of u){const q=x.split('??')[1]; if(q) for(c
 
 正常：`{count: 83, ctx: true, drag: true}`。
 
-**修法**：本仓库 `cordis.patch.yml` 末尾已经内置这两行的显式重声明
-（见「0.2.2-rc.5 兼容补丁」段）。所以只要：
+### 4.4 修法
 
 ```bash
-cd ~/dsh/playground/themes/dsh-guava-pack && git pull --rebase
-systemctl --user restart dsh.service
+# 确认 bundle patch 里没有那 4 行（有就删掉，不需要任何替代补丁）
+grep -n 'ui-context-menu\|ui-file-drag' playground/themes/dsh-guava-pack/cordis.patch.yml
+node tools/tests/client-manifest.mjs      # 应 83、两个模块都在
 ```
 
-界面即恢复。若将来某个版本官方修好了，这段重声明也无害（同 id 同名，等于补插）。
+浏览器侧若是旧的失败清单，硬刷新一次（Ctrl+Shift+R 或 DevTools → Application →
+Clear site data）。服务端修好后浏览器仍会贴着一份旧的坏客户端图。
 
 ---
 
