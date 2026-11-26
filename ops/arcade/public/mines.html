@@ -11,7 +11,9 @@
 <script src="arcade.js"></script>
 <script>Arcade.initTheme({ page: 'mines', accent: 'rose' });</script>
 <style>
-  .wrap { padding: 14px 16px 30px; }
+  .wrap { padding: 14px 16px 30px; max-width: none; }
+  /* 文字行仍然按 720 收一下，棋盘不受限：高级 30 列要 930px 才放得下 */
+  .hint, .bestline { max-width: 720px; margin-left: auto; margin-right: auto; }
 
   /* ── 经典外观（Windows 95 扫雷）───────────────────────────────────────
    * 只动中性灰：未翻开的凸起格子、翻开的凹面、LED 数字、笑脸。
@@ -351,7 +353,7 @@
     </div>
   </div>
 
-  <p class="hint small muted" id="hint">左键翻开 · 右键插旗 / 再右键取消 · 左右键同时按住和弦（触屏：轻点翻开 · 长按插旗）</p>
+  <p class="hint small muted" id="hint">左键翻开 · 右键插旗 / 再右键取消 · 左右键同时按住和弦（高级棋盘偏宽时可左右滑动；触屏：轻点翻开 · 长按插旗）</p>
   <p class="bestline small muted" id="best">最佳 --</p>
 
   <!-- 三档最高分 + 就地删除（mountScoreRow 渲染） -->
@@ -541,6 +543,7 @@
 
   var press = null;
   var chordDone = false;
+  var chordGesture = false;
   var suppressCtxUntil = 0;
   var timerId = null;
   var timerRunning = false;
@@ -706,9 +709,17 @@
     var container = wrapEl && wrapEl.clientWidth ? wrapEl.clientWidth : window.innerWidth;
     var avail = Math.max(200, container - 52);
     elBoard.style.setProperty('--cols', String(G.cols));
+    /* 2026-11-26 二改：先取"这一档在当前宽度下放得下的最大边长"（容器不再被
+     * shared.css 的 720px 卡住），再 ×1.1 取整。
+     * 初级/中级封顶 33（35 那版偏大）；高级封顶 35 —— 30 列会超出屏幕，
+     * 交给 .field 横向滑动（本来就是这个设计）。 */
     var fit = Math.floor(avail / G.cols);
-    /* 2026-11-26：整体放大 1.1 倍（用户鼠标灵敏度高：格子边长 32 → 35、下限 20 → 22） */
-    var size = Math.max(22, Math.min(35, fit));
+    var target = Math.round(fit * 1.1);
+    /* 三档统一到同一个格子边长（经典版本来就不随难度变）：
+     * 初/中回到 32（35 那版用户觉得偏大）；高级以前被 30 列的宽度压到 28，
+     * 现在只要屏幕放得下 20 列就抬到 31，多出来的宽度交给横向滑动。 */
+    if (level === 'hard' && fit >= 20) target = Math.max(target, 31);
+    var size = Math.max(22, Math.min(32, target));
     elBoard.style.setProperty('--cell', size + 'px');
   }
 
@@ -1021,7 +1032,7 @@
       y: typeof e.clientY === 'number' ? e.clientY : 0,
       long: false, timer: null
     };
-    press.timer = setTimeout(function () {
+    if (e.pointerType !== 'mouse') press.timer = setTimeout(function () {
       if (!press) return;
       press.long = true;
       /* 长按已处理：随后浏览器补发的 contextmenu 别再插一次旗 */
@@ -1058,10 +1069,36 @@
   elBoard.addEventListener('pointerleave', cancelPress);
   window.addEventListener('pointerup', cancelPress);
 
+  /* 双键和弦：**第二颗键按下不会再发 pointerdown**（规范如此，只发 mousedown），
+   * 所以真正的判定必须挂在 mousedown 上。左右键谁先按都行，只看按键状态是否为 3。 */
+  elBoard.addEventListener('mousedown', function (e) {
+    if (over || paused) return;
+    if (e.button !== 0 && e.button !== 2) return;
+    if (e.buttons !== 3) return;
+
+    e.preventDefault();
+    chordGesture = true;
+    chordDone = true;
+    suppressCtxUntil = Date.now() + 1500;   /* 这一轮手势补发的菜单别插旗 */
+    cancelPress();
+    var idx = cellAt(e);
+    if (idx >= 0) actChord(idx);
+  });
+
+  /* 两颗键都松开 → 结束本轮和弦手势 */
+  window.addEventListener('mouseup', function (e) {
+    if (e.buttons === 0) chordGesture = false;
+  });
+
   /* 右键：插旗 / 取消。整个棋盘上都要吃掉浏览器菜单，否则点到格子会弹菜单 */
   elBoard.addEventListener('contextmenu', function (e) {
     e.preventDefault();
-    if (Date.now() < suppressCtxUntil) return;
+    /* 和弦/长按之后浏览器补发的 contextmenu：**只吃掉这一次** */
+    if (chordGesture || Date.now() < suppressCtxUntil) {
+      suppressCtxUntil = 0;
+      chordGesture = false;
+      return;
+    }
     var idx = cellAt(e);
     if (idx < 0) return;
     if (over || paused) return;
