@@ -223,6 +223,18 @@ providers:
         - DeepSeek-V4-Pro-0813
       on_missing: keep
 
+  # ── google（Gemini，经本地 8318 路由 → SSR；2026-11-26 新增）─────────────
+  # 直连被墙（裸直连 10s 超时，经 SSR 2080 可达），所以 profile 里的 baseURL
+  # 指向路由代理。型号是人工点名的三个，脚本只负责改名/保持，不替你挑。
+  google:
+    intent: 人工点名的三个 Gemini 4 型号
+    pick:
+      explicit:
+        - gemini-4-carbon
+        - gemini-4-hydrogen
+        - gemini-4-neon
+      on_missing: keep
+
 # ── 视觉推断表 ──────────────────────────────────────────────────────────────
 # 端点上**没有**视觉字段（实测 6 家都没有），所以只能按 id 关键词推断。
 # 这直接影响"旗舰没视觉时要补一个视觉型号"这条规则。
