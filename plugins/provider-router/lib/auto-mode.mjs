@@ -37,6 +37,8 @@ export const DEFAULT_MODES = Object.freeze({
  * 其余（未列出的）= 默认按 `router` 处理（baseURL 指向 127.0.0.1:8318）。
  */
 export const CONTROL_OVERRIDES = Object.freeze({
+  /* 8045 是第三方工具（antigravity-tools）自己的出口，本代理改不了它的路。 */
+  antigravity: 'external',
   commandcode: 'bridge',
 });
 

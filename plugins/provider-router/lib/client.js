@@ -59,6 +59,7 @@ window.__ModuleLoader__.load({
       provider: {
         'xiaomi-token-plan-cn': '小米 MiMo（国内）',
         'opencode-go': 'DeepSeek via opencode-go',
+        'antigravity': 'Antigravity（本地桥接）',
         'agentrouter': 'AgentRouter',
         'commandcode': 'CommandCode（本地桥接）',
       },

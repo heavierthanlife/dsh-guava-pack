@@ -235,6 +235,23 @@ providers:
         - gemini-4-neon
       on_missing: keep
 
+  # ── antigravity（本地 8045 桥接；2026-11-27 恢复）────────────────────────
+  # 用户 11-27 重新启用：openai-completions 直连 127.0.0.1:8045/v1，模型表由桥接
+  # 决定（base + high/medium/xhigh 变体）。这里人工点名 7 个基座型号；变体由同步
+  # 工具按「现有模型保留」处理，不会因为没点名就被删。
+  antigravity:
+    intent: 人工点名的七个基座型号（Claude 5.5 / Gemini 3.8 / 4 系）
+    pick:
+      explicit:
+        - claude-opus-5-5
+        - claude-sonnet-5-5
+        - gemini-3.1-flash-image
+        - gemini-3.8-flash
+        - gemini-4-carbon
+        - gemini-4-hydrogen
+        - gemini-4-neon
+      on_missing: keep
+
 # ── 视觉推断表 ──────────────────────────────────────────────────────────────
 # 端点上**没有**视觉字段（实测 6 家都没有），所以只能按 id 关键词推断。
 # 这直接影响"旗舰没视觉时要补一个视觉型号"这条规则。

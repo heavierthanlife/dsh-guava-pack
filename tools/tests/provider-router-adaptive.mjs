@@ -248,6 +248,17 @@ const noisyIds = noisy.map((r) => r.id);
 check('未配置的内置供应商被隐藏（amazon-bedrock / anthropic / groq）',
   !noisyIds.includes('amazon-bedrock') && !noisyIds.includes('anthropic') && !noisyIds.includes('groq'), noisyIds);
 check('live 的行保留（opencode-go）', noisyIds.includes('opencode-go'));
+// 8045 桥接属于「外部控制」（2026-11-27 恢复）：override 必须先于 baseURL 判定，
+// 否则面板会给它画一个根本拨不动的开关。
+const ext = buildProviderCatalog({
+  live: [{ id: 'antigravity' }],
+  configurable: [],
+  defaults: DEFAULT_MODES,
+  routerPrefixes: [],
+  endpoints: {},
+});
+check('antigravity 标为外部控制（不可拨）', ext[0]?.control === 'external', ext[0]);
+
 check('DEFAULT_MODES 的行保留（xiaomi / opencode-go / commandcode）',
   noisyIds.includes('xiaomi-token-plan-cn') && noisyIds.includes('opencode-go') && noisyIds.includes('commandcode'), noisyIds);
 

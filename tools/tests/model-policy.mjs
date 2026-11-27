@@ -115,10 +115,10 @@ const pi = prof.find((e) => e?.id === 'llm-pi-ai');
 const provs = Object.keys(pi?.config?.providers ?? {});
 check('策略表能解析', policy !== null && typeof policy === 'object');
 // 已废弃的上游路由允许没有策略规则：
-//   agentrouter — 2026-10-27，Anthropic 路由已无任何可用模型；
-//   antigravity — 2026-11-25，会员不再续，provider 与 key 全部移除。
+//   agentrouter — 2026-10-27，Anthropic 路由已无任何可用模型。
 // 除这些之外，策略必须覆盖 profile 里的每一家 —— 否则新供应商会静默漏配。
-const RETIRED_PROVIDERS = new Set(['agentrouter', 'antigravity']);
+// （antigravity 2026-11-27 由用户恢复启用，重新纳入覆盖范围。）
+const RETIRED_PROVIDERS = new Set(['agentrouter']);
 const uncovered = provs.filter((p) => !(p in (policy.providers ?? {})));
 check(`策略表覆盖全部在用供应商（已废弃的 ${[...RETIRED_PROVIDERS].join('/')} 除外）`,
   uncovered.every((p) => RETIRED_PROVIDERS.has(p)), uncovered);
@@ -128,12 +128,19 @@ check('每家的 pick 都非空', Object.values(policy.providers ?? {}).every((r
 check('exclude 正则在 JS 里可构造（不支持 (?i)）',
   (() => { try { new RegExp(policy.defaults.exclude, policy.defaults.exclude_flags ?? ''); return true; } catch { return false; } })());
 
-// ── 5. 已下线的供应商不得回流（2026-11-25 antigravity 退役）─────────────
-// 会员不续了 → provider、key、策略规则一起删。这条守卫防止哪次合并又把它带回来。
-console.log('\n已下线供应商');
-check('策略表里已无 antigravity 规则', !('antigravity' in (policy.providers ?? {})));
-check('profile 里已无 antigravity provider',
-  !(pi?.config?.providers && 'antigravity' in pi.config.providers));
+// ── 5. antigravity 人工点名清单不得被悄悄删空（2026-11-27 恢复）────────
+// 11-25 曾整段下线，11-27 用户重新启用（本地 8045 桥接）。这条守卫改成正向：
+// 规则必须在、必须用 explicit（启发式猜不出"要哪几个"）。
+console.log('\nantigravity 点名清单');
+const agRule = policy.providers.antigravity;
+check('策略表里有 antigravity 规则', Boolean(agRule && agRule.pick));
+check('antigravity 用 explicit（人工点名）而不是启发式',
+  Array.isArray(agRule?.pick?.explicit) && agRule.pick.explicit.length > 0,
+  agRule?.pick?.explicit);
+check('点名的型号没有重复',
+  new Set(agRule?.pick?.explicit ?? []).size === (agRule?.pick?.explicit ?? []).length,
+  agRule?.pick?.explicit);
+check('profile 里 antigravity provider 仍在', Boolean(pi?.config?.providers && 'antigravity' in pi.config.providers));
 
 // ── 6. 免费模型策略必须依赖真探测（不能靠 id 猜）─────────────────────
 // 实测：端点列表里混着 "No endpoints found" / "已终止转付费" / "上游满载"，

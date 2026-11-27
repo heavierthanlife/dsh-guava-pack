@@ -11,6 +11,7 @@
 |---|---|
 | `~/dsh/.credentials.yaml`（`refs:` 段） | ✅ 在（`~/dsh` 被整体备份，restic 加密） |
 | `~/.bashrc` 里的 `export *_API_KEY=` | ❌ **不在**（`~/.bashrc` 在 `~/dsh` 之外，备份不覆盖） |
+| Windows 侧 `Antigravity Tools` 自己的配置（8045 桥接） | ❌ 不在 |
 
 也就是说：**如果 Windows 重装、WSL 被删、或家目录丢失，`.bashrc` 里那几把 key 就真的没了**（除非你记得去各家控制台重新申请）。
 
@@ -40,7 +41,7 @@ eval "$(node "$GUAVA_PACK/tools/export-provider-keys.mjs")"
 
 ## 2. 清单：变量名 / 用途 / 位置
 
-`profiles/web/cordis.patch.yml` 里用 `apiKeyEnv:` 引用，共 **6 个必需**：
+`profiles/web/cordis.patch.yml` 里用 `apiKeyEnv:` 引用，共 **9 个必需**：
 
 | 变量名 | 对应供应商 | 在 `.bashrc` | 在 `.credentials.yaml` |
 |---|---|---|---|
@@ -50,6 +51,9 @@ eval "$(node "$GUAVA_PACK/tools/export-provider-keys.mjs")"
 | `COMMANDCODE_API_KEY` | Command Code（经 8317 桥接） | ✅（2026-11-12 已对齐） | ✅ 生效 |
 | `OPENROUTER_API_KEY` | OpenRouter | ✅（2026-11-12 复制） | ✅ |
 | `NVIDIA_API_KEY` | NVIDIA NIM | ✅（2026-11-12 复制） | ✅ |
+| `GOOGLE_API_KEY` | Google Gemini（经 8318 路由 → SSR） | —（2026-11-26 起只在凭证库） | ✅ |
+| `ZLJZ_HUB_API_KEY` | 中联基智企业网关 | — | ✅ |
+| `ANTIGRAVITY_API_KEY` | Antigravity（本地 8045 桥接） | —（2026-11-27 恢复，只在凭证库） | ✅ |
 
 另有一些**不在 profiles 里、但其它工具会用**的：
 
@@ -88,7 +92,7 @@ echo "$HISTCONTROL"
 ### 3.3 逐条显示（推荐：一次只显示一个，看完按回车）
 
 ```bash
- for v in AGENTROUTER_API_KEY OPENCODE_GO_API_KEY \
+ for v in AGENTROUTER_API_KEY ANTIGRAVITY_API_KEY OPENCODE_GO_API_KEY \
           XIAOMI_TOKEN_PLAN_CN_API_KEY COMMANDCODE_API_KEY \
           OPENROUTER_API_KEY NVIDIA_API_KEY; do
    printf '\n===== %s =====\n' "$v"
