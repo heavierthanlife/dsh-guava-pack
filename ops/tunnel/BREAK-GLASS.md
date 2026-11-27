@@ -857,6 +857,96 @@ console.log("len:", resolveProviderKey("OPENROUTER_API_KEY")?.length)'
 
 ---
 
+### 8.25 profile 挂着旧副本、改 pack 却不生效（bundle 收敛，2026-11-27）
+
+**症状**：改 `dsh-guava-pack/plugins/*` 没反应；同样的改动改 `playground/themes/<旧副本>` 才生效。
+`~/.cursor` 里没有任何报错 —— 因为 profile 的 `bundles` 压根没指向 pack。
+
+**本机曾经的形态**：profile `bundles` = 11 个，依赖 9 条 `link:`，其中 7 条指向
+`playground/themes/<旧插件>`；只有 `dsh-context-acp` / `dsh-opencode-session-header` 指向 pack。
+
+**收敛做法**（= 别的机器 3.9 已经做过的）：
+
+```yaml
+# profiles/web/package.json
+"dependencies": {
+  "dsh-context-acp": "link:.../dsh-guava-pack/plugins/dsh-context-acp",   # preset 要 `dsh-context-acp/engine`
+  "dsh-guava-pack": "link:.../dsh-guava-pack"
+},
+"dsh": { "profile": { "bundles": [
+  "@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "dsh-guava-pack"
+] } }
+```
+
+```bash
+cd ~/dsh/profiles/web && pnpm install          # 生成 node_modules/dsh-guava-pack 链接
+~/dsh/dsh --profile web --dump-config > after.yml   # 与迁移前逐条对比，别只看"能起来"
+```
+
+**四个坑**（本机 2026-11-27 全踩过）：
+
+1. **旧副本里可能有 pack 没有的本地改动** —— 切换即丢。本机就是：google 的三处修复
+   （query 保真 / catalog 回落 / providers.json）只存在于旧副本。**先收回 pack，再切 bundle。**
+2. **手工起的旧 daemon 会占着 8318**：`start.sh` 的 `--force` 才会按端口接管，否则新 daemon
+   `EADDRINUSE` 起不来；更阴的是面板写 pack 的 `mode.json`、旧 daemon 读旧的 →
+   **开关静默不生效**。重启前先 `kill $(cat <旧目录>/router.pid)`。
+3. **判断"谁在跑"只看端口和日志**：`ls -l playground/themes/*/router.log` 与
+   `dsh-guava-pack/plugins/provider-router/router.log` 谁的 mtime 新，就是谁在写；
+   `--dump-config` 里插件行的 `name:` 也会直接指出实际路径。
+4. **归档不删除**：旧目录 `mv` 到 `playground/themes/.archive-20261127/`，观察一周再删；
+   同时清掉 profile `node_modules` 里未声明的 8 个旧 symlink。
+
+**验收**：`dump-config` 顶层条目数/ id 集合与迁移前一致；`client-manifest` 83；
+router 日志里的 `providers:` 列表包含该有的上游；UI 面板里供应商都在。
+
+---
+
+### 8.26 antigravity（8045 桥接）报 `Connection failed, please check your network` —— 它自己要过 SSR
+
+**症状**：`http://127.0.0.1:8045/v1/models` 返回 **200**（桥接活着），但
+`/v1/chat/completions` 返回 **500**，正文是 Antigravity Tools 自己的：
+
+```
+Stream collection error: Connection failed, please check your network or proxy settings
+fn=collect_stream_to_json ... raw=Stream interrupted before completion
+```
+
+**根因**：8045 是 **Antigravity Tools（Windows 侧）**，它自己出墙需要上游代理；配置项在
+`%USERPROFILE%\.antigravity_tools\gui_config.json`：
+
+```json
+"proxy": { "upstream_proxy": { "enabled": false, "url": "" } }
+```
+
+默认是**关的**。DSH 这一跳（WSL → 127.0.0.1:8045）是本地回环，通不通和 SSR 无关；
+真正要过 SSR 的是**桥接→Google/Anthropic 的那一跳**。
+
+**修法**：
+
+```json
+"upstream_proxy": { "enabled": true, "url": "http://127.0.0.1:2080" }
+```
+
+改完**必须重启 Antigravity Tools**（配置在启动时读进内存，热改不生效）。
+本机 SSR 在 Windows 侧监听 2080，Windows 上 `curl -x http://127.0.0.1:2080 https://www.google.com/generate_204` → 204。
+
+**验证**（用桥接的 key 直接打，不进 DSH）：
+
+```bash
+curl -s -m 30 http://127.0.0.1:8045/v1/chat/completions \
+  -H "Authorization: Bearer $ANTIGRAVITY_API_KEY" -H 'content-type: application/json' \
+  -d '{"model":"claude-sonnet-5-5","messages":[{"role":"user","content":"ok"}],"max_tokens":5}'
+# 2026-11-27 实测：claude-sonnet-5-5 / gemini-3.8-flash-tiered / gemini-3.1-flash-image → 200
+#               gemini-3.8-flash(→flash-high) / gemini-4-carbon → 仍 500（上游流中断，与代理无关）
+```
+
+**教训**：**删 `~/.antigravity_tools` 等于把它的代理设置一起删了**（11-25 清理时踩的）。
+只删日志/缓存放着不动；要清就先把 `gui_config.json` 里的 `upstream_proxy` 抄下来。
+另外：DSH 的 router **不要**给 antigravity 配上 8318 —— router 对 loopback 强制直连，
+而且 SSR agent 只包 https，配了也不会生效，只会误导后来人。
+
+---
+
 ### 8.15 排查顺序（省时间的模板）
 
 ```

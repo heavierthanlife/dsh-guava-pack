@@ -82,6 +82,33 @@ node install.mjs --patch          # 给 node_modules 打三处补丁（幂等）
 
 ---
 
+## 2.5 profile 只挂单一 bundle（**新机器照这个来**）
+
+profile 的 `dsh.profile.bundles` 只该有 **3 个**：
+
+```json
+["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "dsh-guava-pack"]
+```
+
+依赖只留两条（`dsh-context-acp` 是 preset 里 `dsh-context-acp/engine` 的解析锚点，不能省）：
+
+```json
+"dependencies": {
+  "dsh-context-acp": "link:<pack>/plugins/dsh-context-acp",
+  "dsh-guava-pack": "link:<pack>"
+}
+```
+
+```bash
+cd ~/dsh/profiles/web && pnpm install
+~/dsh/dsh --profile web --dump-config | grep -c '^- id:'   # 与迁移前对比，别只看"能起来"
+```
+
+**不要**再按插件逐个 `link:` + 逐个进 `bundles` —— 那会让你改 pack 时不生效（改旧副本才生效），
+且每台机器都会漂。踩坑记录见 `ops/tunnel/BREAK-GLASS.md` §8.25。
+
+---
+
 ## 3. 机器绑定配置（不进 git，每台各做一次）
 
 ### 3.1 `~/.bashrc`

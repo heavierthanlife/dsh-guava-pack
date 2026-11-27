@@ -11,7 +11,7 @@
 |---|---|
 | `~/dsh/.credentials.yaml`（`refs:` 段） | ✅ 在（`~/dsh` 被整体备份，restic 加密） |
 | `~/.bashrc` 里的 `export *_API_KEY=` | ❌ **不在**（`~/.bashrc` 在 `~/dsh` 之外，备份不覆盖） |
-| Windows 侧 `Antigravity Tools` 自己的配置（8045 桥接） | ❌ 不在 |
+| Windows 侧 `Antigravity Tools` 自己的配置（8045 桥接；含 `upstream_proxy` 的 SSR 设置） | ❌ 不在 |
 
 也就是说：**如果 Windows 重装、WSL 被删、或家目录丢失，`.bashrc` 里那几把 key 就真的没了**（除非你记得去各家控制台重新申请）。
 
