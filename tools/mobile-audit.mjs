@@ -136,7 +136,10 @@ async function openRealSession() {
   await evaluate(`(() => {
     const scrim = document.querySelector('.dsh-mobile-scrim');
     if (scrim && getComputedStyle(scrim).display !== 'none') { scrim.click(); return 'scrim'; }
-    const toggle = document.querySelector('.dsh-mobile-drawer-toggle');
+    // 0.2.2-rc.5 起宿主自己在 leadingSeat 里也放了一枚侧栏开关，优先用那枚
+    // （我们那枚在重叠时会被 CSS 藏成 visibility:hidden，程序化 click 仍然有效，
+    //   但用宿主那枚更接近真机上用户手指的落点）。
+    const toggle = document.querySelector('[class*="leadingSeat"] button') || document.querySelector('.dsh-mobile-drawer-toggle');
     if (toggle) { toggle.click(); return 'toggle'; }
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     return 'escape';
@@ -177,6 +180,29 @@ async function main() {
 
   check('手机模式已生效（dsh-phone）', (await evaluate(`document.documentElement.classList.contains('dsh-phone')`)) === true);
 
+  // 左上角只能有一枚侧栏开关：宿主自带的（leadingSeat 里）和我们的汉堡落点重合，
+  // 两个都可见就是「三道横线上面压着面板图标」。允许的两种状态：
+  //   a) 只有宿主那枚可见（我们被 data-dsh-mobile-host-toggle 藏成 visibility:hidden）；
+  //   b) 只有我们那枚可见（旧宿主没有那个座位）。
+  const sidebarToggles = await evaluate(`(() => {
+    const mine = document.querySelector('.dsh-mobile-drawer-toggle');
+    const seat = document.querySelector('[class*="leadingSeat"]');
+    const host = seat ? seat.querySelector('button') : null;
+    const visible = (el) => {
+      if (!el) return false;
+      const s = getComputedStyle(el);
+      if (s.display === 'none' || s.visibility === 'hidden' || s.opacity === '0') return false;
+      return el.getBoundingClientRect().width > 0;
+    };
+    return {
+      mine: visible(mine),
+      host: visible(host),
+      attr: document.documentElement.getAttribute('data-dsh-mobile-host-toggle'),
+      phone: document.documentElement.classList.contains('dsh-phone'),
+    };
+  })()`);
+  check('左上角只有一枚侧栏开关（图标不重叠）', !(sidebarToggles.mine && sidebarToggles.host), JSON.stringify(sidebarToggles));
+
   const session = await openRealSession();
   check('能打开一个真实历史会话', typeof session === 'string' && session.length > 0, session);
 
@@ -190,7 +216,7 @@ async function main() {
     await evaluate(`(() => {
       const scrim = document.querySelector('.dsh-mobile-scrim');
       if (scrim && getComputedStyle(scrim).display !== 'none') { scrim.click(); return 'scrim'; }
-      const toggle = document.querySelector('.dsh-mobile-drawer-toggle');
+      const toggle = document.querySelector('[class*="leadingSeat"] button') || document.querySelector('.dsh-mobile-drawer-toggle');
       if (toggle) toggle.click();
       return 'toggle';
     })()`);

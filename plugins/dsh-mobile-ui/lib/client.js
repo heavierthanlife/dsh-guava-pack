@@ -351,6 +351,85 @@ window.__ModuleLoader__.load({
       };
     }
 
+    /**
+     * 「两个侧栏开关叠在一起」去重。
+     *
+     * 现象（0.2.2-rc.5 起）：左上角的汉堡上压着一枚和右侧「打开右侧边栏」
+     * 长得一样的面板图标 —— 因为宿主自己在 shell frame 里多渲染了一个
+     * `[class*="leadingSeat"]`（position:absolute; z-index:15），里面是它自己的
+     * 「打开侧边栏」按钮，落点和我们注册进 `conversation.header.leading` 的
+     * 汉堡重合。DOM 实测（手机视口 390px）：
+     *
+     *   宿主的那枚  BUTTON[打开侧边栏] { x:12, y:11, w:28, h:28 }  ← z-index 15，在最上层
+     *   我们的汉堡  BUTTON[展开 / 收起侧栏] { x:20, y:10, w:32, h:32 }
+     *
+     * 两者都调 `layout.toggleSidebar`（实测点宿主那枚一样能开/关抽屉：抽屉
+     * 300px、遮罩 display:block 均正常），所以功能上完全冗余 —— 只留一个。
+     *
+     * 判据用**矩形相交**而不是选择器硬编码位置：位置变了（平板、未来改版）
+     * 自然恢复显示；旧版宿主没有这个座位时 `hostButton()` 返回 null，什么都不做。
+     * 属性打上以后 CSS 用 visibility:hidden 把图案藏掉，盒子继续占位，
+     * 标题不会左移 —— 宿主那枚正好落在腾出来的位置。
+     */
+    function installHeaderToggleDedupe(root) {
+      var ATTR = 'data-dsh-mobile-host-toggle';
+      var observer = null;
+      var marked = null;
+
+      function hostButton() {
+        var seat = document.querySelector('[class*="leadingSeat"]');
+        if (!seat) return null;
+        var btn = seat.querySelector('button, [role="button"]');
+        return btn && !btn.classList.contains('dsh-mobile-drawer-toggle') ? btn : null;
+      }
+
+      /** 我们的按钮和宿主那枚有没有面积重叠。 */
+      function intersects() {
+        var mine = document.querySelector('.dsh-mobile-drawer-toggle');
+        var host = hostButton();
+        if (!mine || !host) return false;
+        // 图案被藏起来后 rect 仍然有尺寸（visibility 不脱布局），但父亲节点更稳。
+        var box = mine.getBoundingClientRect().width > 0 ? mine : mine.parentElement;
+        if (!box) return false;
+        var a = box.getBoundingClientRect();
+        var b = host.getBoundingClientRect();
+        if (a.width <= 0 || b.width <= 0) return false;
+        return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+      }
+
+      function sync() {
+        var on = root.classList.contains(PHONE_CLASS) && intersects();
+        if (on === marked) return;
+        marked = on;
+        try {
+          if (on) root.setAttribute(ATTR, '1');
+          else root.removeAttribute(ATTR);
+        } catch (e) {}
+      }
+
+      // 流式输出时 body 每秒会变更几十次，这里按帧节流，避免每帧多次量 rect。
+      var ticking = false;
+      function schedule() {
+        if (ticking) return;
+        ticking = true;
+        var run = function () { ticking = false; sync(); };
+        try { window.requestAnimationFrame(run); } catch (e) { run(); }
+      }
+
+      sync();
+      try {
+        observer = new MutationObserver(schedule);
+        observer.observe(document.body, { childList: true, subtree: true });
+      } catch (e) {}
+      window.addEventListener('resize', schedule);
+      return function () {
+        try { if (observer) observer.disconnect(); } catch (e) {}
+        observer = null;
+        window.removeEventListener('resize', schedule);
+        try { root.removeAttribute(ATTR); } catch (e) {}
+      };
+    }
+
     function installLocaleMemo(ctx, locale) {
       var enabled = function () { return liveSettings.rememberLocale !== false; };
       var host = null;
@@ -830,6 +909,22 @@ window.__ModuleLoader__.load({
         ':root.' + PHONE_CLASS + ' .dsh-mobile-drawer-toggle:hover {',
         '  background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,0.12));',
         '}',
+        '',
+        '/* ══ 去重：和宿主自带的侧栏开关不让它们叠在一起 ════════════════',
+        '   0.2.2-rc.5 起，宿主自己在 shell frame 里渲染了一枚',
+        '   `[class*="leadingSeat"]`（position:absolute; z-index:15），里面是它的',
+        '   「打开侧边栏」按钮 —— 落点和我们注册进 conversation.header.leading 的',
+        '   汉堡完全重合，于是两个图案叠成一张（视觉上是「三道横线上面压着面板图标」）。',
+        '',
+        '   宿主那枚调的是同一个 layout.toggleSidebar（实测：点它一样能开/关抽屉，',
+        '   抽屉 300px、遮罩正常），所以**让它赢**。这里只藏图案、不撤盒子：',
+        '   用 visibility 而不是 display —— 32px 的占位还在，标题不会因此左移。',
+        '   属性由 installHeaderToggleDedupe() 按「矩形真的相交」来打，',
+        '   旧版宿主没有这个座位、或将来位置改了，规则自然不生效。 */',
+        ':root.' + PHONE_CLASS + '[data-dsh-mobile-host-toggle] .dsh-mobile-drawer-toggle {',
+        '  visibility: hidden !important;',
+        '  pointer-events: none !important;',
+        '}',
       ])
       .join('\n');
 
@@ -1204,6 +1299,11 @@ window.__ModuleLoader__.load({
           ctx.effect(function () {
             return installComposerDock();
           }, 'dsh-mobile-ui: composer dock layout');
+
+          // header 上「我们的汉堡」和「宿主自带的侧栏开关」重合时让位（见函数注释）
+          ctx.effect(function () {
+            return installHeaderToggleDedupe(root);
+          }, 'dsh-mobile-ui: header toggle dedupe');
 
           // 手机上的回车＝换行（见 installEnterAsNewline 的注释）
           ctx.effect(function () {

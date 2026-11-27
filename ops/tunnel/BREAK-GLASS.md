@@ -947,6 +947,40 @@ curl -s -m 30 http://127.0.0.1:8045/v1/chat/completions \
 
 ---
 
+### 8.27 手机左上角两个图标叠成一团 —— 宿主自己也有了 header 侧栏开关（0.2.2-rc.5+）
+
+**症状**：手机上左上角「三道横线」（我们的抽屉开关）上压着一枚和右侧「打开右侧边栏」
+一模一样的面板图标，两个图案重叠；点哪儿都能开侧栏，功能正常，只是难看。
+
+**根因**：0.2.2-rc.5 起宿主在 shell frame 里**自己**渲染了一枚绝对定位的座位，
+里面是它的「打开侧边栏」按钮，落点正好盖住我们注册进 `conversation.header.leading`
+的汉堡。手机视口 390px 的 DOM 实测（`elementFromPoint` 命中栈从顶到底）：
+
+| 元素 | 矩形 | 说明 |
+|---|---|---|
+| `BUTTON[打开侧边栏]`（宿主，`[class*="leadingSeat"]` 里） | `x:12 y:11 w:28 h:28` | `position:absolute; z-index:15`，在最上层 |
+| `BUTTON[展开 / 收起侧栏]`（`dsh-mobile-ui`） | `x:20 y:10 w:32 h:32` | 在我们的 `header > headerLeading` 里 |
+
+注意座位**不在 `<header>` 里**（它是 frame 的直接子节点），所以写
+`header:has(...)` 是匹配不到的 —— 想用纯 CSS 也得写成 `:root:has(...)`。
+实测点宿主那枚：抽屉 300px、遮罩 `display:block`、再点收起，行为与我们的完全一致
+（没去追它内部调的是哪个 API —— 只按可观测行为判定「冗余」），所以留一枚就够。
+
+**修法**（`plugins/dsh-mobile-ui/lib/client.js`）：
+
+- `installHeaderToggleDedupe()` 用**矩形相交**判断（不硬编码坐标），命中就在 `<html>`
+  打 `data-dsh-mobile-host-toggle`；
+- CSS 只藏**图案**不撤盒子：`visibility:hidden + pointer-events:none`。
+  用 `display:none` 会让 32px 占位消失、标题左移，反而更难看。
+
+**为什么不用 `header:has()` / 不写死哈希类名**：座位是 frame 的子节点，且 `pI_x6G_`
+前缀会随构建变；`leadingSeat` 只是当「候选按钮」的粗筛，真正的判据是几何关系 ——
+宿主换位置/换版本时自动恢复显示我们那枚，不会把功能弄丢。
+
+**门禁**：`node tools/mobile-audit.mjs` 的「左上角只有一枚侧栏开关（图标不重叠）」
+（量 `computedStyle.visibility/display` + 宽度）。验证它会咬人：手动
+`document.documentElement.removeAttribute('data-dsh-mobile-host-toggle')` 后同一判据立刻变红。
+
 ### 8.15 排查顺序（省时间的模板）
 
 ```
